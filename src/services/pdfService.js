@@ -224,92 +224,78 @@ function addVoterTable(doc, startY, voters) {
 
 // ======================= SUB TABLE =======================
 function addSubTable(doc, startY, subs, estructura) {
-  const pw = doc.internal.pageSize.getWidth();
-  const pageH = doc.internal.pageSize.getHeight();
-  let y = startY;
-
-  subs.forEach((s, idx) => {
+  const body = subs.map((s) => {
     const subCI = normalizeCI(s.ci);
     const voters = (estructura.votantes || []).filter(
       (v) => normalizeCI(v.asignado_por) === subCI
     );
     const confirmed = voters.filter((v) => v.voto_confirmado === true).length;
-    const direccion = s.direccion_override || s.direccion || "—";
-    const confirmadoVal = s.confirmado ? "Si" : "No";
-
-    // Ensure enough space for the sub label + table; otherwise start new page
-    if (y + 60 > pageH - M.bottom) {
-      doc.addPage();
-      y = M.top;
-    }
-
-    // Sub label
-    doc.setFontSize(9);
-    doc.setFont("helvetica", "bold");
-    doc.setTextColor(...COLOR_TEXT);
-    doc.text(`Subcoordinador: ${name(s)}`, M.left, y + 5);
-    y += 9;
-
-    // Vertical info table — same style as addPersonInfoBox
-    const rows = [
-      ["Nombre completo", name(s)],
-      ["CI", str(s.ci) || "—"],
-      ["Seccional", str(s.seccional) || "—"],
-      ["Local de votacion", str(s.local_votacion) || "—"],
-      ["Mesa", str(s.mesa) || "—"],
-      ["Orden", str(s.orden) || "—"],
-      ["Direccion", direccion],
-      ["Telefono", str(s.telefono) || "—"],
-      ["Confirmado", confirmadoVal],
-      ["Total votantes", String(voters.length)],
-      ["Confirmados", String(confirmed)],
-    ];
-
-    autoTable(doc, {
-      startY: y,
-      head: [["Campo", "Dato"]],
-      body: rows,
-      margin: { left: M.left, right: M.right },
-      tableWidth: 150,
-      columnStyles: {
-        0: { cellWidth: 50, fontStyle: "bold", textColor: COLOR_MUTED },
-        1: { cellWidth: 100, textColor: COLOR_TEXT },
-      },
-      headStyles: {
-        fillColor: COLOR_HEADER_BG,
-        textColor: COLOR_HEADER_TXT,
-        fontStyle: "bold",
-        fontSize: 8,
-        cellPadding: 2.5,
-      },
-      bodyStyles: { fontSize: 8, cellPadding: 2.5 },
-      alternateRowStyles: { fillColor: COLOR_ALT_ROW },
-      didParseCell: (data) => {
-        if (data.section === "body" && data.row.raw[0] === "Confirmado") {
-          if (data.column.index === 1) {
-            data.cell.styles.fontStyle = "bold";
-            data.cell.styles.textColor =
-              data.cell.raw === "Si" ? COLOR_GREEN_TXT : COLOR_RED_TXT;
-          }
-        }
-      },
-    });
-
-    y = doc.lastAutoTable.finalY;
-
-    // Divider between subs (skip after last)
-    if (idx < subs.length - 1) {
-      y += 4;
-      doc.setDrawColor(...COLOR_LINE);
-      doc.setLineWidth(0.3);
-      doc.line(M.left, y, pw - M.right, y);
-      y += 4;
-    } else {
-      y += 6;
-    }
+    return {
+      nombre: name(s),
+      ci: str(s.ci) || "—",
+      telefono: str(s.telefono) || "—",
+      mesa: str(s.mesa) || "—",
+      orden: str(s.orden) || "—",
+      local: str(s.local_votacion) || "—",
+      confirmado: s.confirmado ? "Si" : "No",
+      totalVotantes: String(voters.length),
+      confirmados: String(confirmed),
+    };
   });
 
-  return y;
+  autoTable(doc, {
+    startY,
+    columns: [
+      { header: "Nombre", dataKey: "nombre" },
+      { header: "CI", dataKey: "ci" },
+      { header: "Telefono", dataKey: "telefono" },
+      { header: "Mesa", dataKey: "mesa" },
+      { header: "Orden", dataKey: "orden" },
+      { header: "Local", dataKey: "local" },
+      { header: "Confirmado", dataKey: "confirmado" },
+      { header: "Total Votantes", dataKey: "totalVotantes" },
+      { header: "Confirmados", dataKey: "confirmados" },
+    ],
+    body,
+    margin: { left: M.left, right: M.right },
+    tableWidth: "auto",
+    styles: {
+      fontSize: 8,
+      cellPadding: 2,
+      overflow: "linebreak",
+      halign: "left",
+    },
+    headStyles: {
+      fillColor: COLOR_SECTION_BG,
+      textColor: COLOR_TEXT,
+      fontStyle: "bold",
+      fontSize: 8,
+      cellPadding: 2,
+      halign: "left",
+    },
+    alternateRowStyles: { fillColor: COLOR_ALT_ROW },
+    columnStyles: {
+      nombre: { cellWidth: 42 },
+      ci: { cellWidth: 20 },
+      telefono: { cellWidth: 22 },
+      mesa: { cellWidth: 12, halign: "center" },
+      orden: { cellWidth: 12, halign: "center" },
+      local: { cellWidth: 38 },
+      confirmado: { cellWidth: 20, halign: "center" },
+      totalVotantes: { cellWidth: 18, halign: "center" },
+      confirmados: { cellWidth: 16, halign: "center" },
+    },
+    rowPageBreak: "avoid",
+    didParseCell: (data) => {
+      if (data.column.dataKey === "confirmado" && data.section === "body") {
+        data.cell.styles.fontStyle = "bold";
+        data.cell.styles.textColor =
+          data.cell.raw === "Si" ? COLOR_GREEN_TXT : COLOR_RED_TXT;
+      }
+    },
+  });
+
+  return doc.lastAutoTable.finalY;
 }
 
 // ======================= PERSON INFO BOX =======================
