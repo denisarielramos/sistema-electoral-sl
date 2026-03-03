@@ -4,7 +4,7 @@ import { normalizeCI } from "../utils/estructuraHelpers";
 
 // ======================= CONSTANTS =======================
 const PAGE_FORMAT = "a4";
-const PAGE_ORIENTATION = "portrait";
+const PAGE_ORIENTATION = "landscape";
 const M = { top: 15, bottom: 15, left: 15, right: 15 };
 
 // Brand colors matching app UI (tailwind.config.js)
