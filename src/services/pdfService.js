@@ -5,7 +5,7 @@ import { normalizeCI } from "../utils/estructuraHelpers";
 // ======================= CONSTANTS =======================
 const PAGE_FORMAT = "a4";
 const PAGE_ORIENTATION = "landscape";
-const M = { top: 15, bottom: 15, left: 15, right: 15 };
+const M = { top: 15, bottom: 15, left: 10, right: 10 };
 
 // Brand colors matching app UI (tailwind.config.js)
 const COLOR_BRAND      = [220, 38, 38];    // brand-600 #dc2626
@@ -122,11 +122,11 @@ function sectionTitle(doc, text, y) {
 
 // ======================= SUB SECTION TITLE =======================
 function subSectionTitle(doc, text, y) {
-  doc.setFontSize(9);
+  doc.setFontSize(14);
   doc.setFont("helvetica", "bold");
-  doc.setTextColor(...COLOR_MUTED);
-  doc.text(text, M.left + 2, y);
-  return y + 4;
+  doc.setTextColor(0, 0, 0);
+  doc.text(text, M.left, y);
+  return y + 7;
 }
 
 // ======================= SUMMARY BOX =======================
@@ -181,27 +181,28 @@ function addVoterTable(doc, startY, voters) {
     columns: VOTER_COLUMNS,
     body,
     margin: { left: M.left, right: M.right },
+    tableWidth: "auto",
     headStyles: {
       fillColor: COLOR_HEADER_BG,
       textColor: COLOR_HEADER_TXT,
       fontStyle: "bold",
-      fontSize: 7.5,
-      cellPadding: 2.5,
+      fontSize: 9,
+      cellPadding: 3,
     },
     bodyStyles: {
-      fontSize: 7,
-      textColor: COLOR_TEXT,
-      cellPadding: 2,
+      fontSize: 9,
+      textColor: [0, 0, 0],
+      cellPadding: 3,
       overflow: "linebreak",
     },
     columnStyles: {
       nombre: { cellWidth: "auto" },
-      ci: { cellWidth: 20 },
-      telefono: { cellWidth: 24 },
-      mesa: { cellWidth: 12, halign: "center" },
+      ci: { cellWidth: 22 },
+      telefono: { cellWidth: 26 },
+      mesa: { cellWidth: 14, halign: "center" },
       orden: { cellWidth: 14, halign: "center" },
-      local: { cellWidth: 34 },
-      confirmado: { cellWidth: 20, halign: "center" },
+      local: { cellWidth: 40 },
+      confirmado: { cellWidth: 22, halign: "center" },
     },
     alternateRowStyles: { fillColor: COLOR_ALT_ROW },
     rowPageBreak: "avoid",
@@ -258,32 +259,33 @@ function addSubTable(doc, startY, subs, estructura) {
     ],
     body,
     margin: { left: M.left, right: M.right },
-    tableWidth: "wrap",
+    tableWidth: "auto",
     styles: {
-      fontSize: 8,
-      cellPadding: 2,
+      fontSize: 9,
+      cellPadding: 3,
       overflow: "linebreak",
       halign: "left",
+      textColor: [0, 0, 0],
     },
     headStyles: {
       fillColor: COLOR_SECTION_BG,
       textColor: COLOR_TEXT,
       fontStyle: "bold",
-      fontSize: 8,
-      cellPadding: 2,
+      fontSize: 9,
+      cellPadding: 3,
       halign: "left",
     },
     alternateRowStyles: { fillColor: COLOR_ALT_ROW },
     columnStyles: {
-      nombre:        { cellWidth: 35 },
-      ci:            { cellWidth: 18 },
-      telefono:      { cellWidth: 22 },
-      mesa:          { cellWidth: 12, halign: "center" },
-      orden:         { cellWidth: 12, halign: "center" },
-      local:         { cellWidth: 35 },
-      confirmado:    { cellWidth: 18, halign: "center" },
-      totalVotantes: { cellWidth: 15, halign: "center" },
-      confirmados:   { cellWidth: 15, halign: "center" },
+      nombre:        { cellWidth: "auto" },
+      ci:            { cellWidth: 22 },
+      telefono:      { cellWidth: 26 },
+      mesa:          { cellWidth: 14, halign: "center" },
+      orden:         { cellWidth: 14, halign: "center" },
+      local:         { cellWidth: 40 },
+      confirmado:    { cellWidth: 22, halign: "center" },
+      totalVotantes: { cellWidth: 20, halign: "center" },
+      confirmados:   { cellWidth: 20, halign: "center" },
     },
     rowPageBreak: "avoid",
     didParseCell: (data) => {
