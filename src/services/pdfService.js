@@ -285,6 +285,46 @@ function addSubTable(doc, startY, subs, estructura) {
   return doc.lastAutoTable.finalY;
 }
 
+// ======================= PERSON INFO BOX =======================
+// Renders a full-detail info block for a coordinador or subcoordinador.
+// Shows the same fields as voters: Nombre, CI, Seccional, Local, Mesa, Orden, Direccion, Telefono.
+function addPersonInfoBox(doc, startY, person) {
+  const direccion = person.direccion_override || person.direccion || "—";
+  const rows = [
+    ["Nombre completo", name(person)],
+    ["CI", str(person.ci) || "—"],
+    ["Seccional", str(person.seccional) || "—"],
+    ["Local de votacion", str(person.local_votacion) || "—"],
+    ["Mesa", str(person.mesa) || "—"],
+    ["Orden", str(person.orden) || "—"],
+    ["Direccion", direccion],
+    ["Telefono", str(person.telefono) || "—"],
+  ];
+
+  autoTable(doc, {
+    startY,
+    head: [["Campo", "Dato"]],
+    body: rows,
+    margin: { left: M.left, right: M.right },
+    tableWidth: 150,
+    columnStyles: {
+      0: { cellWidth: 50, fontStyle: "bold", textColor: COLOR_MUTED },
+      1: { cellWidth: 100, textColor: COLOR_TEXT },
+    },
+    headStyles: {
+      fillColor: COLOR_HEADER_BG,
+      textColor: COLOR_HEADER_TXT,
+      fontStyle: "bold",
+      fontSize: 8,
+      cellPadding: 2.5,
+    },
+    bodyStyles: { fontSize: 8, cellPadding: 2.5 },
+    alternateRowStyles: { fillColor: COLOR_ALT_ROW },
+  });
+
+  return doc.lastAutoTable.finalY;
+}
+
 // ======================= CHECK PAGE SPACE =======================
 function ensureSpace(doc, needed, afterY) {
   const ph = doc.internal.pageSize.getHeight();
@@ -398,12 +438,17 @@ export const generateSuperadminPDF = async ({ estructura, currentUser }) => {
 
 // ====================================================================
 // COORDINADOR PDF
+// Accepts optional `targetPerson` to print any coordinator's structure
+// (used by superadmin "Verificar estructura" view). Falls back to currentUser.
 // ====================================================================
-export const generateCoordinadorPDF = async ({ estructura, currentUser }) => {
+export const generateCoordinadorPDF = async ({ estructura, currentUser, targetPerson = null }) => {
   const doc = new jsPDF(PAGE_ORIENTATION, "mm", PAGE_FORMAT);
-  const userName = name(currentUser);
   const logoImg = await loadLogo();
-  const miCI = normalizeCI(currentUser.ci);
+
+  // If targetPerson is provided, use it as the coordinator; otherwise use currentUser
+  const coord = targetPerson || currentUser;
+  const userName = name(currentUser);
+  const miCI = normalizeCI(coord.ci);
 
   const { subcoordinadores = [], votantes = [] } = estructura;
 
@@ -417,9 +462,15 @@ export const generateCoordinadorPDF = async ({ estructura, currentUser }) => {
   const totalConfirmados = 1 + subsConf + votersConf;
   const pct = totalConfirmable > 0 ? Math.round((totalConfirmados / totalConfirmable) * 100) : 0;
 
-  // ---- Summary ----
-  let y = addHeader(doc, "Reporte Coordinador", userName, logoImg);
-  y = sectionTitle(doc, "Resumen de Mi Red", y);
+  // ---- Header & coordinator full info ----
+  const reportLabel = targetPerson ? `Estructura del Coordinador: ${name(coord)}` : "Reporte Coordinador";
+  let y = addHeader(doc, reportLabel, userName, logoImg);
+
+  y = sectionTitle(doc, `Datos del Coordinador: ${name(coord)}`, y);
+  y = addPersonInfoBox(doc, y, coord);
+  y += 6;
+
+  y = sectionTitle(doc, "Resumen de la Red", y);
   y = addSummaryBox(doc, y, [
     ["Total Red", String(totalConfirmable)],
     ["Subcoordinadores", String(subs.length)],
@@ -464,12 +515,17 @@ export const generateCoordinadorPDF = async ({ estructura, currentUser }) => {
 
 // ====================================================================
 // SUBCOORDINADOR PDF
+// Accepts optional `targetPerson` to print any sub's structure
+// (used by superadmin "Verificar estructura" view). Falls back to currentUser.
 // ====================================================================
-export const generateSubcoordinadorPDF = async ({ estructura, currentUser }) => {
+export const generateSubcoordinadorPDF = async ({ estructura, currentUser, targetPerson = null }) => {
   const doc = new jsPDF(PAGE_ORIENTATION, "mm", PAGE_FORMAT);
-  const userName = name(currentUser);
   const logoImg = await loadLogo();
-  const miCI = normalizeCI(currentUser.ci);
+
+  // If targetPerson is provided, use it as the sub; otherwise use currentUser
+  const sub = targetPerson || currentUser;
+  const userName = name(currentUser);
+  const miCI = normalizeCI(sub.ci);
 
   const { votantes = [] } = estructura;
   const misVotantes = votantes.filter((v) => normalizeCI(v.asignado_por) === miCI);
@@ -478,8 +534,14 @@ export const generateSubcoordinadorPDF = async ({ estructura, currentUser }) => 
   const totalConfirmados = 1 + confirmados;
   const pct = totalConfirmable > 0 ? Math.round((totalConfirmados / totalConfirmable) * 100) : 0;
 
-  // ---- Summary ----
-  let y = addHeader(doc, "Reporte Subcoordinador", userName, logoImg);
+  // ---- Header & sub full info ----
+  const reportLabel = targetPerson ? `Estructura del Subcoordinador: ${name(sub)}` : "Reporte Subcoordinador";
+  let y = addHeader(doc, reportLabel, userName, logoImg);
+
+  y = sectionTitle(doc, `Datos del Subcoordinador: ${name(sub)}`, y);
+  y = addPersonInfoBox(doc, y, sub);
+  y += 6;
+
   y = sectionTitle(doc, "Resumen", y);
   y = addSummaryBox(doc, y, [
     ["Total Red", String(totalConfirmable)],
