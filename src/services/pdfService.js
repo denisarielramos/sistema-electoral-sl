@@ -230,8 +230,16 @@ function addSubTable(doc, startY, subs, estructura) {
       (v) => normalizeCI(v.asignado_por) === subCI
     );
     const confirmed = voters.filter((v) => v.voto_confirmado === true).length;
+    const direccion = s.direccion_override || s.direccion || "—";
     return {
       nombre: name(s),
+      ci: str(s.ci) || "—",
+      telefono: str(s.telefono) || "—",
+      seccional: str(s.seccional) || "—",
+      local: str(s.local_votacion) || "—",
+      mesa: str(s.mesa) || "—",
+      orden: str(s.orden) || "—",
+      direccion,
       confirmado: s.confirmado ? "Si" : "No",
       totalVotantes: String(voters.length),
       confirmados: String(confirmed),
@@ -241,33 +249,47 @@ function addSubTable(doc, startY, subs, estructura) {
   autoTable(doc, {
     startY,
     columns: [
-      { header: "Subcoordinador", dataKey: "nombre" },
+      { header: "Nombre completo", dataKey: "nombre" },
+      { header: "CI", dataKey: "ci" },
+      { header: "Telefono", dataKey: "telefono" },
+      { header: "Seccional", dataKey: "seccional" },
+      { header: "Local de votacion", dataKey: "local" },
+      { header: "Mesa", dataKey: "mesa" },
+      { header: "Orden", dataKey: "orden" },
+      { header: "Direccion", dataKey: "direccion" },
       { header: "Confirmado", dataKey: "confirmado" },
       { header: "Total Votantes", dataKey: "totalVotantes" },
       { header: "Confirmados", dataKey: "confirmados" },
     ],
     body,
     margin: { left: M.left, right: M.right },
-    tableWidth: 140,
     headStyles: {
       fillColor: COLOR_SECTION_BG,
       textColor: COLOR_TEXT,
       fontStyle: "bold",
-      fontSize: 7.5,
-      cellPadding: 2.5,
+      fontSize: 7,
+      cellPadding: 2,
     },
     bodyStyles: {
-      fontSize: 7.5,
+      fontSize: 7,
       textColor: COLOR_TEXT,
-      cellPadding: 2.5,
+      cellPadding: 2,
     },
     columnStyles: {
       nombre: { cellWidth: "auto" },
-      confirmado: { cellWidth: 22, halign: "center" },
-      totalVotantes: { cellWidth: 25, halign: "center" },
-      confirmados: { cellWidth: 25, halign: "center" },
+      ci: { cellWidth: 18 },
+      telefono: { cellWidth: 20 },
+      seccional: { cellWidth: 16, halign: "center" },
+      local: { cellWidth: 28 },
+      mesa: { cellWidth: 11, halign: "center" },
+      orden: { cellWidth: 11, halign: "center" },
+      direccion: { cellWidth: 30 },
+      confirmado: { cellWidth: 18, halign: "center" },
+      totalVotantes: { cellWidth: 16, halign: "center" },
+      confirmados: { cellWidth: 16, halign: "center" },
     },
     alternateRowStyles: { fillColor: COLOR_ALT_ROW },
+    rowPageBreak: "avoid",
     didParseCell: (data) => {
       if (data.column.dataKey === "confirmado" && data.section === "body") {
         const val = data.cell.raw;
