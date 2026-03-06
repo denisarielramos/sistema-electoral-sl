@@ -1,6 +1,6 @@
 export default function StatsCards({ role, stats }) {
   return (
-    <div className="max-w-7xl mx-auto px-4 py-6 grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4">
+    <div className="max-w-7xl mx-auto px-4 py-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
       {role === "superadmin" && (
         <>
           <Card title="Coordinadores" value={stats.coordinadores} />
@@ -46,18 +46,18 @@ export default function StatsCards({ role, stats }) {
 
 function Card({ title, value }) {
   return (
-    <div className="bg-white rounded-lg shadow p-6">
-      <p className="text-gray-600 text-sm">{title}</p>
-      <p className="text-4xl font-bold text-red-600">{value}</p>
+    <div className="bg-white rounded-lg shadow p-3 sm:p-4">
+      <p className="text-gray-600 text-xs sm:text-sm">{title}</p>
+      <p className="text-2xl sm:text-3xl font-bold text-red-600">{value}</p>
     </div>
   );
 }
 
 function CardProgress({ title, confirmed, total, percentage }) {
   return (
-    <div className="bg-white rounded-lg shadow p-6">
-      <p className="text-gray-600 text-sm">{title}</p>
-      <p className="text-3xl font-bold text-green-600 mb-2">
+    <div className="bg-white rounded-lg shadow p-3 sm:p-4">
+      <p className="text-gray-600 text-xs sm:text-sm">{title}</p>
+      <p className="text-2xl sm:text-3xl font-bold text-green-600 mb-2">
         {confirmed}/{total}
       </p>
       <div className="w-full bg-gray-200 rounded-full h-2">
@@ -66,7 +66,7 @@ function CardProgress({ title, confirmed, total, percentage }) {
           style={{ width: `${percentage}%` }}
         ></div>
       </div>
-      <p className="text-sm text-gray-600 mt-2">{percentage}% confirmado</p>
+      <p className="text-xs sm:text-sm text-gray-600 mt-2">{percentage}% confirmado</p>
     </div>
   );
 }

@@ -17,12 +17,12 @@ const Acciones = ({
   if (!currentUser) return null;
 
   return (
-    <div className="max-w-7xl mx-auto px-4 mb-6 flex flex-wrap gap-3 items-center">
+    <div className="max-w-7xl mx-auto px-4 mb-4 flex flex-wrap gap-3 items-center">
       {/* ======================= SUPERADMIN ======================= */}
       {currentUser.role === "superadmin" && (
         <button
           onClick={onAddCoordinador}
-          className="flex items-center gap-2 bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700"
+          className="flex items-center gap-2 bg-red-600 text-white px-4 h-10 rounded-lg hover:bg-red-700"
         >
           <UserPlus className="w-4 h-4" />
           Agregar Coordinador
@@ -33,7 +33,7 @@ const Acciones = ({
       {currentUser.role === "coordinador" && (
         <button
           onClick={onAddSubcoordinador}
-          className="flex items-center gap-2 bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700"
+          className="flex items-center gap-2 bg-red-600 text-white px-4 h-10 rounded-lg hover:bg-red-700"
         >
           <UserPlus className="w-4 h-4" />
           Agregar Subcoordinador
@@ -45,7 +45,7 @@ const Acciones = ({
         currentUser.role === "subcoordinador") && (
         <button
           onClick={onAddVotante}
-          className="flex items-center gap-2 border-2 border-red-600 text-red-600 px-4 py-2 rounded-lg hover:bg-red-50"
+          className="flex items-center gap-2 border-2 border-red-600 text-red-600 px-4 h-10 rounded-lg hover:bg-red-50"
         >
           <UserPlus className="w-4 h-4" />
           Agregar Votante
@@ -55,7 +55,7 @@ const Acciones = ({
       {/* ======================= MENÚ PDF ======================= */}
       <div className="relative inline-block">
         <button
-          className="flex items-center gap-2 border-2 border-red-600 text-red-600 px-4 py-2 rounded-lg hover:bg-red-50"
+          className="flex items-center gap-2 border-2 border-red-600 text-red-600 px-4 h-10 rounded-lg hover:bg-red-50"
           onClick={(e) => {
             const menu = e.currentTarget.nextSibling;
             if (menu) menu.classList.toggle("hidden");

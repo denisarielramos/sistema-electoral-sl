@@ -882,72 +882,72 @@ const Dashboard = ({ currentUser, onLogout }) => {
 
       {/* KPI GRANDES */}
       <div className="max-w-7xl mx-auto px-6 -mt-8 relative z-20">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           {currentUser.role === "superadmin" && (
             <>
-              <div className="bg-white rounded-2xl shadow-lg p-8 hover:shadow-xl transition-shadow border border-gray-100">
-                <p className="text-gray-500 text-sm font-semibold uppercase tracking-wide mb-2">Total en Red</p>
-                <p className="text-6xl font-black text-gray-900">{stats?.votantesTotales ?? 0}</p>
+              <div className="bg-white rounded-2xl shadow-lg p-4 sm:p-6 hover:shadow-xl transition-shadow border border-gray-100">
+                <p className="text-gray-500 text-xs sm:text-sm font-semibold uppercase tracking-wide mb-2">Total en Red</p>
+                <p className="text-3xl sm:text-4xl lg:text-5xl font-black text-gray-900">{stats?.votantesTotales ?? 0}</p>
               </div>
-              <div className="bg-gradient-to-br from-green-500 to-green-600 rounded-2xl shadow-lg p-8 hover:shadow-xl transition-shadow text-white">
-                <p className="text-green-100 text-sm font-semibold uppercase tracking-wide mb-2">Confirmados</p>
-                <p className="text-6xl font-black">{stats?.votosConfirmadosTotales ?? 0}</p>
+              <div className="bg-gradient-to-br from-green-500 to-green-600 rounded-2xl shadow-lg p-4 sm:p-6 hover:shadow-xl transition-shadow text-white">
+                <p className="text-green-100 text-xs sm:text-sm font-semibold uppercase tracking-wide mb-2">Confirmados</p>
+                <p className="text-3xl sm:text-4xl lg:text-5xl font-black">{stats?.votosConfirmadosTotales ?? 0}</p>
               </div>
-              <div className="bg-white rounded-2xl shadow-lg p-8 hover:shadow-xl transition-shadow border border-gray-100">
-                <p className="text-gray-500 text-sm font-semibold uppercase tracking-wide mb-2">Pendientes</p>
-                <p className="text-6xl font-black text-gray-900">
+              <div className="bg-white rounded-2xl shadow-lg p-4 sm:p-6 hover:shadow-xl transition-shadow border border-gray-100">
+                <p className="text-gray-500 text-xs sm:text-sm font-semibold uppercase tracking-wide mb-2">Pendientes</p>
+                <p className="text-3xl sm:text-4xl lg:text-5xl font-black text-gray-900">
                   {(stats?.votantesTotales ?? 0) - (stats?.votosConfirmadosTotales ?? 0)}
                 </p>
               </div>
-              <div className="bg-gradient-to-br from-red-600 to-red-700 rounded-2xl shadow-lg p-8 hover:shadow-xl transition-shadow text-white">
-                <p className="text-red-100 text-sm font-semibold uppercase tracking-wide mb-2">Porcentaje</p>
-                <p className="text-6xl font-black">{stats?.porcentajeConfirmados ?? 0}%</p>
+              <div className="bg-gradient-to-br from-red-600 to-red-700 rounded-2xl shadow-lg p-4 sm:p-6 hover:shadow-xl transition-shadow text-white">
+                <p className="text-red-100 text-xs sm:text-sm font-semibold uppercase tracking-wide mb-2">Porcentaje</p>
+                <p className="text-3xl sm:text-4xl lg:text-5xl font-black">{stats?.porcentajeConfirmados ?? 0}%</p>
               </div>
             </>
           )}
 
           {currentUser.role === "coordinador" && (
             <>
-              <div className="bg-white rounded-2xl shadow-lg p-8 hover:shadow-xl transition-shadow border border-gray-100">
-                <p className="text-gray-500 text-sm font-semibold uppercase tracking-wide mb-2">Total en Red</p>
-                <p className="text-6xl font-black text-gray-900">{stats?.total ?? 0}</p>
+              <div className="bg-white rounded-2xl shadow-lg p-4 sm:p-6 hover:shadow-xl transition-shadow border border-gray-100">
+                <p className="text-gray-500 text-xs sm:text-sm font-semibold uppercase tracking-wide mb-2">Total en Red</p>
+                <p className="text-3xl sm:text-4xl lg:text-5xl font-black text-gray-900">{stats?.total ?? 0}</p>
               </div>
-              <div className="bg-gradient-to-br from-green-500 to-green-600 rounded-2xl shadow-lg p-8 hover:shadow-xl transition-shadow text-white">
-                <p className="text-green-100 text-sm font-semibold uppercase tracking-wide mb-2">Confirmados</p>
-                <p className="text-6xl font-black">{stats?.votosConfirmadosTotales ?? 0}</p>
+              <div className="bg-gradient-to-br from-green-500 to-green-600 rounded-2xl shadow-lg p-4 sm:p-6 hover:shadow-xl transition-shadow text-white">
+                <p className="text-green-100 text-xs sm:text-sm font-semibold uppercase tracking-wide mb-2">Confirmados</p>
+                <p className="text-3xl sm:text-4xl lg:text-5xl font-black">{stats?.votosConfirmadosTotales ?? 0}</p>
               </div>
-              <div className="bg-white rounded-2xl shadow-lg p-8 hover:shadow-xl transition-shadow border border-gray-100">
-                <p className="text-gray-500 text-sm font-semibold uppercase tracking-wide mb-2">Pendientes</p>
-                <p className="text-6xl font-black text-gray-900">
+              <div className="bg-white rounded-2xl shadow-lg p-4 sm:p-6 hover:shadow-xl transition-shadow border border-gray-100">
+                <p className="text-gray-500 text-xs sm:text-sm font-semibold uppercase tracking-wide mb-2">Pendientes</p>
+                <p className="text-3xl sm:text-4xl lg:text-5xl font-black text-gray-900">
                   {(stats?.total ?? 0) - (stats?.votosConfirmadosTotales ?? 0)}
                 </p>
               </div>
-              <div className="bg-gradient-to-br from-red-600 to-red-700 rounded-2xl shadow-lg p-8 hover:shadow-xl transition-shadow text-white">
-                <p className="text-red-100 text-sm font-semibold uppercase tracking-wide mb-2">Porcentaje</p>
-                <p className="text-6xl font-black">{stats?.porcentajeConfirmados ?? 0}%</p>
+              <div className="bg-gradient-to-br from-red-600 to-red-700 rounded-2xl shadow-lg p-4 sm:p-6 hover:shadow-xl transition-shadow text-white">
+                <p className="text-red-100 text-xs sm:text-sm font-semibold uppercase tracking-wide mb-2">Porcentaje</p>
+                <p className="text-3xl sm:text-4xl lg:text-5xl font-black">{stats?.porcentajeConfirmados ?? 0}%</p>
               </div>
             </>
           )}
 
           {currentUser.role === "subcoordinador" && (
             <>
-              <div className="bg-white rounded-2xl shadow-lg p-8 hover:shadow-xl transition-shadow border border-gray-100">
-                <p className="text-gray-500 text-sm font-semibold uppercase tracking-wide mb-2">Total en Red</p>
-                <p className="text-6xl font-black text-gray-900">{stats?.votantesTotales ?? 0}</p>
+              <div className="bg-white rounded-2xl shadow-lg p-4 sm:p-6 hover:shadow-xl transition-shadow border border-gray-100">
+                <p className="text-gray-500 text-xs sm:text-sm font-semibold uppercase tracking-wide mb-2">Total en Red</p>
+                <p className="text-3xl sm:text-4xl lg:text-5xl font-black text-gray-900">{stats?.votantesTotales ?? 0}</p>
               </div>
-              <div className="bg-gradient-to-br from-green-500 to-green-600 rounded-2xl shadow-lg p-8 hover:shadow-xl transition-shadow text-white">
-                <p className="text-green-100 text-sm font-semibold uppercase tracking-wide mb-2">Confirmados</p>
-                <p className="text-6xl font-black">{stats?.votosConfirmadosTotales ?? 0}</p>
+              <div className="bg-gradient-to-br from-green-500 to-green-600 rounded-2xl shadow-lg p-4 sm:p-6 hover:shadow-xl transition-shadow text-white">
+                <p className="text-green-100 text-xs sm:text-sm font-semibold uppercase tracking-wide mb-2">Confirmados</p>
+                <p className="text-3xl sm:text-4xl lg:text-5xl font-black">{stats?.votosConfirmadosTotales ?? 0}</p>
               </div>
-              <div className="bg-white rounded-2xl shadow-lg p-8 hover:shadow-xl transition-shadow border border-gray-100">
-                <p className="text-gray-500 text-sm font-semibold uppercase tracking-wide mb-2">Pendientes</p>
-                <p className="text-6xl font-black text-gray-900">
+              <div className="bg-white rounded-2xl shadow-lg p-4 sm:p-6 hover:shadow-xl transition-shadow border border-gray-100">
+                <p className="text-gray-500 text-xs sm:text-sm font-semibold uppercase tracking-wide mb-2">Pendientes</p>
+                <p className="text-3xl sm:text-4xl lg:text-5xl font-black text-gray-900">
                   {(stats?.votantesTotales ?? 0) - (stats?.votosConfirmadosTotales ?? 0)}
                 </p>
               </div>
-              <div className="bg-gradient-to-br from-red-600 to-red-700 rounded-2xl shadow-lg p-8 hover:shadow-xl transition-shadow text-white">
-                <p className="text-red-100 text-sm font-semibold uppercase tracking-wide mb-2">Porcentaje</p>
-                <p className="text-6xl font-black">{stats?.porcentajeConfirmados ?? 0}%</p>
+              <div className="bg-gradient-to-br from-red-600 to-red-700 rounded-2xl shadow-lg p-4 sm:p-6 hover:shadow-xl transition-shadow text-white">
+                <p className="text-red-100 text-xs sm:text-sm font-semibold uppercase tracking-wide mb-2">Porcentaje</p>
+                <p className="text-3xl sm:text-4xl lg:text-5xl font-black">{stats?.porcentajeConfirmados ?? 0}%</p>
               </div>
             </>
           )}
@@ -955,13 +955,13 @@ const Dashboard = ({ currentUser, onLogout }) => {
       </div>
 
       {/* ACCIONES */}
-      <div className="max-w-7xl mx-auto px-6 my-8 flex flex-wrap gap-3 items-center">
+      <div className="max-w-7xl mx-auto px-6 my-6 flex flex-wrap gap-3 items-center">
         {currentUser.role === "superadmin" && (
           <button
             onClick={() => { setModalType("coordinador"); setShowAddModal(true); }}
-            className="flex items-center gap-2 bg-gradient-to-r from-red-600 to-red-700 text-white px-6 py-3 rounded-xl hover:from-red-700 hover:to-red-800 shadow-lg hover:shadow-xl transition-all font-semibold"
+            className="flex items-center gap-2 bg-gradient-to-r from-red-600 to-red-700 text-white px-4 h-10 rounded-xl hover:from-red-700 hover:to-red-800 shadow-lg hover:shadow-xl transition-all font-semibold"
           >
-            <UserPlus className="w-5 h-5" />
+            <UserPlus className="w-4 h-4" />
             Agregar Coordinador
           </button>
         )}
@@ -969,9 +969,9 @@ const Dashboard = ({ currentUser, onLogout }) => {
         {currentUser.role === "coordinador" && (
           <button
             onClick={() => { setModalType("subcoordinador"); setShowAddModal(true); }}
-            className="flex items-center gap-2 bg-gradient-to-r from-red-600 to-red-700 text-white px-6 py-3 rounded-xl hover:from-red-700 hover:to-red-800 shadow-lg hover:shadow-xl transition-all font-semibold"
+            className="flex items-center gap-2 bg-gradient-to-r from-red-600 to-red-700 text-white px-4 h-10 rounded-xl hover:from-red-700 hover:to-red-800 shadow-lg hover:shadow-xl transition-all font-semibold"
           >
-            <UserPlus className="w-5 h-5" />
+            <UserPlus className="w-4 h-4" />
             Agregar Subcoordinador
           </button>
         )}
@@ -979,36 +979,36 @@ const Dashboard = ({ currentUser, onLogout }) => {
         {(currentUser.role === "coordinador" || currentUser.role === "subcoordinador") && (
           <button
             onClick={() => { setModalType("votante"); setShowAddModal(true); }}
-            className="flex items-center gap-2 bg-white border-2 border-red-600 text-red-600 px-6 py-3 rounded-xl hover:bg-red-50 shadow-md hover:shadow-lg transition-all font-semibold"
+            className="flex items-center gap-2 bg-white border-2 border-red-600 text-red-600 px-4 h-10 rounded-xl hover:bg-red-50 shadow-md hover:shadow-lg transition-all font-semibold"
           >
-            <UserPlus className="w-5 h-5" />
+            <UserPlus className="w-4 h-4" />
             Agregar Votante
           </button>
         )}
 
         <button
           onClick={descargarPDF}
-          className="flex items-center gap-2 bg-white border-2 border-gray-300 text-gray-700 px-6 py-3 rounded-xl hover:bg-gray-50 shadow-md hover:shadow-lg transition-all font-semibold"
+          className="flex items-center gap-2 bg-white border-2 border-gray-300 text-gray-700 px-4 h-10 rounded-xl hover:bg-gray-50 shadow-md hover:shadow-lg transition-all font-semibold"
         >
-          <BarChart3 className="w-5 h-5" />
+          <BarChart3 className="w-4 h-4" />
           Descargar PDF
         </button>
       </div>
 
       {/* BUSCADOR */}
-      <div className="max-w-7xl mx-auto px-6 mb-6">
-        <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100">
-          <label className="block text-sm font-bold text-gray-700 mb-3 uppercase tracking-wide">
+      <div className="max-w-7xl mx-auto px-6 mb-4">
+        <div className="bg-white rounded-2xl shadow-lg p-4 sm:p-5 border border-gray-100">
+          <label className="block text-xs sm:text-sm font-bold text-gray-700 mb-2 uppercase tracking-wide">
             Buscar dentro de mi estructura
           </label>
           <input
             value={searchCI}
             onChange={(e) => setSearchCI(e.target.value)}
             placeholder="Buscar por CI, nombre, apellido o combinación"
-            className="w-full border-2 border-gray-200 rounded-xl px-5 py-3 focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent transition-all"
+            className="w-full border-2 border-gray-200 rounded-xl px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent transition-all"
           />
           {normalizeText(searchCI) && (
-            <p className="text-sm text-gray-600 mt-3 font-medium">
+            <p className="text-xs sm:text-sm text-gray-600 mt-2 font-medium">
               Resultados: <span className="text-red-600 font-bold">{resultadosBusqueda.length}</span>
             </p>
           )}
