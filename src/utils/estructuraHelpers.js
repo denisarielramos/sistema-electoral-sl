@@ -38,18 +38,22 @@ export const getVotantesDirectosCoord = (estructura, coordCi) => {
 
 // ======================= PERSONAS DISPONIBLES =======================
 export const getPersonasDisponibles = (padron, estructura) => {
+  // Build O(1) lookup maps to avoid nested .find() inside .map()
+  const coordMap = new Map(
+    (estructura.coordinadores || []).map((c) => [normalizeCI(c.ci), c])
+  );
+  const subMap = new Map(
+    (estructura.subcoordinadores || []).map((s) => [normalizeCI(s.ci), s])
+  );
+  const votMap = new Map(
+    (estructura.votantes || []).map((v) => [normalizeCI(v.ci), v])
+  );
+
   return padron.map((p) => {
     const ci = normalizeCI(p.ci);
-
-    const coord = estructura.coordinadores.find(
-      (c) => normalizeCI(c.ci) === ci
-    );
-    const sub = estructura.subcoordinadores.find(
-      (s) => normalizeCI(s.ci) === ci
-    );
-    const vot = estructura.votantes.find(
-      (v) => normalizeCI(v.ci) === ci
-    );
+    const coord = coordMap.get(ci);
+    const sub = subMap.get(ci);
+    const vot = votMap.get(ci);
 
     let rol = null;
     if (coord) rol = "coordinador";

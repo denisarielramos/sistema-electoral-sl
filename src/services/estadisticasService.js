@@ -46,25 +46,30 @@ export const getEstadisticas = (estructura, currentUser) => {
   if (currentUser.role === "coordinador") {
     const miCI = normalizeCI(currentUser.ci);
 
+    // Build O(1) map: asignadoPorCI -> votante[]
+    const votantesByAsignadoPor = new Map();
+    for (const v of estructura.votantes) {
+      const key = normalizeCI(v.asignado_por);
+      if (!votantesByAsignadoPor.has(key)) votantesByAsignadoPor.set(key, []);
+      votantesByAsignadoPor.get(key).push(v);
+    }
+
     // Subcoordinadores under this coord
     const subs = estructura.subcoordinadores.filter(
       (s) => normalizeCI(s.coordinador_ci) === miCI
     );
 
     // Voters assigned directly by this coord
-    const votantesDirectos = estructura.votantes.filter(
-      (v) => normalizeCI(v.asignado_por) === miCI
-    );
+    const votantesDirectos = votantesByAsignadoPor.get(miCI) || [];
 
-    // Voters assigned by each sub (indirect)
-    const votantesIndirectos = subs.reduce(
-      (acc, sub) =>
-        acc +
-        estructura.votantes.filter(
-          (v) => normalizeCI(v.asignado_por) === normalizeCI(sub.ci)
-        ).length,
-      0
-    );
+    // Voters assigned by each sub (indirect) — O(subs) with map
+    let votantesIndirectos = 0;
+    let votosIndirectosConfirmados = 0;
+    for (const sub of subs) {
+      const subVoters = votantesByAsignadoPor.get(normalizeCI(sub.ci)) || [];
+      votantesIndirectos += subVoters.length;
+      votosIndirectosConfirmados += subVoters.filter((v) => v.voto_confirmado === true).length;
+    }
 
     // Total voters = direct + indirect
     const totalVotantes = votantesDirectos.length + votantesIndirectos;
@@ -76,17 +81,6 @@ export const getEstadisticas = (estructura, currentUser) => {
     const votosDirectosConfirmados = votantesDirectos.filter(
       (v) => v.voto_confirmado === true
     ).length;
-
-    const votosIndirectosConfirmados = subs.reduce(
-      (acc, sub) =>
-        acc +
-        estructura.votantes.filter(
-          (v) =>
-            normalizeCI(v.asignado_por) === normalizeCI(sub.ci) &&
-            v.voto_confirmado === true
-        ).length,
-      0
-    );
 
     const votosConfirmados = votosDirectosConfirmados + votosIndirectosConfirmados;
 
