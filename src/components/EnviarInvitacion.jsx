@@ -116,7 +116,7 @@ const StatCard = ({ label, value, icon: Icon, variant = "default" }) => {
 const FlyerCard = React.forwardRef(({ persona }, ref) => {
   const nombre = getFieldSafe(persona, "nombre", "nombres") || "Elector";
   const apellido = getFieldSafe(persona, "apellido", "apellidos") || "";
-  const distrito = getFieldSafe(persona, "distrito", "departamento") || "Sin dato";
+  const ci = persona.ci || "Sin CI";
   const local = getFieldSafe(persona, "local_votacion", "local_de_votacion", "local") || "Sin dato";
   const mesa = getFieldSafe(persona, "mesa", "nro_mesa") || "Sin dato";
   const orden = getFieldSafe(persona, "orden", "orden_votacion") || "Sin dato";
@@ -127,25 +127,40 @@ const FlyerCard = React.forwardRef(({ persona }, ref) => {
       className="w-[360px] bg-white rounded-lg overflow-hidden shadow-lg"
       style={{ fontFamily: "system-ui, -apple-system, sans-serif" }}
     >
-      <div className="bg-red-600 text-white px-6 py-5 text-center">
-        <p className="text-2xl font-bold tracking-tight">José Chechito López</p>
+      {/* Imagen real del flyer de Chechito */}
+      <img
+        src="/chechito-flyer.jpeg"
+        alt="José Chechito López - Concejal 2026"
+        className="w-full h-auto"
+        crossOrigin="anonymous"
+        onError={(e) => {
+          // Fallback if image doesn't exist
+          e.target.style.display = "none";
+          e.target.nextSibling.style.display = "block";
+        }}
+      />
+      {/* Fallback header if image not found */}
+      <div className="bg-red-600 text-white px-6 py-5 text-center hidden">
+        <p className="text-2xl font-bold tracking-tight">Jose Chechito Lopez</p>
         <p className="text-red-100 text-sm mt-1 font-medium">Concejal 2026</p>
       </div>
-      <div className="px-6 py-5">
-        <p className="text-lg font-semibold text-slate-800 mb-4">
+      
+      {/* Datos del votante */}
+      <div className="px-6 py-5 bg-white">
+        <p className="text-lg font-semibold text-slate-800 mb-3">
           Hola <span className="text-red-600">{nombre} {apellido}</span>
         </p>
         <p className="text-sm text-slate-600 mb-4">
-          Te recordamos tus datos de votación:
+          Te recordamos tus datos de votacion:
         </p>
         <div className="bg-slate-50 rounded-lg p-4 space-y-2 border border-slate-200">
           <div className="flex justify-between text-sm">
-            <span className="text-slate-500">Distrito:</span>
-            <span className="font-semibold text-slate-700">{distrito}</span>
+            <span className="text-slate-500">CI:</span>
+            <span className="font-semibold text-slate-700">{ci}</span>
           </div>
           <div className="flex justify-between text-sm">
-            <span className="text-slate-500">Local:</span>
-            <span className="font-semibold text-slate-700">{local}</span>
+            <span className="text-slate-500">Local de votacion:</span>
+            <span className="font-semibold text-slate-700 text-right max-w-[180px]">{local}</span>
           </div>
           <div className="flex justify-between text-sm">
             <span className="text-slate-500">Mesa:</span>
@@ -157,13 +172,13 @@ const FlyerCard = React.forwardRef(({ persona }, ref) => {
           </div>
         </div>
         <div className="mt-5 bg-red-50 rounded-lg p-4 text-center border border-red-200">
-          <p className="text-sm text-slate-600 mb-2">Votá así:</p>
+          <p className="text-sm text-slate-600 mb-2">Vota asi:</p>
           <p className="text-xl font-bold text-red-600">Lista 2E</p>
-          <p className="text-lg font-semibold text-slate-800">Opción 2</p>
+          <p className="text-lg font-semibold text-slate-800">Opcion 2</p>
         </div>
       </div>
       <div className="bg-slate-800 text-white px-6 py-3 text-center">
-        <p className="text-xs text-slate-300">José Chechito López - Concejal 2026</p>
+        <p className="text-xs text-slate-300">Jose Chechito Lopez - Concejal 2026</p>
       </div>
     </div>
   );
@@ -466,6 +481,20 @@ export default function EnviarInvitacion({ onBack }) {
     subsData.forEach((s) => addPersona(s, "subcoordinador"));
     votantesData.forEach((v) => addPersona(v, "votante"));
 
+    // Debug logging
+    console.log("[v0] EnviarInvitacion - Datos cargados:", {
+      coordinadores: coordsData.length,
+      subcoordinadores: subsData.length,
+      votantes: votantesData.length,
+      invitaciones: invData.length,
+      personasConTelefono: allPersonas.length,
+      desglosePorTipo: {
+        coordsConTel: allPersonas.filter((p) => p.tipo === "coordinador").length,
+        subsConTel: allPersonas.filter((p) => p.tipo === "subcoordinador").length,
+        votantesConTel: allPersonas.filter((p) => p.tipo === "votante").length,
+      },
+    });
+
     setPersonas(allPersonas);
     setInvitaciones(invData);
     setLoading(false);
@@ -490,13 +519,15 @@ export default function EnviarInvitacion({ onBack }) {
     return map;
   }, [invitaciones]);
 
-  // Maps for names lookup
+  // Maps for names lookup - Use ALL coords/subs, not just those with phone
+  // This ensures we can show the coordinator name even if they don't have phone
   const coordsMap = useMemo(() => {
     const map = new Map();
     rawCoords.forEach((c) => {
       const nombre = `${getFieldSafe(c.padron || c, "nombre", "nombres") || ""} ${getFieldSafe(c.padron || c, "apellido", "apellidos") || ""}`.trim() || "Sin nombre";
       map.set(normalizeCI(c.ci), nombre);
     });
+    console.log("[v0] coordsMap built with", map.size, "coordinadores");
     return map;
   }, [rawCoords]);
 
@@ -506,6 +537,7 @@ export default function EnviarInvitacion({ onBack }) {
       const nombre = `${getFieldSafe(s.padron || s, "nombre", "nombres") || ""} ${getFieldSafe(s.padron || s, "apellido", "apellidos") || ""}`.trim() || "Sin nombre";
       map.set(normalizeCI(s.ci), nombre);
     });
+    console.log("[v0] subsMap built with", map.size, "subcoordinadores");
     return map;
   }, [rawSubs]);
 
@@ -564,13 +596,22 @@ export default function EnviarInvitacion({ onBack }) {
 
   // ======================= HIERARCHY DATA =======================
   const hierarchyData = useMemo(() => {
-    // Build maps for quick lookup
+    // IMPORTANT: Use rawCoords/rawSubs to build the REAL hierarchy, not just personas with phone
+    // This ensures subs are grouped under their coordinator even if coord has no phone
+
+    // Build a complete set of ALL coordinador CIs (with or without phone)
+    const allCoordCIsComplete = new Set(rawCoords.map((c) => normalizeCI(c.ci)));
+    
+    // Build a complete set of ALL subcoordinador CIs (with or without phone)  
+    const allSubCIsComplete = new Set(rawSubs.map((s) => normalizeCI(s.ci)));
+
+    // Build maps for quick lookup of personas with phone
     const personasByCi = new Map();
     personasConEstado.forEach((p) => {
       personasByCi.set(normalizeCI(p.ci), p);
     });
 
-    // Group subcoordinadores by coordinador_ci
+    // Group subcoordinadores (with phone) by coordinador_ci
     const subsByCoord = new Map();
     personasConEstado.filter((p) => p.tipo === "subcoordinador").forEach((s) => {
       const coordCI = normalizeCI(s.coordinador_ci);
@@ -578,7 +619,7 @@ export default function EnviarInvitacion({ onBack }) {
       subsByCoord.get(coordCI).push(s);
     });
 
-    // Group votantes by asignado_por
+    // Group votantes (with phone) by asignado_por
     const votantesByAsignador = new Map();
     personasConEstado.filter((p) => p.tipo === "votante").forEach((v) => {
       const asignadoPor = normalizeCI(v.asignado_por);
@@ -586,19 +627,18 @@ export default function EnviarInvitacion({ onBack }) {
       votantesByAsignador.get(asignadoPor).push(v);
     });
 
-    // Build hierarchy
+    // Build hierarchy starting with coordinators that have phone
     const coordinadores = personasConEstado.filter((p) => p.tipo === "coordinador");
     
-    // Find subs without a valid coord
-    const allCoordCIs = new Set(coordinadores.map((c) => normalizeCI(c.ci)));
+    // A sub is "without coord" only if their coordinador_ci doesn't exist in the COMPLETE list of coords
     const subsWithoutCoord = personasConEstado.filter(
-      (p) => p.tipo === "subcoordinador" && !allCoordCIs.has(normalizeCI(p.coordinador_ci))
+      (p) => p.tipo === "subcoordinador" && !allCoordCIsComplete.has(normalizeCI(p.coordinador_ci))
     );
 
-    // Find votantes without valid asignador (neither coord nor sub with phone)
-    const allAsignadores = new Set([...allCoordCIs, ...personasConEstado.filter((p) => p.tipo === "subcoordinador").map((s) => normalizeCI(s.ci))]);
+    // A votante is "sin estructura" only if their asignado_por doesn't exist in coords OR subs (complete lists)
+    const allAsignadoresComplete = new Set([...allCoordCIsComplete, ...allSubCIsComplete]);
     const votantesSinEstructura = personasConEstado.filter(
-      (p) => p.tipo === "votante" && !allAsignadores.has(normalizeCI(p.asignado_por))
+      (p) => p.tipo === "votante" && !allAsignadoresComplete.has(normalizeCI(p.asignado_por))
     );
 
     // Helper to count stats for a group
