@@ -190,19 +190,26 @@ FlyerCard.displayName = "FlyerCard";
 const Modal = ({ open, onClose, children, title }) => {
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
+    <div 
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="modal-title"
+      aria-describedby="modal-description"
+    >
+      <div className="absolute inset-0 bg-black/50" onClick={onClose} aria-hidden="true" />
       <div className="relative bg-white rounded-2xl shadow-xl max-w-md w-full max-h-[90vh] overflow-auto">
         <div className="sticky top-0 bg-white border-b border-slate-200 px-5 py-4 flex items-center justify-between rounded-t-2xl">
-          <h3 className="font-semibold text-slate-800">{title}</h3>
+          <h3 id="modal-title" className="font-semibold text-slate-800">{title}</h3>
           <button
             onClick={onClose}
             className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors"
+            aria-label="Cerrar modal"
           >
             <X className="w-5 h-5 text-slate-500" />
           </button>
         </div>
-        <div className="p-5">{children}</div>
+        <div id="modal-description" className="p-5">{children}</div>
       </div>
     </div>
   );
@@ -657,52 +664,65 @@ export default function EnviarInvitacion({ onBack }) {
 
   // ======================= HIERARCHY DATA =======================
   const hierarchyData = useMemo(() => {
-    // IMPORTANT: Use rawCoords/rawSubs to build the REAL hierarchy, not just personas with phone
-    // This ensures subs are grouped under their coordinator even if coord has no phone
+    // Use rawCoords/rawSubs to build the REAL hierarchy structure
+    // Coordinators/subs appear as headers even if they don't have phone
+    // Only people with phone (personasConEstado) are actionable
 
-    // Build a complete set of ALL coordinador CIs (with or without phone)
-    const allCoordCIsComplete = new Set(rawCoords.map((c) => normalizeCI(c.ci)));
-    
-    // Build a complete set of ALL subcoordinador CIs (with or without phone)  
-    const allSubCIsComplete = new Set(rawSubs.map((s) => normalizeCI(s.ci)));
+    // Build maps of all coords/subs for quick lookup by CI
+    const allCoordsMap = new Map();
+    rawCoords.forEach((c) => {
+      const ci = String(c.ci);
+      allCoordsMap.set(ci, {
+        ci: c.ci,
+        nombre: getFieldSafe(c.padron || c, "nombre", "nombres") || "",
+        apellido: getFieldSafe(c.padron || c, "apellido", "apellidos") || "",
+        telefono: c.telefono || c.padron?.telefono || null,
+      });
+    });
 
-    // Build maps for quick lookup of personas with phone
+    const allSubsMap = new Map();
+    rawSubs.forEach((s) => {
+      const ci = String(s.ci);
+      allSubsMap.set(ci, {
+        ci: s.ci,
+        coordinador_ci: s.coordinador_ci,
+        nombre: getFieldSafe(s.padron || s, "nombre", "nombres") || "",
+        apellido: getFieldSafe(s.padron || s, "apellido", "apellidos") || "",
+        telefono: s.telefono || s.padron?.telefono || null,
+      });
+    });
+
+    // Build maps for personas with phone (actionable)
     const personasByCi = new Map();
     personasConEstado.forEach((p) => {
-      personasByCi.set(normalizeCI(p.ci), p);
+      personasByCi.set(String(p.ci), p);
     });
 
     // Group subcoordinadores (with phone) by coordinador_ci
-    const subsByCoord = new Map();
+    const subsConTelByCoord = new Map();
     personasConEstado.filter((p) => p.tipo === "subcoordinador").forEach((s) => {
-      const coordCI = normalizeCI(s.coordinador_ci);
-      if (!subsByCoord.has(coordCI)) subsByCoord.set(coordCI, []);
-      subsByCoord.get(coordCI).push(s);
+      const coordCI = String(s.coordinador_ci);
+      if (!subsConTelByCoord.has(coordCI)) subsConTelByCoord.set(coordCI, []);
+      subsConTelByCoord.get(coordCI).push(s);
     });
 
     // Group votantes (with phone) by asignado_por
     const votantesByAsignador = new Map();
     personasConEstado.filter((p) => p.tipo === "votante").forEach((v) => {
-      const asignadoPor = normalizeCI(v.asignado_por);
+      const asignadoPor = String(v.asignado_por);
       if (!votantesByAsignador.has(asignadoPor)) votantesByAsignador.set(asignadoPor, []);
       votantesByAsignador.get(asignadoPor).push(v);
     });
 
-    // Build hierarchy starting with coordinators that have phone
-    const coordinadores = personasConEstado.filter((p) => p.tipo === "coordinador");
-    
-    // A sub is "without coord" only if their coordinador_ci doesn't exist in the COMPLETE list of coords
-    const subsWithoutCoord = personasConEstado.filter(
-      (p) => p.tipo === "subcoordinador" && !allCoordCIsComplete.has(normalizeCI(p.coordinador_ci))
-    );
+    // Also group ALL subs by coordinador_ci (even without phone) to show structure
+    const allSubsByCoord = new Map();
+    rawSubs.forEach((s) => {
+      const coordCI = String(s.coordinador_ci);
+      if (!allSubsByCoord.has(coordCI)) allSubsByCoord.set(coordCI, []);
+      allSubsByCoord.get(coordCI).push(s);
+    });
 
-    // A votante is "sin estructura" only if their asignado_por doesn't exist in coords OR subs (complete lists)
-    const allAsignadoresComplete = new Set([...allCoordCIsComplete, ...allSubCIsComplete]);
-    const votantesSinEstructura = personasConEstado.filter(
-      (p) => p.tipo === "votante" && !allAsignadoresComplete.has(normalizeCI(p.asignado_por))
-    );
-
-    // Helper to count stats for a group
+    // Helper to count stats for a list of actionable personas
     const getStats = (items) => {
       const stats = { total: 0, pendiente: 0, enviado: 0, error: 0, preparado: 0 };
       items.forEach((p) => {
@@ -712,40 +732,92 @@ export default function EnviarInvitacion({ onBack }) {
       return stats;
     };
 
-    // Build coord structures
-    const estructuraCoords = coordinadores.map((coord) => {
-      const coordCI = normalizeCI(coord.ci);
-      const mySubs = subsByCoord.get(coordCI) || [];
-      const myDirectVotantes = votantesByAsignador.get(coordCI) || [];
+    // Build hierarchy starting with ALL coordinators from rawCoords
+    const estructuraCoords = [];
+    
+    for (const [coordCI, coordInfo] of allCoordsMap) {
+      const coordPersona = personasByCi.get(coordCI); // May be null if no phone
+      
+      // Get all subs under this coord (with or without phone)
+      const allSubsUnderCoord = allSubsByCoord.get(coordCI) || [];
+      
+      // Build sub structures
+      const subStructures = [];
+      for (const rawSub of allSubsUnderCoord) {
+        const subCI = String(rawSub.ci);
+        const subPersona = personasByCi.get(subCI); // May be null if no phone
+        const subVotantes = votantesByAsignador.get(subCI) || [];
+        
+        subStructures.push({
+          ci: rawSub.ci,
+          nombre: getFieldSafe(rawSub.padron || rawSub, "nombre", "nombres") || "",
+          apellido: getFieldSafe(rawSub.padron || rawSub, "apellido", "apellidos") || "",
+          hasPhone: !!subPersona,
+          persona: subPersona, // null if no phone
+          votantes: subVotantes,
+        });
+      }
 
-      // All votantes under this coord (direct + via subs)
-      let allMyVotantes = [...myDirectVotantes];
-      mySubs.forEach((sub) => {
-        const subVotantes = votantesByAsignador.get(normalizeCI(sub.ci)) || [];
-        allMyVotantes = [...allMyVotantes, ...subVotantes];
+      // Get votantes directly under this coord
+      const votantesDirectos = votantesByAsignador.get(coordCI) || [];
+
+      // Collect all actionable people under this coord for stats
+      const allActionable = [];
+      if (coordPersona) allActionable.push(coordPersona);
+      subStructures.forEach((sub) => {
+        if (sub.persona) allActionable.push(sub.persona);
+        allActionable.push(...sub.votantes);
       });
+      allActionable.push(...votantesDirectos);
 
-      const subsWithVotantes = mySubs.map((sub) => ({
-        ...sub,
-        votantes: votantesByAsignador.get(normalizeCI(sub.ci)) || [],
-      }));
+      // Only show coord if it has structure below or has phone itself
+      if (coordPersona || subStructures.length > 0 || votantesDirectos.length > 0) {
+        estructuraCoords.push({
+          ci: coordInfo.ci,
+          nombre: coordInfo.nombre,
+          apellido: coordInfo.apellido,
+          hasPhone: !!coordPersona,
+          persona: coordPersona, // null if no phone
+          subcoordinadores: subStructures,
+          votantesDirectos,
+          stats: getStats(allActionable),
+        });
+      }
+    }
 
-      return {
-        ...coord,
-        subcoordinadores: subsWithVotantes,
-        votantesDirectos: myDirectVotantes,
-        stats: getStats([coord, ...mySubs, ...allMyVotantes]),
-      };
-    });
+    // Find subs without a valid coord in rawCoords
+    const allCoordCIs = new Set([...allCoordsMap.keys()]);
+    const subsWithoutCoord = [];
+    for (const [subCI, subInfo] of allSubsMap) {
+      const subCoordCI = String(subInfo.coordinador_ci);
+      if (!allCoordCIs.has(subCoordCI)) {
+        const subPersona = personasByCi.get(subCI);
+        const subVotantes = votantesByAsignador.get(subCI) || [];
+        if (subPersona || subVotantes.length > 0) {
+          subsWithoutCoord.push({
+            ci: subInfo.ci,
+            nombre: subInfo.nombre,
+            apellido: subInfo.apellido,
+            hasPhone: !!subPersona,
+            persona: subPersona,
+            votantes: subVotantes,
+          });
+        }
+      }
+    }
+
+    // Find votantes without valid asignador (neither coord nor sub in rawCoords/rawSubs)
+    const allAsignadores = new Set([...allCoordsMap.keys(), ...allSubsMap.keys()]);
+    const votantesSinEstructura = personasConEstado.filter(
+      (p) => p.tipo === "votante" && !allAsignadores.has(String(p.asignado_por))
+    );
 
     return {
       coordinadores: estructuraCoords,
       subsWithoutCoord,
       votantesSinEstructura,
-      subsByCoord,
-      votantesByAsignador,
     };
-  }, [personasConEstado]);
+  }, [personasConEstado, rawCoords, rawSubs]);
 
   // ======================= ACTIONS =======================
   const upsertInvitacion = async (ci, telefono, updates) => {
@@ -1160,9 +1232,13 @@ José Chechito López - Concejal
                             Coordinador
                           </Badge>
                           <span className="font-semibold text-slate-800">
-                            {getFieldSafe(coord, "nombre", "nombres")} {getFieldSafe(coord, "apellido", "apellidos")}
+                            {coord.nombre} {coord.apellido}
                           </span>
-                          <Badge variant={coord.estado}>{coord.estado}</Badge>
+                          {coord.hasPhone ? (
+                            <Badge variant={coord.persona?.estado || "pendiente"}>{coord.persona?.estado || "pendiente"}</Badge>
+                          ) : (
+                            <Badge variant="default" className="bg-slate-200 text-slate-600">Sin teléfono</Badge>
+                          )}
                         </div>
                         <div className="flex flex-wrap gap-3 text-xs text-slate-500 mt-1">
                           <span>Total: {stats.total}</span>
@@ -1176,21 +1252,23 @@ José Chechito López - Concejal
                     {/* Coord content expanded */}
                     {isExpanded && (
                       <div className="border-t border-slate-100 bg-slate-50/50">
-                        {/* Coord person actions */}
-                        <div className="px-4 py-2 bg-red-50/50 border-b border-slate-100">
-                          <PersonaRow
-                            persona={coord}
-                            actionLoading={actionLoading}
-                            coordsMap={coordsMap}
-                            subsMap={subsMap}
-                            onPrepararFlyer={handlePrepararFlyer}
-                            onVerPreview={handleVerPreview}
-                            onAbrirWhatsapp={handleAbrirWhatsapp}
-                            onMarcarEnviado={handleMarcarEnviado}
-                            onMarcarError={handleMarcarError}
-                            onVolverPendiente={handleVolverPendiente}
-                          />
-                        </div>
+                        {/* Coord person actions (only if has phone) */}
+                        {coord.hasPhone && coord.persona && (
+                          <div className="px-4 py-2 bg-red-50/50 border-b border-slate-100">
+                            <PersonaRow
+                              persona={coord.persona}
+                              actionLoading={actionLoading}
+                              coordsMap={coordsMap}
+                              subsMap={subsMap}
+                              onPrepararFlyer={handlePrepararFlyer}
+                              onVerPreview={handleVerPreview}
+                              onAbrirWhatsapp={handleAbrirWhatsapp}
+                              onMarcarEnviado={handleMarcarEnviado}
+                              onMarcarError={handleMarcarError}
+                              onVolverPendiente={handleVolverPendiente}
+                            />
+                          </div>
+                        )}
 
                         {/* Subs */}
                         {coord.subcoordinadores.map((sub) => {
@@ -1217,9 +1295,13 @@ José Chechito López - Concejal
                                       Sub
                                     </Badge>
                                     <span className="font-medium text-slate-700">
-                                      {getFieldSafe(sub, "nombre", "nombres")} {getFieldSafe(sub, "apellido", "apellidos")}
+                                      {sub.nombre} {sub.apellido}
                                     </span>
-                                    <Badge variant={sub.estado}>{sub.estado}</Badge>
+                                    {sub.hasPhone ? (
+                                      <Badge variant={sub.persona?.estado || "pendiente"}>{sub.persona?.estado || "pendiente"}</Badge>
+                                    ) : (
+                                      <Badge variant="default" className="bg-slate-200 text-slate-600">Sin teléfono</Badge>
+                                    )}
                                     <span className="text-xs text-slate-400">({subVotantes.length} votantes)</span>
                                   </div>
                                 </div>
@@ -1228,21 +1310,23 @@ José Chechito López - Concejal
                               {/* Sub expanded */}
                               {subExpanded && (
                                 <div className="bg-blue-50/30 border-t border-slate-100">
-                                  {/* Sub person actions */}
-                                  <div className="px-4 py-2 pl-12 bg-blue-50/50 border-b border-slate-100">
-                                    <PersonaRow
-                                      persona={sub}
-                                      actionLoading={actionLoading}
-                                      coordsMap={coordsMap}
-                                      subsMap={subsMap}
-                                      onPrepararFlyer={handlePrepararFlyer}
-                                      onVerPreview={handleVerPreview}
-                                      onAbrirWhatsapp={handleAbrirWhatsapp}
-                                      onMarcarEnviado={handleMarcarEnviado}
-                                      onMarcarError={handleMarcarError}
-                                      onVolverPendiente={handleVolverPendiente}
-                                    />
-                                  </div>
+                                  {/* Sub person actions (only if has phone) */}
+                                  {sub.hasPhone && sub.persona && (
+                                    <div className="px-4 py-2 pl-12 bg-blue-50/50 border-b border-slate-100">
+                                      <PersonaRow
+                                        persona={sub.persona}
+                                        actionLoading={actionLoading}
+                                        coordsMap={coordsMap}
+                                        subsMap={subsMap}
+                                        onPrepararFlyer={handlePrepararFlyer}
+                                        onVerPreview={handleVerPreview}
+                                        onAbrirWhatsapp={handleAbrirWhatsapp}
+                                        onMarcarEnviado={handleMarcarEnviado}
+                                        onMarcarError={handleMarcarError}
+                                        onVolverPendiente={handleVolverPendiente}
+                                      />
+                                    </div>
+                                  )}
                                   {/* Votantes of this sub */}
                                   {subVotantes.map((v) => (
                                     <div key={v.ci} className="pl-12 border-t border-slate-100">
@@ -1260,7 +1344,7 @@ José Chechito López - Concejal
                                       />
                                     </div>
                                   ))}
-                                  {subVotantes.length === 0 && (
+                                  {subVotantes.length === 0 && !sub.hasPhone && (
                                     <p className="text-xs text-slate-400 py-3 pl-12">Sin votantes con teléfono</p>
                                   )}
                                 </div>
@@ -1294,7 +1378,7 @@ José Chechito López - Concejal
                           </div>
                         )}
 
-                        {coord.subcoordinadores.length === 0 && coord.votantesDirectos.length === 0 && (
+                        {coord.subcoordinadores.length === 0 && coord.votantesDirectos.length === 0 && !coord.hasPhone && (
                           <p className="text-xs text-slate-400 py-3 pl-8">Sin estructura asignada</p>
                         )}
                       </div>
@@ -1317,25 +1401,58 @@ José Chechito López - Concejal
                     )}
                     <div className="flex-1">
                       <p className="font-semibold text-amber-800">Subcoordinadores sin coordinador</p>
-                      <p className="text-xs text-amber-600">{hierarchyData.subsWithoutCoord.length} personas</p>
+                      <p className="text-xs text-amber-600">{hierarchyData.subsWithoutCoord.length} subcoordinadores</p>
                     </div>
                   </div>
                   {expandedNodes["subs-sin-coord"] && (
                     <div className="border-t border-amber-200">
-                      {hierarchyData.subsWithoutCoord.map((s) => (
-                        <div key={s.ci} className="border-t border-amber-100 first:border-t-0">
-                          <PersonaRow
-                            persona={s}
-                            actionLoading={actionLoading}
-                            coordsMap={coordsMap}
-                            subsMap={subsMap}
-                            onPrepararFlyer={handlePrepararFlyer}
-                            onVerPreview={handleVerPreview}
-                            onAbrirWhatsapp={handleAbrirWhatsapp}
-                            onMarcarEnviado={handleMarcarEnviado}
-                            onMarcarError={handleMarcarError}
-                            onVolverPendiente={handleVolverPendiente}
-                          />
+                      {hierarchyData.subsWithoutCoord.map((sub) => (
+                        <div key={sub.ci} className="border-t border-amber-100 first:border-t-0">
+                          <div className="p-3 bg-amber-50/50">
+                            <div className="flex items-center gap-2 mb-2">
+                              <Badge variant="subcoordinador">
+                                <UserCheck className="w-3 h-3 mr-1" />
+                                Sub
+                              </Badge>
+                              <span className="font-medium text-slate-700">{sub.nombre} {sub.apellido}</span>
+                              {sub.hasPhone ? (
+                                <Badge variant={sub.persona?.estado || "pendiente"}>{sub.persona?.estado || "pendiente"}</Badge>
+                              ) : (
+                                <Badge variant="default" className="bg-slate-200 text-slate-600">Sin teléfono</Badge>
+                              )}
+                            </div>
+                            {sub.hasPhone && sub.persona && (
+                              <PersonaRow
+                                persona={sub.persona}
+                                actionLoading={actionLoading}
+                                coordsMap={coordsMap}
+                                subsMap={subsMap}
+                                onPrepararFlyer={handlePrepararFlyer}
+                                onVerPreview={handleVerPreview}
+                                onAbrirWhatsapp={handleAbrirWhatsapp}
+                                onMarcarEnviado={handleMarcarEnviado}
+                                onMarcarError={handleMarcarError}
+                                onVolverPendiente={handleVolverPendiente}
+                              />
+                            )}
+                          </div>
+                          {/* Votantes under this orphan sub */}
+                          {sub.votantes.map((v) => (
+                            <div key={v.ci} className="pl-8 border-t border-amber-100">
+                              <PersonaRow
+                                persona={v}
+                                actionLoading={actionLoading}
+                                coordsMap={coordsMap}
+                                subsMap={subsMap}
+                                onPrepararFlyer={handlePrepararFlyer}
+                                onVerPreview={handleVerPreview}
+                                onAbrirWhatsapp={handleAbrirWhatsapp}
+                                onMarcarEnviado={handleMarcarEnviado}
+                                onMarcarError={handleMarcarError}
+                                onVolverPendiente={handleVolverPendiente}
+                              />
+                            </div>
+                          ))}
                         </div>
                       ))}
                     </div>
