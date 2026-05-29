@@ -33,8 +33,16 @@ const normalizeCI = (ci) =>
   (ci ?? "").toString().replace(/\D/g, "").trim() || (ci ?? "").toString().trim();
 
 const normalizarTelefonoWhatsapp = (telefono) => {
-  if (!telefono) return null;
-  let num = telefono.toString().replace(/[\s\-\(\)\+\.]/g, "");
+  if (telefono === null || telefono === undefined) return null;
+  // Convert to string and clean all non-digits
+  let num = String(telefono)
+    .replace(/\s/g, "")
+    .replace(/-/g, "")
+    .replace(/\(/g, "")
+    .replace(/\)/g, "")
+    .replace(/\+/g, "")
+    .replace(/\./g, "");
+  if (!num || num.length === 0) return null;
   if (num.startsWith("0")) num = num.slice(1);
   if (!num.startsWith("595")) num = "595" + num;
   // Validar longitud razonable (Paraguay: 595 + 9 dígitos = 12)
@@ -207,51 +215,112 @@ export default function EnviarInvitacion({ onBack }) {
   // ======================= LOAD DATA =======================
   const cargarDatos = useCallback(async () => {
     setLoading(true);
+    
+    // Cargar cada tabla independientemente para que una falla no tire todo
+    let coordsData = [];
+    let subsData = [];
+    let votantesData = [];
+    let invData = [];
+
+    // Coordinadores
     try {
-      // Cargar todas las personas con teléfono (coords, subs, votantes)
-      const [coordsRes, subsRes, votantesRes, invRes] = await Promise.all([
-        supabase.from("coordinadores").select("*, padron(*)"),
-        supabase.from("subcoordinadores").select("*, padron(*)"),
-        supabase.from("votantes").select("*, padron(*)"),
-        supabase.from("invitaciones_whatsapp").select("*").eq("campania", CAMPANIA),
-      ]);
-
-      if (coordsRes.error) throw coordsRes.error;
-      if (subsRes.error) throw subsRes.error;
-      if (votantesRes.error) throw votantesRes.error;
-      if (invRes.error) throw invRes.error;
-
-      // Combinar todas las personas con teléfono
-      const allPersonas = [];
-      const seen = new Set();
-
-      const addPersona = (p, tipo) => {
-        const telefono = p.telefono || p.padron?.telefono;
-        if (!telefono) return;
-        const ci = normalizeCI(p.ci);
-        if (seen.has(ci)) return;
-        seen.add(ci);
-        allPersonas.push({
-          ...p.padron,
-          ...p,
-          ci,
-          telefono,
-          tipo,
-        });
-      };
-
-      (coordsRes.data || []).forEach((c) => addPersona(c, "coordinador"));
-      (subsRes.data || []).forEach((s) => addPersona(s, "subcoordinador"));
-      (votantesRes.data || []).forEach((v) => addPersona(v, "votante"));
-
-      setPersonas(allPersonas);
-      setInvitaciones(invRes.data || []);
+      const { data, error } = await supabase.from("coordinadores").select("*, padron(*)");
+      if (error) {
+        console.error("Error cargando coordinadores:", error);
+      } else {
+        coordsData = data || [];
+      }
     } catch (err) {
-      console.error("Error cargando datos:", err);
-      showToast("Error al cargar datos", "error");
-    } finally {
-      setLoading(false);
+      console.error("Error cargando coordinadores:", err);
     }
+
+    // Subcoordinadores
+    try {
+      const { data, error } = await supabase.from("subcoordinadores").select("*, padron(*)");
+      if (error) {
+        console.error("Error cargando subcoordinadores:", error);
+      } else {
+        subsData = data || [];
+      }
+    } catch (err) {
+      console.error("Error cargando subcoordinadores:", err);
+    }
+
+    // Votantes
+    try {
+      const { data, error } = await supabase.from("votantes").select("*, padron(*)");
+      if (error) {
+        console.error("Error cargando votantes:", error);
+      } else {
+        votantesData = data || [];
+      }
+    } catch (err) {
+      console.error("Error cargando votantes:", err);
+    }
+
+    // Invitaciones WhatsApp
+    try {
+      const { data, error } = await supabase.from("invitaciones_whatsapp").select("*").eq("campania", CAMPANIA);
+      if (error) {
+        console.error("Error cargando invitaciones_whatsapp:", error);
+      } else {
+        invData = data || [];
+      }
+    } catch (err) {
+      console.error("Error cargando invitaciones_whatsapp:", err);
+    }
+
+    // Combinar todas las personas con teléfono
+    const allPersonas = [];
+    const seen = new Set();
+
+    // Helper para validar teléfono (votantes.telefono es numeric, otras son varchar)
+    const getTelefonoStr = (p) => {
+      const tel = p.telefono ?? p.padron?.telefono ?? "";
+      return String(tel).replace(/\s/g, "").trim();
+    };
+
+    const addPersona = (p, tipo) => {
+      const telefonoStr = getTelefonoStr(p);
+      // Solo agregar si tiene teléfono válido
+      if (!telefonoStr || telefonoStr.length === 0) return;
+      
+      const ci = normalizeCI(p.ci);
+      if (!ci) return;
+      if (seen.has(ci)) return;
+      seen.add(ci);
+      
+      allPersonas.push({
+        ...p.padron,
+        ...p,
+        ci,
+        telefono: telefonoStr,
+        tipo,
+      });
+    };
+
+    // Procesar en orden de prioridad (coord > sub > votante)
+    coordsData.forEach((c) => addPersona(c, "coordinador"));
+    subsData.forEach((s) => addPersona(s, "subcoordinador"));
+    votantesData.forEach((v) => addPersona(v, "votante"));
+
+    console.log("[v0] Datos cargados:", {
+      coordinadores: coordsData.length,
+      subcoordinadores: subsData.length,
+      votantes: votantesData.length,
+      invitaciones: invData.length,
+      personasConTelefono: allPersonas.length,
+    });
+
+    setPersonas(allPersonas);
+    setInvitaciones(invData);
+
+    // Si no hay datos después de cargar, mostrar warning pero no error
+    if (allPersonas.length === 0 && (coordsData.length > 0 || subsData.length > 0 || votantesData.length > 0)) {
+      showToast("No se encontraron personas con teléfono", "error");
+    }
+
+    setLoading(false);
   }, []);
 
   useEffect(() => {
