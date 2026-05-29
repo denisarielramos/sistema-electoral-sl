@@ -113,6 +113,12 @@ const StatCard = ({ label, value, icon: Icon, variant = "default" }) => {
 };
 
 // ======================= FLYER COMPONENT =======================
+const formatCI = (ci) => {
+  const num = Number(ci);
+  if (Number.isNaN(num)) return ci || "Sin dato";
+  return new Intl.NumberFormat("es-PY").format(num);
+};
+
 const FlyerCard = React.forwardRef(({ persona }, ref) => {
   const nombre = getFieldSafe(persona, "nombre", "nombres") || "Elector";
   const apellido = getFieldSafe(persona, "apellido", "apellidos") || "";
@@ -153,22 +159,22 @@ const FlyerCard = React.forwardRef(({ persona }, ref) => {
         <p className="text-sm text-slate-600 mb-4">
           Te recordamos tus datos de votacion:
         </p>
-        <div className="bg-slate-50 rounded-lg p-4 space-y-2 border border-slate-200">
-          <div className="flex justify-between text-sm">
-            <span className="text-slate-500">CI:</span>
-            <span className="font-semibold text-slate-700">{ci}</span>
+        <div className="bg-red-600 rounded-lg p-4 space-y-2.5">
+          <div className="flex justify-between text-base">
+            <span className="font-bold text-white">CI:</span>
+            <span className="font-bold text-white">{formatCI(ci)}</span>
           </div>
-          <div className="flex justify-between text-sm">
-            <span className="text-slate-500">Local de votacion:</span>
-            <span className="font-semibold text-slate-700 text-right max-w-[180px]">{local}</span>
+          <div className="flex justify-between text-base gap-4">
+            <span className="font-bold text-white shrink-0">Local de votacion:</span>
+            <span className="font-bold text-white text-right">{local}</span>
           </div>
-          <div className="flex justify-between text-sm">
-            <span className="text-slate-500">Mesa:</span>
-            <span className="font-semibold text-slate-700">{mesa}</span>
+          <div className="flex justify-between text-base">
+            <span className="font-bold text-white">Mesa:</span>
+            <span className="font-bold text-white">{mesa}</span>
           </div>
-          <div className="flex justify-between text-sm">
-            <span className="text-slate-500">Orden:</span>
-            <span className="font-semibold text-slate-700">{orden}</span>
+          <div className="flex justify-between text-base">
+            <span className="font-bold text-white">Orden:</span>
+            <span className="font-bold text-white">{orden}</span>
           </div>
         </div>
         <div className="mt-5 bg-red-50 rounded-lg p-4 text-center border border-red-200">
