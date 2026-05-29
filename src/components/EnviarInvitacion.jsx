@@ -183,9 +183,6 @@ const FlyerCard = React.forwardRef(({ persona }, ref) => {
           <p className="text-lg font-semibold text-slate-800">Opcion 2</p>
         </div>
       </div>
-      <div className="bg-slate-800 text-white px-6 py-3 text-center">
-        <p className="text-xs text-slate-300">Jose Chechito Lopez - Concejal 2026</p>
-      </div>
     </div>
   );
 });
