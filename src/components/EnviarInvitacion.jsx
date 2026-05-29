@@ -976,7 +976,7 @@ Local de votación: ${local}
 Mesa: ${mesa}
 Orden: ${orden}
 
-Este 07 de Junio votá así:
+Este 7 de Junio votá así:
 
 Lista 2E
 Opción 2
