@@ -408,18 +408,79 @@ export default function EnviarInvitacion({ onBack }) {
       console.error("Error cargando subcoordinadores:", err);
     }
 
-    // Votantes
+    // Votantes - select only real columns, filter by telefono IS NOT NULL
     try {
-      const { data, error } = await supabase.from("votantes").select("*, padron(*)");
+      const { data, error } = await supabase
+        .from("votantes")
+        .select("ci, asignado_por, asignado_por_nombre, telefono, coordinador_ci, voto_confirmado, direccion_override, created_at")
+        .not("telefono", "is", null);
+      
       if (error) {
         console.error("Error cargando votantes:", {
           message: error?.message,
           details: error?.details,
           hint: error?.hint,
           code: error?.code,
+          fullError: error,
         });
       } else {
-        votantesData = data || [];
+        // Filter in JS to ensure telefono is not empty string
+        const votantesConTelefono = (data || []).filter((v) => {
+          const tel = String(v.telefono || "").trim();
+          return tel.length > 0;
+        });
+        console.log("[v0] votantes con telefono cargados:", votantesConTelefono.length);
+
+        // Get CIs to fetch from padron
+        const votantesCIs = votantesConTelefono.map((v) => v.ci);
+        
+        // Fetch padron data in chunks of 500 to avoid Supabase limits
+        let padronData = [];
+        const chunkSize = 500;
+        for (let i = 0; i < votantesCIs.length; i += chunkSize) {
+          const chunk = votantesCIs.slice(i, i + chunkSize);
+          const { data: padronChunk, error: padronError } = await supabase
+            .from("padron")
+            .select("ci, nombre, apellido, seccional, local_votacion, mesa, orden, direccion")
+            .in("ci", chunk);
+          
+          if (padronError) {
+            console.error("Error cargando padron chunk:", padronError);
+          } else {
+            padronData = padronData.concat(padronChunk || []);
+          }
+        }
+        console.log("[v0] padron encontrado para votantes:", padronData.length);
+
+        // Build padron map for quick lookup (bigint comparison via String)
+        const padronMap = new Map();
+        padronData.forEach((p) => {
+          padronMap.set(String(p.ci), p);
+        });
+
+        // Enrich votantes with padron data
+        votantesData = votantesConTelefono.map((v) => {
+          const padron = padronMap.get(String(v.ci));
+          return {
+            ci: v.ci,
+            telefono: v.telefono,
+            asignado_por: v.asignado_por,
+            asignado_por_nombre: v.asignado_por_nombre,
+            coordinador_ci: v.coordinador_ci,
+            voto_confirmado: v.voto_confirmado,
+            direccion_override: v.direccion_override,
+            // Padron fields
+            nombre: padron?.nombre || "",
+            apellido: padron?.apellido || "",
+            seccional: padron?.seccional || "",
+            local_votacion: padron?.local_votacion || "",
+            mesa: padron?.mesa || "",
+            orden: padron?.orden || "",
+            direccion: v.direccion_override || padron?.direccion || "",
+            // For compatibility with existing code
+            padron: padron || null,
+          };
+        });
       }
     } catch (err) {
       console.error("Error cargando votantes:", err);
