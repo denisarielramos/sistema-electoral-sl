@@ -963,22 +963,20 @@ export default function EnviarInvitacion({ onBack }) {
       return;
     }
 
-    const nombre = getFieldSafe(persona, "nombre", "nombres") || "Elector";
-    const distrito = getFieldSafe(persona, "distrito", "departamento") || "Sin dato";
-    const local = getFieldSafe(persona, "local_votacion", "local_de_votacion", "local") || "Sin dato";
-    const mesa = getFieldSafe(persona, "mesa", "nro_mesa") || "Sin dato";
-    const orden = getFieldSafe(persona, "orden", "orden_votacion") || "Sin dato";
+  const nombre = getFieldSafe(persona, "nombre", "nombres") || "Elector";
+  const local = getFieldSafe(persona, "local_votacion", "local_de_votacion", "local") || "Sin dato";
+  const mesa = getFieldSafe(persona, "mesa", "nro_mesa") || "Sin dato";
+  const orden = getFieldSafe(persona, "orden", "orden_votacion") || "Sin dato";
 
-    const mensaje = `Hola ${nombre}, te saluda el equipo de José Chechito López.
+  const mensaje = `Hola ${nombre}, te saluda el equipo de José Chechito López.
 
 Te recordamos tus datos de votación:
 
-Distrito: ${distrito}
 Local de votación: ${local}
 Mesa: ${mesa}
 Orden: ${orden}
 
-Este 2026 votá así:
+Este 07 de Junio votá así:
 
 Lista 2E
 Opción 2
