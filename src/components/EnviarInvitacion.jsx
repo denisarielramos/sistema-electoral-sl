@@ -23,6 +23,14 @@ import {
   Loader2,
   CheckCircle2,
   XCircle,
+  ChevronDown,
+  ChevronRight,
+  List,
+  Network,
+  RotateCcw,
+  User,
+  UserCheck,
+  UserCog,
 } from "lucide-react";
 
 // ======================= CONSTANTES =======================
@@ -34,7 +42,6 @@ const normalizeCI = (ci) =>
 
 const normalizarTelefonoWhatsapp = (telefono) => {
   if (telefono === null || telefono === undefined) return null;
-  // Convert to string and clean all non-digits
   let num = String(telefono)
     .replace(/\s/g, "")
     .replace(/-/g, "")
@@ -45,7 +52,6 @@ const normalizarTelefonoWhatsapp = (telefono) => {
   if (!num || num.length === 0) return null;
   if (num.startsWith("0")) num = num.slice(1);
   if (!num.startsWith("595")) num = "595" + num;
-  // Validar longitud razonable (Paraguay: 595 + 9 dígitos = 12)
   if (num.length < 10 || num.length > 15) return null;
   return num;
 };
@@ -67,6 +73,9 @@ const Badge = ({ children, variant = "default" }) => {
     preparado: "bg-blue-50 text-blue-700 border border-blue-200",
     enviado: "bg-emerald-50 text-emerald-700 border border-emerald-200",
     error: "bg-red-50 text-red-700 border border-red-200",
+    coordinador: "bg-red-100 text-red-800 border border-red-300",
+    subcoordinador: "bg-blue-100 text-blue-800 border border-blue-300",
+    votante: "bg-slate-100 text-slate-700 border border-slate-300",
   };
   return (
     <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium ${variants[variant] || variants.default}`}>
@@ -118,22 +127,17 @@ const FlyerCard = React.forwardRef(({ persona }, ref) => {
       className="w-[360px] bg-white rounded-lg overflow-hidden shadow-lg"
       style={{ fontFamily: "system-ui, -apple-system, sans-serif" }}
     >
-      {/* Header rojo */}
       <div className="bg-red-600 text-white px-6 py-5 text-center">
         <p className="text-2xl font-bold tracking-tight">José Chechito López</p>
         <p className="text-red-100 text-sm mt-1 font-medium">Concejal 2026</p>
       </div>
-
-      {/* Contenido */}
       <div className="px-6 py-5">
         <p className="text-lg font-semibold text-slate-800 mb-4">
           Hola <span className="text-red-600">{nombre} {apellido}</span>
         </p>
-
         <p className="text-sm text-slate-600 mb-4">
           Te recordamos tus datos de votación:
         </p>
-
         <div className="bg-slate-50 rounded-lg p-4 space-y-2 border border-slate-200">
           <div className="flex justify-between text-sm">
             <span className="text-slate-500">Distrito:</span>
@@ -152,16 +156,12 @@ const FlyerCard = React.forwardRef(({ persona }, ref) => {
             <span className="font-semibold text-slate-700">{orden}</span>
           </div>
         </div>
-
-        {/* CTA */}
         <div className="mt-5 bg-red-50 rounded-lg p-4 text-center border border-red-200">
           <p className="text-sm text-slate-600 mb-2">Votá así:</p>
           <p className="text-xl font-bold text-red-600">Lista 2E</p>
           <p className="text-lg font-semibold text-slate-800">Opción 2</p>
         </div>
       </div>
-
-      {/* Footer */}
       <div className="bg-slate-800 text-white px-6 py-3 text-center">
         <p className="text-xs text-slate-300">José Chechito López - Concejal 2026</p>
       </div>
@@ -193,16 +193,154 @@ const Modal = ({ open, onClose, children, title }) => {
   );
 };
 
+// ======================= PERSONA ROW (Lista) =======================
+const PersonaRow = ({
+  persona,
+  actionLoading,
+  coordsMap,
+  subsMap,
+  onPrepararFlyer,
+  onVerPreview,
+  onAbrirWhatsapp,
+  onMarcarEnviado,
+  onMarcarError,
+  onVolverPendiente,
+}) => {
+  const coordNombre = persona.tipo === "subcoordinador" || persona.tipo === "votante"
+    ? coordsMap.get(normalizeCI(persona.coordinador_ci))
+    : null;
+  const subNombre = persona.tipo === "votante"
+    ? subsMap.get(normalizeCI(persona.asignado_por))
+    : null;
+
+  const tipoIcon = persona.tipo === "coordinador" ? UserCog
+    : persona.tipo === "subcoordinador" ? UserCheck
+    : User;
+
+  return (
+    <div className="p-4 hover:bg-slate-50 transition-colors">
+      <div className="flex flex-col lg:flex-row lg:items-center gap-4">
+        <div className="flex-1 min-w-0">
+          <div className="flex flex-wrap items-center gap-2 mb-1">
+            <span className="font-semibold text-slate-800 truncate">
+              {getFieldSafe(persona, "nombre", "nombres") || "Sin nombre"}{" "}
+              {getFieldSafe(persona, "apellido", "apellidos") || ""}
+            </span>
+            <Badge variant={persona.tipo}>
+              {React.createElement(tipoIcon, { className: "w-3 h-3 mr-1 inline" })}
+              {persona.tipo === "coordinador" ? "Coord" : persona.tipo === "subcoordinador" ? "Sub" : "Votante"}
+            </Badge>
+            <Badge variant={persona.estado}>{persona.estado}</Badge>
+          </div>
+          <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
+            <span>CI: {persona.ci}</span>
+            <span className="flex items-center gap-1">
+              <Phone className="w-3 h-3" />
+              {persona.telefono}
+            </span>
+            {getFieldSafe(persona, "mesa", "nro_mesa") && (
+              <span>Mesa: {getFieldSafe(persona, "mesa", "nro_mesa")}</span>
+            )}
+            {getFieldSafe(persona, "orden", "orden_votacion") && (
+              <span>Orden: {getFieldSafe(persona, "orden", "orden_votacion")}</span>
+            )}
+          </div>
+          {/* Estructura info */}
+          {(coordNombre || subNombre) && (
+            <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-400 mt-1">
+              {coordNombre && <span>Coord: {coordNombre}</span>}
+              {subNombre && <span>Sub: {subNombre}</span>}
+            </div>
+          )}
+          {persona.fecha_envio && (
+            <p className="text-xs text-emerald-600 mt-1">
+              Enviado: {new Date(persona.fecha_envio).toLocaleDateString()}
+            </p>
+          )}
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={() => onPrepararFlyer(persona)}
+            disabled={actionLoading === persona.ci}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors disabled:opacity-50"
+          >
+            <ImageIcon className="w-3.5 h-3.5" />
+            Preparar
+          </button>
+
+          <button
+            onClick={() => onVerPreview(persona)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-slate-50 text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors"
+          >
+            <Eye className="w-3.5 h-3.5" />
+            Ver
+          </button>
+
+          <button
+            onClick={() => onAbrirWhatsapp(persona)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg hover:bg-emerald-100 transition-colors"
+          >
+            <Send className="w-3.5 h-3.5" />
+            WhatsApp
+          </button>
+
+          <button
+            onClick={() => onMarcarEnviado(persona)}
+            disabled={actionLoading === persona.ci || persona.estado === "enviado"}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors disabled:opacity-50"
+          >
+            {actionLoading === persona.ci ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <Check className="w-3.5 h-3.5" />
+            )}
+            Enviado
+          </button>
+
+          {persona.estado === "error" ? (
+            <button
+              onClick={() => onVolverPendiente(persona)}
+              disabled={actionLoading === persona.ci}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-amber-100 text-amber-800 border border-amber-300 rounded-lg hover:bg-amber-200 transition-colors disabled:opacity-50"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              Pendiente
+            </button>
+          ) : (
+            <button
+              onClick={() => onMarcarError(persona)}
+              disabled={actionLoading === persona.ci}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-red-50 text-red-700 border border-red-200 rounded-lg hover:bg-red-100 transition-colors disabled:opacity-50"
+            >
+              <AlertCircle className="w-3.5 h-3.5" />
+              Error
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // ======================= MAIN COMPONENT =======================
 export default function EnviarInvitacion({ onBack }) {
   // ======================= STATE =======================
   const [loading, setLoading] = useState(true);
   const [personas, setPersonas] = useState([]);
   const [invitaciones, setInvitaciones] = useState([]);
-  const [filtro, setFiltro] = useState("todos");
+  const [filtroEstado, setFiltroEstado] = useState("todos");
+  const [filtroTipo, setFiltroTipo] = useState("todos");
   const [busqueda, setBusqueda] = useState("");
   const [actionLoading, setActionLoading] = useState(null);
   const [toast, setToast] = useState(null);
+  const [vistaMode, setVistaMode] = useState("lista"); // "lista" | "estructura"
+  const [expandedNodes, setExpandedNodes] = useState({});
+
+  // Raw data for building relationships
+  const [rawCoords, setRawCoords] = useState([]);
+  const [rawSubs, setRawSubs] = useState([]);
+  const [rawVotantes, setRawVotantes] = useState([]);
 
   // Modal states
   const [modalOpen, setModalOpen] = useState(false);
@@ -216,7 +354,6 @@ export default function EnviarInvitacion({ onBack }) {
   const cargarDatos = useCallback(async () => {
     setLoading(true);
     
-    // Cargar cada tabla independientemente para que una falla no tire todo
     let coordsData = [];
     let subsData = [];
     let votantesData = [];
@@ -226,7 +363,12 @@ export default function EnviarInvitacion({ onBack }) {
     try {
       const { data, error } = await supabase.from("coordinadores").select("*, padron(*)");
       if (error) {
-        console.error("Error cargando coordinadores:", error);
+        console.error("Error cargando coordinadores:", {
+          message: error?.message,
+          details: error?.details,
+          hint: error?.hint,
+          code: error?.code,
+        });
       } else {
         coordsData = data || [];
       }
@@ -238,7 +380,12 @@ export default function EnviarInvitacion({ onBack }) {
     try {
       const { data, error } = await supabase.from("subcoordinadores").select("*, padron(*)");
       if (error) {
-        console.error("Error cargando subcoordinadores:", error);
+        console.error("Error cargando subcoordinadores:", {
+          message: error?.message,
+          details: error?.details,
+          hint: error?.hint,
+          code: error?.code,
+        });
       } else {
         subsData = data || [];
       }
@@ -250,7 +397,12 @@ export default function EnviarInvitacion({ onBack }) {
     try {
       const { data, error } = await supabase.from("votantes").select("*, padron(*)");
       if (error) {
-        console.error("Error cargando votantes:", error);
+        console.error("Error cargando votantes:", {
+          message: error?.message,
+          details: error?.details,
+          hint: error?.hint,
+          code: error?.code,
+        });
       } else {
         votantesData = data || [];
       }
@@ -262,7 +414,12 @@ export default function EnviarInvitacion({ onBack }) {
     try {
       const { data, error } = await supabase.from("invitaciones_whatsapp").select("*").eq("campania", CAMPANIA);
       if (error) {
-        console.error("Error cargando invitaciones_whatsapp:", error);
+        console.error("Error cargando invitaciones_whatsapp:", {
+          message: error?.message,
+          details: error?.details,
+          hint: error?.hint,
+          code: error?.code,
+        });
       } else {
         invData = data || [];
       }
@@ -270,11 +427,15 @@ export default function EnviarInvitacion({ onBack }) {
       console.error("Error cargando invitaciones_whatsapp:", err);
     }
 
-    // Combinar todas las personas con teléfono
+    // Save raw data for hierarchy building
+    setRawCoords(coordsData);
+    setRawSubs(subsData);
+    setRawVotantes(votantesData);
+
+    // Build persons with phone
     const allPersonas = [];
     const seen = new Set();
 
-    // Helper para validar teléfono (votantes.telefono es numeric, otras son varchar)
     const getTelefonoStr = (p) => {
       const tel = p.telefono ?? p.padron?.telefono ?? "";
       return String(tel).replace(/\s/g, "").trim();
@@ -282,7 +443,6 @@ export default function EnviarInvitacion({ onBack }) {
 
     const addPersona = (p, tipo) => {
       const telefonoStr = getTelefonoStr(p);
-      // Solo agregar si tiene teléfono válido
       if (!telefonoStr || telefonoStr.length === 0) return;
       
       const ci = normalizeCI(p.ci);
@@ -296,30 +456,18 @@ export default function EnviarInvitacion({ onBack }) {
         ci,
         telefono: telefonoStr,
         tipo,
+        coordinador_ci: p.coordinador_ci || null,
+        asignado_por: p.asignado_por || null,
       });
     };
 
-    // Procesar en orden de prioridad (coord > sub > votante)
+    // Process in hierarchy priority order (coord > sub > votante)
     coordsData.forEach((c) => addPersona(c, "coordinador"));
     subsData.forEach((s) => addPersona(s, "subcoordinador"));
     votantesData.forEach((v) => addPersona(v, "votante"));
 
-    console.log("[v0] Datos cargados:", {
-      coordinadores: coordsData.length,
-      subcoordinadores: subsData.length,
-      votantes: votantesData.length,
-      invitaciones: invData.length,
-      personasConTelefono: allPersonas.length,
-    });
-
     setPersonas(allPersonas);
     setInvitaciones(invData);
-
-    // Si no hay datos después de cargar, mostrar warning pero no error
-    if (allPersonas.length === 0 && (coordsData.length > 0 || subsData.length > 0 || votantesData.length > 0)) {
-      showToast("No se encontraron personas con teléfono", "error");
-    }
-
     setLoading(false);
   }, []);
 
@@ -342,6 +490,25 @@ export default function EnviarInvitacion({ onBack }) {
     return map;
   }, [invitaciones]);
 
+  // Maps for names lookup
+  const coordsMap = useMemo(() => {
+    const map = new Map();
+    rawCoords.forEach((c) => {
+      const nombre = `${getFieldSafe(c.padron || c, "nombre", "nombres") || ""} ${getFieldSafe(c.padron || c, "apellido", "apellidos") || ""}`.trim() || "Sin nombre";
+      map.set(normalizeCI(c.ci), nombre);
+    });
+    return map;
+  }, [rawCoords]);
+
+  const subsMap = useMemo(() => {
+    const map = new Map();
+    rawSubs.forEach((s) => {
+      const nombre = `${getFieldSafe(s.padron || s, "nombre", "nombres") || ""} ${getFieldSafe(s.padron || s, "apellido", "apellidos") || ""}`.trim() || "Sin nombre";
+      map.set(normalizeCI(s.ci), nombre);
+    });
+    return map;
+  }, [rawSubs]);
+
   const personasConEstado = useMemo(() => {
     return personas.map((p) => {
       const inv = invitacionesMap.get(normalizeCI(p.ci));
@@ -356,10 +523,11 @@ export default function EnviarInvitacion({ onBack }) {
   }, [personas, invitacionesMap]);
 
   const contadores = useMemo(() => {
-    const counts = { total: 0, pendiente: 0, preparado: 0, enviado: 0, error: 0 };
+    const counts = { total: 0, pendiente: 0, preparado: 0, enviado: 0, error: 0, coordinador: 0, subcoordinador: 0, votante: 0 };
     personasConEstado.forEach((p) => {
       counts.total++;
       counts[p.estado] = (counts[p.estado] || 0) + 1;
+      counts[p.tipo] = (counts[p.tipo] || 0) + 1;
     });
     return counts;
   }, [personasConEstado]);
@@ -367,12 +535,17 @@ export default function EnviarInvitacion({ onBack }) {
   const personasFiltradas = useMemo(() => {
     let result = personasConEstado;
 
-    // Filtro por estado
-    if (filtro !== "todos") {
-      result = result.filter((p) => p.estado === filtro);
+    // Filter by estado
+    if (filtroEstado !== "todos") {
+      result = result.filter((p) => p.estado === filtroEstado);
     }
 
-    // Búsqueda
+    // Filter by tipo
+    if (filtroTipo !== "todos") {
+      result = result.filter((p) => p.tipo === filtroTipo);
+    }
+
+    // Search
     if (busqueda.trim()) {
       const tokens = busqueda.toLowerCase().split(" ").filter(Boolean);
       result = result.filter((p) => {
@@ -387,7 +560,91 @@ export default function EnviarInvitacion({ onBack }) {
     }
 
     return result;
-  }, [personasConEstado, filtro, busqueda]);
+  }, [personasConEstado, filtroEstado, filtroTipo, busqueda]);
+
+  // ======================= HIERARCHY DATA =======================
+  const hierarchyData = useMemo(() => {
+    // Build maps for quick lookup
+    const personasByCi = new Map();
+    personasConEstado.forEach((p) => {
+      personasByCi.set(normalizeCI(p.ci), p);
+    });
+
+    // Group subcoordinadores by coordinador_ci
+    const subsByCoord = new Map();
+    personasConEstado.filter((p) => p.tipo === "subcoordinador").forEach((s) => {
+      const coordCI = normalizeCI(s.coordinador_ci);
+      if (!subsByCoord.has(coordCI)) subsByCoord.set(coordCI, []);
+      subsByCoord.get(coordCI).push(s);
+    });
+
+    // Group votantes by asignado_por
+    const votantesByAsignador = new Map();
+    personasConEstado.filter((p) => p.tipo === "votante").forEach((v) => {
+      const asignadoPor = normalizeCI(v.asignado_por);
+      if (!votantesByAsignador.has(asignadoPor)) votantesByAsignador.set(asignadoPor, []);
+      votantesByAsignador.get(asignadoPor).push(v);
+    });
+
+    // Build hierarchy
+    const coordinadores = personasConEstado.filter((p) => p.tipo === "coordinador");
+    
+    // Find subs without a valid coord
+    const allCoordCIs = new Set(coordinadores.map((c) => normalizeCI(c.ci)));
+    const subsWithoutCoord = personasConEstado.filter(
+      (p) => p.tipo === "subcoordinador" && !allCoordCIs.has(normalizeCI(p.coordinador_ci))
+    );
+
+    // Find votantes without valid asignador (neither coord nor sub with phone)
+    const allAsignadores = new Set([...allCoordCIs, ...personasConEstado.filter((p) => p.tipo === "subcoordinador").map((s) => normalizeCI(s.ci))]);
+    const votantesSinEstructura = personasConEstado.filter(
+      (p) => p.tipo === "votante" && !allAsignadores.has(normalizeCI(p.asignado_por))
+    );
+
+    // Helper to count stats for a group
+    const getStats = (items) => {
+      const stats = { total: 0, pendiente: 0, enviado: 0, error: 0, preparado: 0 };
+      items.forEach((p) => {
+        stats.total++;
+        stats[p.estado] = (stats[p.estado] || 0) + 1;
+      });
+      return stats;
+    };
+
+    // Build coord structures
+    const estructuraCoords = coordinadores.map((coord) => {
+      const coordCI = normalizeCI(coord.ci);
+      const mySubs = subsByCoord.get(coordCI) || [];
+      const myDirectVotantes = votantesByAsignador.get(coordCI) || [];
+
+      // All votantes under this coord (direct + via subs)
+      let allMyVotantes = [...myDirectVotantes];
+      mySubs.forEach((sub) => {
+        const subVotantes = votantesByAsignador.get(normalizeCI(sub.ci)) || [];
+        allMyVotantes = [...allMyVotantes, ...subVotantes];
+      });
+
+      const subsWithVotantes = mySubs.map((sub) => ({
+        ...sub,
+        votantes: votantesByAsignador.get(normalizeCI(sub.ci)) || [],
+      }));
+
+      return {
+        ...coord,
+        subcoordinadores: subsWithVotantes,
+        votantesDirectos: myDirectVotantes,
+        stats: getStats([coord, ...mySubs, ...allMyVotantes]),
+      };
+    });
+
+    return {
+      coordinadores: estructuraCoords,
+      subsWithoutCoord,
+      votantesSinEstructura,
+      subsByCoord,
+      votantesByAsignador,
+    };
+  }, [personasConEstado]);
 
   // ======================= ACTIONS =======================
   const upsertInvitacion = async (ci, telefono, updates) => {
@@ -418,7 +675,6 @@ export default function EnviarInvitacion({ onBack }) {
     setGenerandoFlyer(true);
     setFlyerBlob(null);
 
-    // Esperar a que el DOM renderice el flyer
     setTimeout(async () => {
       try {
         if (!flyerRef.current) throw new Error("Flyer no disponible");
@@ -439,7 +695,6 @@ export default function EnviarInvitacion({ onBack }) {
           setFlyerBlob(blob);
           setGenerandoFlyer(false);
 
-          // Guardar en DB como preparado
           try {
             await upsertInvitacion(persona.ci, persona.telefono, {
               estado: "preparado",
@@ -469,7 +724,6 @@ export default function EnviarInvitacion({ onBack }) {
 
   const handleDescargarFlyer = async () => {
     if (!flyerBlob && flyerRef.current) {
-      // Generar si no existe
       const canvas = await html2canvas(flyerRef.current, {
         scale: 2,
         useCORS: true,
@@ -594,6 +848,27 @@ José Chechito López - Concejal
     }
   };
 
+  const handleVolverPendiente = async (persona) => {
+    setActionLoading(persona.ci);
+    try {
+      await upsertInvitacion(persona.ci, persona.telefono, {
+        estado: "pendiente",
+        observacion: null,
+      });
+      await cargarDatos();
+      showToast("Vuelto a pendiente");
+    } catch (err) {
+      console.error("Error volviendo a pendiente:", err);
+      showToast("Error al guardar", "error");
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const toggleExpanded = (key) => {
+    setExpandedNodes((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
+
   // ======================= RENDER =======================
   return (
     <div className="min-h-screen bg-slate-100">
@@ -633,28 +908,81 @@ José Chechito López - Concejal
 
         {/* Filtros y búsqueda */}
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 mb-6">
-          <div className="flex flex-col sm:flex-row gap-4">
-            {/* Filtros */}
-            <div className="flex flex-wrap gap-2">
-              {[
-                { key: "todos", label: "Todos" },
-                { key: "pendiente", label: "Pendientes" },
-                { key: "preparado", label: "Preparados" },
-                { key: "enviado", label: "Enviados" },
-                { key: "error", label: "Error" },
-              ].map((f) => (
-                <button
-                  key={f.key}
-                  onClick={() => setFiltro(f.key)}
-                  className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
-                    filtro === f.key
-                      ? "bg-brand-600 text-white"
-                      : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                  }`}
-                >
-                  {f.label}
-                </button>
-              ))}
+          <div className="flex flex-col gap-4">
+            {/* Vista selector */}
+            <div className="flex flex-wrap gap-2 items-center">
+              <span className="text-xs font-medium text-slate-500 mr-2">Vista:</span>
+              <button
+                onClick={() => setVistaMode("lista")}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
+                  vistaMode === "lista"
+                    ? "bg-brand-600 text-white"
+                    : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                }`}
+              >
+                <List className="w-4 h-4" />
+                Lista
+              </button>
+              <button
+                onClick={() => setVistaMode("estructura")}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
+                  vistaMode === "estructura"
+                    ? "bg-brand-600 text-white"
+                    : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                }`}
+              >
+                <Network className="w-4 h-4" />
+                Estructura
+              </button>
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-4">
+              {/* Filtros Estado */}
+              <div className="flex flex-wrap gap-2">
+                <span className="text-xs font-medium text-slate-500 self-center mr-1">Estado:</span>
+                {[
+                  { key: "todos", label: "Todos" },
+                  { key: "pendiente", label: "Pendientes" },
+                  { key: "preparado", label: "Preparados" },
+                  { key: "enviado", label: "Enviados" },
+                  { key: "error", label: "Error" },
+                ].map((f) => (
+                  <button
+                    key={f.key}
+                    onClick={() => setFiltroEstado(f.key)}
+                    className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
+                      filtroEstado === f.key
+                        ? "bg-brand-600 text-white"
+                        : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                    }`}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Filtros Tipo */}
+              <div className="flex flex-wrap gap-2">
+                <span className="text-xs font-medium text-slate-500 self-center mr-1">Tipo:</span>
+                {[
+                  { key: "todos", label: "Todos" },
+                  { key: "coordinador", label: "Coords" },
+                  { key: "subcoordinador", label: "Subs" },
+                  { key: "votante", label: "Votantes" },
+                ].map((f) => (
+                  <button
+                    key={f.key}
+                    onClick={() => setFiltroTipo(f.key)}
+                    className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
+                      filtroTipo === f.key
+                        ? "bg-brand-600 text-white"
+                        : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                    }`}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+              </div>
             </div>
 
             {/* Buscador */}
@@ -671,118 +999,303 @@ José Chechito López - Concejal
           </div>
         </div>
 
-        {/* Lista */}
+        {/* Content */}
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
           {loading ? (
             <div className="flex items-center justify-center py-20">
               <Loader2 className="w-8 h-8 text-brand-600 animate-spin" />
             </div>
-          ) : personasFiltradas.length === 0 ? (
-            <div className="text-center py-20">
-              <Users className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-              <p className="text-slate-500">No se encontraron personas con teléfono.</p>
-            </div>
+          ) : vistaMode === "lista" ? (
+            // ======================= VISTA LISTA =======================
+            personasFiltradas.length === 0 ? (
+              <div className="text-center py-20">
+                <Users className="w-12 h-12 text-slate-300 mx-auto mb-3" />
+                <p className="text-slate-500">No se encontraron personas.</p>
+              </div>
+            ) : (
+              <div className="divide-y divide-slate-100">
+                {personasFiltradas.map((persona) => (
+                  <PersonaRow
+                    key={persona.ci}
+                    persona={persona}
+                    actionLoading={actionLoading}
+                    coordsMap={coordsMap}
+                    subsMap={subsMap}
+                    onPrepararFlyer={handlePrepararFlyer}
+                    onVerPreview={handleVerPreview}
+                    onAbrirWhatsapp={handleAbrirWhatsapp}
+                    onMarcarEnviado={handleMarcarEnviado}
+                    onMarcarError={handleMarcarError}
+                    onVolverPendiente={handleVolverPendiente}
+                  />
+                ))}
+              </div>
+            )
           ) : (
-            <div className="divide-y divide-slate-100">
-              {personasFiltradas.map((persona) => (
-                <div
-                  key={persona.ci}
-                  className="p-4 hover:bg-slate-50 transition-colors"
-                >
-                  <div className="flex flex-col lg:flex-row lg:items-center gap-4">
-                    {/* Info */}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex flex-wrap items-center gap-2 mb-1">
-                        <span className="font-semibold text-slate-800 truncate">
-                          {getFieldSafe(persona, "nombre", "nombres") || "Sin nombre"}{" "}
-                          {getFieldSafe(persona, "apellido", "apellidos") || ""}
-                        </span>
-                        <Badge variant={persona.estado}>{persona.estado}</Badge>
-                      </div>
-                      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
-                        <span>CI: {persona.ci}</span>
-                        <span className="flex items-center gap-1">
-                          <Phone className="w-3 h-3" />
-                          {persona.telefono}
-                        </span>
-                        {getFieldSafe(persona, "distrito", "departamento") && (
-                          <span>Distrito: {getFieldSafe(persona, "distrito", "departamento")}</span>
-                        )}
-                        {getFieldSafe(persona, "local_votacion", "local_de_votacion", "local") && (
-                          <span>Local: {getFieldSafe(persona, "local_votacion", "local_de_votacion", "local")}</span>
-                        )}
-                        {getFieldSafe(persona, "mesa", "nro_mesa") && (
-                          <span>Mesa: {getFieldSafe(persona, "mesa", "nro_mesa")}</span>
-                        )}
-                        {getFieldSafe(persona, "orden", "orden_votacion") && (
-                          <span>Orden: {getFieldSafe(persona, "orden", "orden_votacion")}</span>
-                        )}
-                      </div>
-                      {persona.fecha_envio && (
-                        <p className="text-xs text-emerald-600 mt-1">
-                          Enviado: {new Date(persona.fecha_envio).toLocaleDateString()}
-                        </p>
+            // ======================= VISTA ESTRUCTURA =======================
+            <div className="divide-y divide-slate-200">
+              {/* Coordinadores */}
+              {hierarchyData.coordinadores.map((coord) => {
+                const coordKey = `coord-${coord.ci}`;
+                const isExpanded = expandedNodes[coordKey];
+                const stats = coord.stats;
+
+                return (
+                  <div key={coord.ci} className="bg-white">
+                    {/* Coord header */}
+                    <div
+                      className="flex items-center gap-3 p-4 cursor-pointer hover:bg-slate-50"
+                      onClick={() => toggleExpanded(coordKey)}
+                    >
+                      {isExpanded ? (
+                        <ChevronDown className="w-5 h-5 text-brand-600 shrink-0" />
+                      ) : (
+                        <ChevronRight className="w-5 h-5 text-brand-600 shrink-0" />
                       )}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge variant="coordinador">
+                            <UserCog className="w-3 h-3 mr-1" />
+                            Coordinador
+                          </Badge>
+                          <span className="font-semibold text-slate-800">
+                            {getFieldSafe(coord, "nombre", "nombres")} {getFieldSafe(coord, "apellido", "apellidos")}
+                          </span>
+                          <Badge variant={coord.estado}>{coord.estado}</Badge>
+                        </div>
+                        <div className="flex flex-wrap gap-3 text-xs text-slate-500 mt-1">
+                          <span>Total: {stats.total}</span>
+                          <span className="text-amber-600">Pend: {stats.pendiente}</span>
+                          <span className="text-emerald-600">Env: {stats.enviado}</span>
+                          <span className="text-red-600">Err: {stats.error}</span>
+                        </div>
+                      </div>
                     </div>
 
-                    {/* Acciones */}
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        onClick={() => handlePrepararFlyer(persona)}
-                        disabled={actionLoading === persona.ci}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors disabled:opacity-50"
-                      >
-                        <ImageIcon className="w-3.5 h-3.5" />
-                        Preparar flyer
-                      </button>
+                    {/* Coord content expanded */}
+                    {isExpanded && (
+                      <div className="border-t border-slate-100 bg-slate-50/50">
+                        {/* Coord person actions */}
+                        <div className="px-4 py-2 bg-red-50/50 border-b border-slate-100">
+                          <PersonaRow
+                            persona={coord}
+                            actionLoading={actionLoading}
+                            coordsMap={coordsMap}
+                            subsMap={subsMap}
+                            onPrepararFlyer={handlePrepararFlyer}
+                            onVerPreview={handleVerPreview}
+                            onAbrirWhatsapp={handleAbrirWhatsapp}
+                            onMarcarEnviado={handleMarcarEnviado}
+                            onMarcarError={handleMarcarError}
+                            onVolverPendiente={handleVolverPendiente}
+                          />
+                        </div>
 
-                      <button
-                        onClick={() => handleVerPreview(persona)}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-slate-50 text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors"
-                      >
-                        <Eye className="w-3.5 h-3.5" />
-                        Ver preview
-                      </button>
+                        {/* Subs */}
+                        {coord.subcoordinadores.map((sub) => {
+                          const subKey = `sub-${sub.ci}`;
+                          const subExpanded = expandedNodes[subKey];
+                          const subVotantes = sub.votantes || [];
 
-                      <button
-                        onClick={() => handleAbrirWhatsapp(persona)}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg hover:bg-emerald-100 transition-colors"
-                      >
-                        <Send className="w-3.5 h-3.5" />
-                        Abrir WhatsApp
-                      </button>
+                          return (
+                            <div key={sub.ci} className="border-t border-slate-100">
+                              {/* Sub header */}
+                              <div
+                                className="flex items-center gap-3 p-3 pl-8 cursor-pointer hover:bg-slate-100"
+                                onClick={() => toggleExpanded(subKey)}
+                              >
+                                {subExpanded ? (
+                                  <ChevronDown className="w-4 h-4 text-blue-600 shrink-0" />
+                                ) : (
+                                  <ChevronRight className="w-4 h-4 text-blue-600 shrink-0" />
+                                )}
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <Badge variant="subcoordinador">
+                                      <UserCheck className="w-3 h-3 mr-1" />
+                                      Sub
+                                    </Badge>
+                                    <span className="font-medium text-slate-700">
+                                      {getFieldSafe(sub, "nombre", "nombres")} {getFieldSafe(sub, "apellido", "apellidos")}
+                                    </span>
+                                    <Badge variant={sub.estado}>{sub.estado}</Badge>
+                                    <span className="text-xs text-slate-400">({subVotantes.length} votantes)</span>
+                                  </div>
+                                </div>
+                              </div>
 
-                      <button
-                        onClick={() => handleMarcarEnviado(persona)}
-                        disabled={actionLoading === persona.ci || persona.estado === "enviado"}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors disabled:opacity-50"
-                      >
-                        {actionLoading === persona.ci ? (
-                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                        ) : (
-                          <Check className="w-3.5 h-3.5" />
+                              {/* Sub expanded */}
+                              {subExpanded && (
+                                <div className="bg-blue-50/30 border-t border-slate-100">
+                                  {/* Sub person actions */}
+                                  <div className="px-4 py-2 pl-12 bg-blue-50/50 border-b border-slate-100">
+                                    <PersonaRow
+                                      persona={sub}
+                                      actionLoading={actionLoading}
+                                      coordsMap={coordsMap}
+                                      subsMap={subsMap}
+                                      onPrepararFlyer={handlePrepararFlyer}
+                                      onVerPreview={handleVerPreview}
+                                      onAbrirWhatsapp={handleAbrirWhatsapp}
+                                      onMarcarEnviado={handleMarcarEnviado}
+                                      onMarcarError={handleMarcarError}
+                                      onVolverPendiente={handleVolverPendiente}
+                                    />
+                                  </div>
+                                  {/* Votantes of this sub */}
+                                  {subVotantes.map((v) => (
+                                    <div key={v.ci} className="pl-12 border-t border-slate-100">
+                                      <PersonaRow
+                                        persona={v}
+                                        actionLoading={actionLoading}
+                                        coordsMap={coordsMap}
+                                        subsMap={subsMap}
+                                        onPrepararFlyer={handlePrepararFlyer}
+                                        onVerPreview={handleVerPreview}
+                                        onAbrirWhatsapp={handleAbrirWhatsapp}
+                                        onMarcarEnviado={handleMarcarEnviado}
+                                        onMarcarError={handleMarcarError}
+                                        onVolverPendiente={handleVolverPendiente}
+                                      />
+                                    </div>
+                                  ))}
+                                  {subVotantes.length === 0 && (
+                                    <p className="text-xs text-slate-400 py-3 pl-12">Sin votantes con teléfono</p>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+
+                        {/* Direct voters of coord */}
+                        {coord.votantesDirectos.length > 0 && (
+                          <div className="border-t border-slate-200">
+                            <p className="text-xs font-semibold text-slate-500 px-4 py-2 pl-8 bg-slate-100">
+                              Votantes directos del coordinador ({coord.votantesDirectos.length})
+                            </p>
+                            {coord.votantesDirectos.map((v) => (
+                              <div key={v.ci} className="pl-8 border-t border-slate-100">
+                                <PersonaRow
+                                  persona={v}
+                                  actionLoading={actionLoading}
+                                  coordsMap={coordsMap}
+                                  subsMap={subsMap}
+                                  onPrepararFlyer={handlePrepararFlyer}
+                                  onVerPreview={handleVerPreview}
+                                  onAbrirWhatsapp={handleAbrirWhatsapp}
+                                  onMarcarEnviado={handleMarcarEnviado}
+                                  onMarcarError={handleMarcarError}
+                                  onVolverPendiente={handleVolverPendiente}
+                                />
+                              </div>
+                            ))}
+                          </div>
                         )}
-                        Marcar enviado
-                      </button>
 
-                      <button
-                        onClick={() => handleMarcarError(persona)}
-                        disabled={actionLoading === persona.ci}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-red-50 text-red-700 border border-red-200 rounded-lg hover:bg-red-100 transition-colors disabled:opacity-50"
-                      >
-                        <AlertCircle className="w-3.5 h-3.5" />
-                        Error
-                      </button>
+                        {coord.subcoordinadores.length === 0 && coord.votantesDirectos.length === 0 && (
+                          <p className="text-xs text-slate-400 py-3 pl-8">Sin estructura asignada</p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+
+              {/* Subs without coord */}
+              {hierarchyData.subsWithoutCoord.length > 0 && (
+                <div className="bg-amber-50/50">
+                  <div
+                    className="flex items-center gap-3 p-4 cursor-pointer hover:bg-amber-100/50"
+                    onClick={() => toggleExpanded("subs-sin-coord")}
+                  >
+                    {expandedNodes["subs-sin-coord"] ? (
+                      <ChevronDown className="w-5 h-5 text-amber-600 shrink-0" />
+                    ) : (
+                      <ChevronRight className="w-5 h-5 text-amber-600 shrink-0" />
+                    )}
+                    <div className="flex-1">
+                      <p className="font-semibold text-amber-800">Subcoordinadores sin coordinador</p>
+                      <p className="text-xs text-amber-600">{hierarchyData.subsWithoutCoord.length} personas</p>
                     </div>
                   </div>
+                  {expandedNodes["subs-sin-coord"] && (
+                    <div className="border-t border-amber-200">
+                      {hierarchyData.subsWithoutCoord.map((s) => (
+                        <div key={s.ci} className="border-t border-amber-100 first:border-t-0">
+                          <PersonaRow
+                            persona={s}
+                            actionLoading={actionLoading}
+                            coordsMap={coordsMap}
+                            subsMap={subsMap}
+                            onPrepararFlyer={handlePrepararFlyer}
+                            onVerPreview={handleVerPreview}
+                            onAbrirWhatsapp={handleAbrirWhatsapp}
+                            onMarcarEnviado={handleMarcarEnviado}
+                            onMarcarError={handleMarcarError}
+                            onVolverPendiente={handleVolverPendiente}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
-              ))}
+              )}
+
+              {/* Votantes without structure */}
+              {hierarchyData.votantesSinEstructura.length > 0 && (
+                <div className="bg-slate-100/50">
+                  <div
+                    className="flex items-center gap-3 p-4 cursor-pointer hover:bg-slate-200/50"
+                    onClick={() => toggleExpanded("votantes-sin-estructura")}
+                  >
+                    {expandedNodes["votantes-sin-estructura"] ? (
+                      <ChevronDown className="w-5 h-5 text-slate-600 shrink-0" />
+                    ) : (
+                      <ChevronRight className="w-5 h-5 text-slate-600 shrink-0" />
+                    )}
+                    <div className="flex-1">
+                      <p className="font-semibold text-slate-700">Votantes sin estructura asignada</p>
+                      <p className="text-xs text-slate-500">{hierarchyData.votantesSinEstructura.length} personas</p>
+                    </div>
+                  </div>
+                  {expandedNodes["votantes-sin-estructura"] && (
+                    <div className="border-t border-slate-200">
+                      {hierarchyData.votantesSinEstructura.map((v) => (
+                        <div key={v.ci} className="border-t border-slate-100 first:border-t-0">
+                          <PersonaRow
+                            persona={v}
+                            actionLoading={actionLoading}
+                            coordsMap={coordsMap}
+                            subsMap={subsMap}
+                            onPrepararFlyer={handlePrepararFlyer}
+                            onVerPreview={handleVerPreview}
+                            onAbrirWhatsapp={handleAbrirWhatsapp}
+                            onMarcarEnviado={handleMarcarEnviado}
+                            onMarcarError={handleMarcarError}
+                            onVolverPendiente={handleVolverPendiente}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {hierarchyData.coordinadores.length === 0 &&
+                hierarchyData.subsWithoutCoord.length === 0 &&
+                hierarchyData.votantesSinEstructura.length === 0 && (
+                  <div className="text-center py-20">
+                    <Users className="w-12 h-12 text-slate-300 mx-auto mb-3" />
+                    <p className="text-slate-500">No hay datos de estructura.</p>
+                  </div>
+                )}
             </div>
           )}
         </div>
 
         {/* Contador resultados */}
-        {!loading && personasFiltradas.length > 0 && (
+        {!loading && vistaMode === "lista" && personasFiltradas.length > 0 && (
           <p className="text-xs text-slate-500 mt-3 text-center">
             Mostrando {personasFiltradas.length} de {contadores.total} personas
           </p>
@@ -801,12 +1314,10 @@ José Chechito López - Concejal
       >
         {modalPersona && (
           <div className="flex flex-col items-center">
-            {/* Flyer */}
             <div className="mb-4">
               <FlyerCard ref={flyerRef} persona={modalPersona} />
             </div>
 
-            {/* Loading */}
             {generandoFlyer && (
               <div className="flex items-center gap-2 text-sm text-slate-600 mb-4">
                 <Loader2 className="w-4 h-4 animate-spin" />
@@ -814,7 +1325,6 @@ José Chechito López - Concejal
               </div>
             )}
 
-            {/* Botones */}
             <div className="flex flex-wrap gap-2 justify-center">
               <button
                 onClick={handleDescargarFlyer}
