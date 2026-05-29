@@ -25,12 +25,14 @@ import {
   ClipboardList,
   Printer,
   ArrowLeft,
+  MessageCircle,
 } from "lucide-react";
 
 import AddPersonModal from "../AddPersonModal";
 import ModalTelefono from "./ModalTelefono";
 import ModalDireccion from "./ModalDireccion";
 import ConfirmVotoModal from "./ConfirmVotoModal";
+import EnviarInvitacion from "./EnviarInvitacion";
 import {
   generateSuperadminPDF,
   generateCoordinadorPDF,
@@ -322,6 +324,9 @@ const Dashboard = ({ currentUser, onLogout }) => {
   const [verificarOpen, setVerificarOpen] = useState(false);
   const [verificarCoordCI, setVerificarCoordCI] = useState("");
   const [verificarPrinting, setVerificarPrinting] = useState(null); // "coord" | "sub-<ci>"
+
+  // Enviar invitación module (superadmin only)
+  const [invitacionOpen, setInvitacionOpen] = useState(false);
 
   // Non-blocking toast notification (replaces alert() to prevent scroll jump)
   const [toastMsg, setToastMsg] = useState(null);
@@ -1040,8 +1045,14 @@ setPadron(data.padron || []);
   }[currentUser.role] ?? currentUser.role;
 
   // ======================= UI =======================
+  
+  // Show EnviarInvitacion module (superadmin only)
+  if (invitacionOpen && currentUser.role === "superadmin") {
+    return <EnviarInvitacion onBack={() => setInvitacionOpen(false)} />;
+  }
+
   return (
-    <div className="min-h-screen bg-slate-100">
+<div className="min-h-screen bg-slate-100">
       {/* LOADING SPLASH */}
       {loadingEstructura && (
         <div className="fixed inset-0 z-50 bg-white/95 backdrop-blur-sm flex flex-col items-center justify-center">
@@ -1165,6 +1176,16 @@ setPadron(data.padron || []);
             >
               <ClipboardList className="w-4 h-4" />
               Verificar estructura
+            </button>
+          )}
+
+          {currentUser.role === "superadmin" && (
+            <button
+              onClick={() => setInvitacionOpen(true)}
+              className="inline-flex items-center gap-2 border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 px-4 h-10 rounded-xl text-sm font-medium transition-colors w-full sm:w-auto shadow-sm"
+            >
+              <MessageCircle className="w-4 h-4" />
+              Enviar invitación
             </button>
           )}
 
