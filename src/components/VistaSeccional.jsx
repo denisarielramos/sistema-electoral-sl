@@ -56,13 +56,14 @@ const StatCard = ({ label, value, icon: Icon, color = "brand" }) => {
 // ======================= MAIN COMPONENT =======================
 export default function VistaSeccional({ onBack }) {
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
 
-  // Raw data
-  const [padronData, setPadronData] = useState([]);
+  // Raw data from tables
   const [coordsData, setCoordsData] = useState([]);
   const [subsData, setSubsData] = useState([]);
   const [votantesData, setVotantesData] = useState([]);
+  const [padronMap, setPadronMap] = useState(new Map());
 
   // Filters
   const [filtroSeccional, setFiltroSeccional] = useState("");
@@ -73,30 +74,105 @@ export default function VistaSeccional({ onBack }) {
   const cargarDatos = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
     else setLoading(true);
+    setError(null);
 
     try {
-      // Load all tables separately
-      const [padronRes, coordsRes, subsRes, votantesRes] = await Promise.allSettled([
-        supabase.from("padron").select("ci, nombre, apellido, seccional, local_votacion, mesa, orden, direccion"),
-        supabase.from("coordinadores").select("ci"),
-        supabase.from("subcoordinadores").select("ci"),
-        supabase.from("votantes").select("ci, direccion_override"),
-      ]);
+      console.log("[VistaSeccional] Iniciando carga de datos...");
 
-      if (padronRes.status === "fulfilled" && !padronRes.value.error) {
-        setPadronData(padronRes.value.data || []);
+      // 1. Load coordinadores
+      let coords = [];
+      try {
+        const { data, error: err } = await supabase
+          .from("coordinadores")
+          .select("ci");
+        if (err) {
+          console.error("[VistaSeccional] Error cargando coordinadores:", err);
+        } else {
+          coords = data || [];
+        }
+      } catch (e) {
+        console.error("[VistaSeccional] Error cargando coordinadores:", e);
       }
-      if (coordsRes.status === "fulfilled" && !coordsRes.value.error) {
-        setCoordsData(coordsRes.value.data || []);
+      console.log("[VistaSeccional] coordinadores:", coords.length);
+
+      // 2. Load subcoordinadores
+      let subs = [];
+      try {
+        const { data, error: err } = await supabase
+          .from("subcoordinadores")
+          .select("ci");
+        if (err) {
+          console.error("[VistaSeccional] Error cargando subcoordinadores:", err);
+        } else {
+          subs = data || [];
+        }
+      } catch (e) {
+        console.error("[VistaSeccional] Error cargando subcoordinadores:", e);
       }
-      if (subsRes.status === "fulfilled" && !subsRes.value.error) {
-        setSubsData(subsRes.value.data || []);
+      console.log("[VistaSeccional] subcoordinadores:", subs.length);
+
+      // 3. Load votantes
+      let votantes = [];
+      try {
+        const { data, error: err } = await supabase
+          .from("votantes")
+          .select("ci, direccion_override");
+        if (err) {
+          console.error("[VistaSeccional] Error cargando votantes:", err);
+        } else {
+          votantes = data || [];
+        }
+      } catch (e) {
+        console.error("[VistaSeccional] Error cargando votantes:", e);
       }
-      if (votantesRes.status === "fulfilled" && !votantesRes.value.error) {
-        setVotantesData(votantesRes.value.data || []);
+      console.log("[VistaSeccional] votantes:", votantes.length);
+
+      // 4. Collect unique CIs
+      const cisSet = new Set();
+      coords.forEach((c) => cisSet.add(normalizeCI(c.ci)));
+      subs.forEach((s) => cisSet.add(normalizeCI(s.ci)));
+      votantes.forEach((v) => cisSet.add(normalizeCI(v.ci)));
+      const cisUnicos = Array.from(cisSet).filter((ci) => ci.length > 0);
+      console.log("[VistaSeccional] cis únicos:", cisUnicos.length);
+
+      // 5. Load padron ONLY for those CIs (in chunks of 500)
+      const padronData = [];
+      const chunkSize = 500;
+      for (let i = 0; i < cisUnicos.length; i += chunkSize) {
+        const chunk = cisUnicos.slice(i, i + chunkSize);
+        try {
+          const { data, error: err } = await supabase
+            .from("padron")
+            .select("ci, nombre, apellido, seccional, local_votacion, mesa, orden, direccion")
+            .in("ci", chunk);
+          if (err) {
+            console.error("[VistaSeccional] Error cargando padron chunk:", err);
+          } else {
+            padronData.push(...(data || []));
+          }
+        } catch (e) {
+          console.error("[VistaSeccional] Error cargando padron chunk:", e);
+        }
       }
+      console.log("[VistaSeccional] padron encontrado:", padronData.length);
+
+      // 6. Build padron map
+      const pMap = new Map();
+      padronData.forEach((p) => {
+        pMap.set(normalizeCI(p.ci), p);
+      });
+
+      // 7. Set state
+      setCoordsData(coords);
+      setSubsData(subs);
+      setVotantesData(votantes);
+      setPadronMap(pMap);
+
+      console.log("[VistaSeccional] Carga completada.");
+
     } catch (err) {
-      console.error("Error cargando datos:", err);
+      console.error("[VistaSeccional] Error general cargando personas por seccional:", err);
+      setError(err?.message || "Error al cargar datos");
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -106,15 +182,6 @@ export default function VistaSeccional({ onBack }) {
   useEffect(() => {
     cargarDatos();
   }, [cargarDatos]);
-
-  // ======================= BUILD PADRON MAP =======================
-  const padronMap = useMemo(() => {
-    const map = new Map();
-    padronData.forEach((p) => {
-      map.set(normalizeCI(p.ci), p);
-    });
-    return map;
-  }, [padronData]);
 
   // ======================= BUILD PERSONAS LIST =======================
   const personas = useMemo(() => {
@@ -176,6 +243,8 @@ export default function VistaSeccional({ onBack }) {
         direccion: v.direccion_override || padron?.direccion || "Sin dato",
       });
     });
+
+    console.log("[VistaSeccional] personas finales:", list.length);
 
     // Sort by seccional, then by rol, then by nombre
     list.sort((a, b) => {
@@ -345,8 +414,19 @@ export default function VistaSeccional({ onBack }) {
           </div>
 
           {loading ? (
-            <div className="flex items-center justify-center py-20">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600" />
+            <div className="flex flex-col items-center justify-center py-20">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600 mb-3" />
+              <p className="text-sm text-slate-500">Cargando personas por seccional...</p>
+            </div>
+          ) : error ? (
+            <div className="text-center py-20">
+              <p className="text-red-600 mb-2">Error: {error}</p>
+              <button
+                onClick={() => cargarDatos()}
+                className="text-brand-600 hover:underline text-sm"
+              >
+                Reintentar
+              </button>
             </div>
           ) : personasFiltradas.length === 0 ? (
             <div className="text-center py-20">
