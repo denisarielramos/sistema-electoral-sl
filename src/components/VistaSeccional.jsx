@@ -305,12 +305,15 @@ export default function VistaSeccional({ onBack }) {
   }, [personas, filtroSeccional, filtroRol, searchQuery]);
 
   // ======================= STATS =======================
+  // Computed from personasFiltradas so cards always match what's shown in the table
+  const hayFiltros = filtroSeccional !== "" || filtroRol !== "" || searchQuery.trim() !== "";
+
   const stats = useMemo(() => ({
-    total: coordsData.length + subsData.length + votantesData.length,
-    coordinadores: coordsData.length,
-    subcoordinadores: subsData.length,
-    votantes: votantesData.length,
-  }), [coordsData, subsData, votantesData]);
+    total: personasFiltradas.length,
+    coordinadores: personasFiltradas.filter((p) => p.rol === "Coordinador").length,
+    subcoordinadores: personasFiltradas.filter((p) => p.rol === "Subcoordinador").length,
+    votantes: personasFiltradas.filter((p) => p.rol === "Votante").length,
+  }), [personasFiltradas]);
 
   // ======================= RENDER =======================
   return (
@@ -346,11 +349,18 @@ export default function VistaSeccional({ onBack }) {
 
       <main className="max-w-7xl mx-auto px-4 py-6 space-y-6">
         {/* Stats Cards */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <StatCard label="TOTAL PERSONAS" value={stats.total} icon={Users} color="brand" />
-          <StatCard label="COORDINADORES" value={stats.coordinadores} icon={UserCog} color="red" />
-          <StatCard label="SUBCOORDINADORES" value={stats.subcoordinadores} icon={UserCheck} color="blue" />
-          <StatCard label="VOTANTES" value={stats.votantes} icon={User} color="slate" />
+        <div className="space-y-2">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <StatCard label="TOTAL PERSONAS" value={stats.total} icon={Users} color="brand" />
+            <StatCard label="COORDINADORES" value={stats.coordinadores} icon={UserCog} color="red" />
+            <StatCard label="SUBCOORDINADORES" value={stats.subcoordinadores} icon={UserCheck} color="blue" />
+            <StatCard label="VOTANTES" value={stats.votantes} icon={User} color="slate" />
+          </div>
+          {hayFiltros && (
+            <p className="text-xs text-brand-600 font-medium text-right">
+              Mostrando resultados filtrados
+            </p>
+          )}
         </div>
 
         {/* Filters */}
