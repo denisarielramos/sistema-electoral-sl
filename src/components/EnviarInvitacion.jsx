@@ -968,7 +968,28 @@ export default function EnviarInvitacion({ onBack }) {
   const mesa = getFieldSafe(persona, "mesa", "nro_mesa") || "Sin dato";
   const orden = getFieldSafe(persona, "orden", "orden_votacion") || "Sin dato";
 
-  const mensaje = `Hola *${nombre}* 👋\nTe saluda el equipo de *José Chechito López*.\n\n*Estos son tus datos de votación:*\n\n📍 *Local:* *${local}*\n🧾 *Mesa:* *${mesa}*\n🔢 *Orden:* *${orden}*\n\n🚩 *Este 7 de Junio votá así:*\n\n🔴 *Lista 2E - Opción 2*\n\n*José Chechito López - Concejal*\n\n¡Tu apoyo es muy importante! 🙌🇵🇾`;
+  const EMOJI = {
+    saludo:   "\u{1F44B}",
+    local:    "\u{1F4CD}",
+    mesa:     "\u{1F9FE}",
+    orden:    "\u{1F522}",
+    bandera:  "\u{1F6A9}",
+    rojo:     "\u{1F534}",
+    apoyo:    "\u{1F64C}",
+    paraguay: "\u{1F1F5}\u{1F1FE}",
+  };
+
+  const mensaje =
+    `Hola *${nombre}* ${EMOJI.saludo}\n` +
+    `Te saluda el equipo de *José Chechito López*.\n\n` +
+    `*Estos son tus datos de votación:*\n\n` +
+    `${EMOJI.local} *Local:* *${local}*\n` +
+    `${EMOJI.mesa} *Mesa:* *${mesa}*\n` +
+    `${EMOJI.orden} *Orden:* *${orden}*\n\n` +
+    `${EMOJI.bandera} *Este 7 de Junio votá así:*\n\n` +
+    `${EMOJI.rojo} *Lista 2E - Opción 2*\n\n` +
+    `*José Chechito López - Concejal*\n\n` +
+    `¡Tu apoyo es muy importante! ${EMOJI.apoyo}${EMOJI.paraguay}`;
 
     const url = `https://wa.me/${numNorm}?text=${encodeURIComponent(mensaje)}`;
     window.open(url, "_blank");
