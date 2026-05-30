@@ -70,6 +70,10 @@ export default function VistaSeccional({ onBack }) {
   const [filtroRol, setFiltroRol] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
 
+  // Pagination
+  const ITEMS_PER_PAGE = 50;
+  const [currentPage, setCurrentPage] = useState(1);
+
   // ======================= LOAD DATA =======================
   const cargarDatos = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
@@ -304,6 +308,37 @@ export default function VistaSeccional({ onBack }) {
     return filtered;
   }, [personas, filtroSeccional, filtroRol, searchQuery]);
 
+  // ======================= PAGINATION =======================
+  const totalPages = Math.max(1, Math.ceil(personasFiltradas.length / ITEMS_PER_PAGE));
+
+  // Reset to page 1 when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filtroSeccional, filtroRol, searchQuery]);
+
+  const personasPaginadas = useMemo(() => {
+    const start = (currentPage - 1) * ITEMS_PER_PAGE;
+    return personasFiltradas.slice(start, start + ITEMS_PER_PAGE);
+  }, [personasFiltradas, currentPage]);
+
+  const rangoInicio = personasFiltradas.length === 0 ? 0 : (currentPage - 1) * ITEMS_PER_PAGE + 1;
+  const rangoFin = Math.min(currentPage * ITEMS_PER_PAGE, personasFiltradas.length);
+
+  // Page numbers to show (max 5, centered around current)
+  const pageNumbers = useMemo(() => {
+    if (totalPages <= 7) return Array.from({ length: totalPages }, (_, i) => i + 1);
+    const pages = [];
+    const delta = 2;
+    const left = Math.max(2, currentPage - delta);
+    const right = Math.min(totalPages - 1, currentPage + delta);
+    pages.push(1);
+    if (left > 2) pages.push("...");
+    for (let i = left; i <= right; i++) pages.push(i);
+    if (right < totalPages - 1) pages.push("...");
+    pages.push(totalPages);
+    return pages;
+  }, [totalPages, currentPage]);
+
   // ======================= STATS =======================
   // Computed from personasFiltradas so cards always match what's shown in the table
   const hayFiltros = filtroSeccional !== "" || filtroRol !== "" || searchQuery.trim() !== "";
@@ -416,10 +451,21 @@ export default function VistaSeccional({ onBack }) {
         {/* Table */}
         <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
           {/* Count header */}
-          <div className="px-4 py-3 border-b border-slate-200 bg-slate-50">
+          <div className="px-4 py-3 border-b border-slate-200 bg-slate-50 flex flex-wrap items-center justify-between gap-2">
             <p className="text-sm text-slate-600">
-              Mostrando <span className="font-semibold text-slate-800">{personasFiltradas.length}</span> de{" "}
-              <span className="font-semibold text-slate-800">{personas.length}</span> personas
+              Mostrando{" "}
+              <span className="font-semibold text-slate-800">
+                {rangoInicio}-{rangoFin}
+              </span>{" "}
+              de{" "}
+              <span className="font-semibold text-slate-800">
+                {new Intl.NumberFormat("es-PY").format(personasFiltradas.length)}
+              </span>{" "}
+              registros
+            </p>
+            <p className="text-sm text-slate-500">
+              Pagina <span className="font-semibold text-slate-700">{currentPage}</span> de{" "}
+              <span className="font-semibold text-slate-700">{totalPages}</span>
             </p>
           </div>
 
@@ -459,7 +505,7 @@ export default function VistaSeccional({ onBack }) {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {personasFiltradas.map((p, idx) => (
+                  {personasPaginadas.map((p, idx) => (
                     <tr key={`${p.ciNorm}-${p.rol}-${idx}`} className="hover:bg-slate-50 transition-colors">
                       <td className="px-4 py-3 text-slate-700 whitespace-nowrap">{p.seccional}</td>
                       <td className="px-4 py-3">
@@ -479,6 +525,55 @@ export default function VistaSeccional({ onBack }) {
                   ))}
                 </tbody>
               </table>
+            </div>
+          )}
+
+          {/* Pagination controls */}
+          {!loading && !error && totalPages > 1 && (
+            <div className="px-4 py-4 border-t border-slate-200 bg-slate-50 flex flex-wrap items-center justify-between gap-3">
+              <p className="text-sm text-slate-500">
+                {new Intl.NumberFormat("es-PY").format(personasFiltradas.length)} registros en total
+              </p>
+              <div className="flex items-center gap-1">
+                {/* Anterior */}
+                <button
+                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                  disabled={currentPage === 1}
+                  className="px-3 py-1.5 rounded-lg text-sm font-medium border border-slate-300 bg-white hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >
+                  Anterior
+                </button>
+
+                {/* Page numbers */}
+                {pageNumbers.map((page, i) =>
+                  page === "..." ? (
+                    <span key={`ellipsis-${i}`} className="px-2 py-1.5 text-sm text-slate-400">
+                      ...
+                    </span>
+                  ) : (
+                    <button
+                      key={page}
+                      onClick={() => setCurrentPage(page)}
+                      className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
+                        currentPage === page
+                          ? "bg-brand-600 text-white border-brand-600"
+                          : "border-slate-300 bg-white hover:bg-slate-100 text-slate-700"
+                      }`}
+                    >
+                      {page}
+                    </button>
+                  )
+                )}
+
+                {/* Siguiente */}
+                <button
+                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={currentPage === totalPages}
+                  className="px-3 py-1.5 rounded-lg text-sm font-medium border border-slate-300 bg-white hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >
+                  Siguiente
+                </button>
+              </div>
             </div>
           )}
         </div>
