@@ -1172,7 +1172,7 @@ setPadron(data.padron || []);
           {currentUser.role === "superadmin" && (
             <button
               onClick={() => { setModalType("coordinador"); setShowAddModal(true); }}
-              className="inline-flex items-center gap-2 bg-brand-600 hover:bg-brand-700 text-white px-4 h-10 rounded-xl text-sm font-medium transition-colors shadow-sm w-full sm:w-auto border-0"
+              className="inline-flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white border border-slate-800 px-4 h-10 rounded-xl text-sm font-medium transition-colors shadow-sm w-full sm:w-auto"
             >
               <UserPlus className="w-4 h-4" />
               Agregar Coordinador
@@ -1182,7 +1182,7 @@ setPadron(data.padron || []);
           {currentUser.role === "superadmin" && (
             <button
               onClick={() => { setVerificarOpen(true); setVerificarCoordCI(""); }}
-              className="inline-flex items-center gap-2 border border-brand-300 bg-white hover:bg-brand-50 text-brand-700 px-4 h-10 rounded-xl text-sm font-medium transition-colors w-full sm:w-auto shadow-sm"
+              className="inline-flex items-center gap-2 border border-slate-200 bg-white hover:bg-slate-50 hover:border-slate-300 text-slate-700 px-4 h-10 rounded-xl text-sm font-medium transition-colors w-full sm:w-auto shadow-sm"
             >
               <ClipboardList className="w-4 h-4" />
               Verificar estructura
@@ -1192,7 +1192,7 @@ setPadron(data.padron || []);
           {currentUser.role === "superadmin" && (
             <button
               onClick={() => setInvitacionOpen(true)}
-              className="inline-flex items-center gap-2 border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 px-4 h-10 rounded-xl text-sm font-medium transition-colors w-full sm:w-auto shadow-sm"
+              className="inline-flex items-center gap-2 border border-slate-200 bg-white hover:bg-slate-50 hover:border-slate-300 text-slate-700 px-4 h-10 rounded-xl text-sm font-medium transition-colors w-full sm:w-auto shadow-sm"
             >
               <MessageCircle className="w-4 h-4" />
               Enviar invitación
@@ -1202,7 +1202,7 @@ setPadron(data.padron || []);
           {currentUser.role === "superadmin" && (
             <button
               onClick={() => setVistaSeccionalOpen(true)}
-              className="inline-flex items-center gap-2 border border-purple-300 bg-purple-50 hover:bg-purple-100 text-purple-700 px-4 h-10 rounded-xl text-sm font-medium transition-colors w-full sm:w-auto shadow-sm"
+              className="inline-flex items-center gap-2 border border-slate-200 bg-white hover:bg-slate-50 hover:border-slate-300 text-slate-700 px-4 h-10 rounded-xl text-sm font-medium transition-colors w-full sm:w-auto shadow-sm"
             >
               <MapIcon className="w-4 h-4" />
               Vista por seccional
@@ -1212,7 +1212,7 @@ setPadron(data.padron || []);
           {currentUser.role === "coordinador" && (
             <button
               onClick={() => { setModalType("subcoordinador"); setShowAddModal(true); }}
-              className="inline-flex items-center gap-2 bg-brand-600 hover:bg-brand-700 text-white px-4 h-10 rounded-xl text-sm font-medium transition-colors shadow-sm w-full sm:w-auto border-0"
+              className="inline-flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white border border-slate-800 px-4 h-10 rounded-xl text-sm font-medium transition-colors shadow-sm w-full sm:w-auto"
             >
               <UserPlus className="w-4 h-4" />
               Agregar Subcoordinador
@@ -1222,7 +1222,7 @@ setPadron(data.padron || []);
           {(currentUser.role === "coordinador" || currentUser.role === "subcoordinador") && (
             <button
               onClick={() => { setModalType("votante"); setShowAddModal(true); }}
-              className="inline-flex items-center gap-2 border border-brand-300 bg-white hover:bg-brand-50 text-brand-700 px-4 h-10 rounded-xl text-sm font-medium transition-colors w-full sm:w-auto shadow-sm"
+              className="inline-flex items-center gap-2 border border-slate-200 bg-white hover:bg-slate-50 hover:border-slate-300 text-slate-700 px-4 h-10 rounded-xl text-sm font-medium transition-colors w-full sm:w-auto shadow-sm"
             >
               <UserPlus className="w-4 h-4" />
               Agregar Votante
@@ -1231,7 +1231,7 @@ setPadron(data.padron || []);
 
           <button
             onClick={descargarPDF}
-            className="inline-flex items-center gap-2 border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 px-4 h-10 rounded-xl text-sm font-medium transition-colors w-full sm:w-auto shadow-sm"
+            className="inline-flex items-center gap-2 border border-slate-200 bg-white hover:bg-slate-50 hover:border-slate-300 text-slate-700 px-4 h-10 rounded-xl text-sm font-medium transition-colors w-full sm:w-auto shadow-sm"
           >
             <FileText className="w-4 h-4" />
             Descargar PDF
