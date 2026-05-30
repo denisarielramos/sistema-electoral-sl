@@ -968,22 +968,7 @@ export default function EnviarInvitacion({ onBack }) {
   const mesa = getFieldSafe(persona, "mesa", "nro_mesa") || "Sin dato";
   const orden = getFieldSafe(persona, "orden", "orden_votacion") || "Sin dato";
 
-  const mensaje = `Hola ${nombre}, te saluda el equipo de José Chechito López.
-
-Te recordamos tus datos de votación:
-
-Local de votación: ${local}
-Mesa: ${mesa}
-Orden: ${orden}
-
-Este 7 de Junio votá así:
-
-Lista 2E
-Opción 2
-
-José Chechito López - Concejal
-
-¡Contamos con tu apoyo!`;
+  const mensaje = `Hola *${nombre}* 👋\nTe saluda el equipo de *José Chechito López*.\n\n*Estos son tus datos de votación:*\n\n📍 *Local:* *${local}*\n🧾 *Mesa:* *${mesa}*\n🔢 *Orden:* *${orden}*\n\n🚩 *Este 7 de Junio votá así:*\n\n🔴 *Lista 2E - Opción 2*\n\n*José Chechito López - Concejal*\n\n¡Tu apoyo es muy importante! 🙌🇵🇾`;
 
     const url = `https://wa.me/${numNorm}?text=${encodeURIComponent(mensaje)}`;
     window.open(url, "_blank");
