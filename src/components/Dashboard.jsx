@@ -26,6 +26,7 @@ import {
   Printer,
   ArrowLeft,
   MessageCircle,
+  Map,
 } from "lucide-react";
 
 import AddPersonModal from "../AddPersonModal";
@@ -33,6 +34,7 @@ import ModalTelefono from "./ModalTelefono";
 import ModalDireccion from "./ModalDireccion";
 import ConfirmVotoModal from "./ConfirmVotoModal";
 import EnviarInvitacion from "./EnviarInvitacion";
+import VistaSeccional from "./VistaSeccional";
 import {
   generateSuperadminPDF,
   generateCoordinadorPDF,
@@ -327,6 +329,9 @@ const Dashboard = ({ currentUser, onLogout }) => {
 
   // Enviar invitación module (superadmin only)
   const [invitacionOpen, setInvitacionOpen] = useState(false);
+
+  // Vista seccional module (superadmin only)
+  const [vistaSeccionalOpen, setVistaSeccionalOpen] = useState(false);
 
   // Non-blocking toast notification (replaces alert() to prevent scroll jump)
   const [toastMsg, setToastMsg] = useState(null);
@@ -1051,6 +1056,11 @@ setPadron(data.padron || []);
     return <EnviarInvitacion onBack={() => setInvitacionOpen(false)} />;
   }
 
+  // Show VistaSeccional module (superadmin only)
+  if (vistaSeccionalOpen && currentUser.role === "superadmin") {
+    return <VistaSeccional onBack={() => setVistaSeccionalOpen(false)} />;
+  }
+
   return (
 <div className="min-h-screen bg-slate-100">
       {/* LOADING SPLASH */}
@@ -1186,6 +1196,16 @@ setPadron(data.padron || []);
             >
               <MessageCircle className="w-4 h-4" />
               Enviar invitación
+            </button>
+          )}
+
+          {currentUser.role === "superadmin" && (
+            <button
+              onClick={() => setVistaSeccionalOpen(true)}
+              className="inline-flex items-center gap-2 border border-purple-300 bg-purple-50 hover:bg-purple-100 text-purple-700 px-4 h-10 rounded-xl text-sm font-medium transition-colors w-full sm:w-auto shadow-sm"
+            >
+              <Map className="w-4 h-4" />
+              Vista por seccional
             </button>
           )}
 
