@@ -14,7 +14,7 @@ import {
   Check,
   X,
   Building2,
-  Map,
+  Map as MapIcon,
   Filter,
 } from "lucide-react";
 
@@ -537,7 +537,7 @@ export default function VistaSeccional({ onBack }) {
                     ) : (
                       <ChevronRight className="w-5 h-5 text-brand-600 shrink-0" />
                     )}
-                    <Map className="w-5 h-5 text-purple-600 shrink-0" />
+                    <MapIcon className="w-5 h-5 text-purple-600 shrink-0" />
                     <div className="flex-1 min-w-0">
                       <h2 className="font-semibold text-slate-800">{seccional}</h2>
                       <div className="flex flex-wrap gap-3 text-xs text-slate-500 mt-1">
