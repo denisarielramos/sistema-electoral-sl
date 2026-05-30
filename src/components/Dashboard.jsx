@@ -26,7 +26,7 @@ import {
   Printer,
   ArrowLeft,
   MessageCircle,
-  Map,
+  Map as MapIcon,
 } from "lucide-react";
 
 import AddPersonModal from "../AddPersonModal";
@@ -1204,7 +1204,7 @@ setPadron(data.padron || []);
               onClick={() => setVistaSeccionalOpen(true)}
               className="inline-flex items-center gap-2 border border-purple-300 bg-purple-50 hover:bg-purple-100 text-purple-700 px-4 h-10 rounded-xl text-sm font-medium transition-colors w-full sm:w-auto shadow-sm"
             >
-              <Map className="w-4 h-4" />
+              <MapIcon className="w-4 h-4" />
               Vista por seccional
             </button>
           )}
