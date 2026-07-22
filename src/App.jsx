@@ -3,7 +3,7 @@
 // Dashboard maneja TODO lo demás.
 
 import React, { useEffect, useState } from "react";
-import { supabase } from "./supabaseClient";
+import { supabase, isSupabaseConfigured } from "./supabaseClient";
 import { ShieldCheck, Eye, EyeOff } from "lucide-react";
 import Dashboard from "./components/Dashboard";
 import { normalizeCI } from "./utils/estructuraHelpers";
@@ -76,6 +76,15 @@ const App = () => {
         };
         setCurrentUser(u);
         localStorage.setItem("currentUser", JSON.stringify(u));
+        return;
+      }
+
+      // ======================= SIN SUPABASE =======================
+      // Los coordinadores/subcoordinadores requieren base de datos.
+      if (!isSupabaseConfigured || !supabase) {
+        alert(
+          "La base de datos no está configurada. Solo los superadmins pueden iniciar sesión hasta que se conecte Supabase.",
+        );
         return;
       }
 
