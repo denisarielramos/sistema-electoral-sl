@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "../supabaseClient";
-import { generarAccessCode } from "../utils/accessCode";
+import { generarAccessCodeUnico } from "../utils/accessCode";
 
 import {
   UserPlus,
@@ -196,12 +196,16 @@ const VoteCounter = ({ confirmed, total }) => {
 };
 
 // ======================= PERSONA DATA =======================
-const DatosPersona = ({ persona, rol, loginCode, onCopy, counter }) => {
+const DatosPersona = ({
+  persona, rol, loginCode, onCopy, counter,
+  tablaAcceso, onGenerarAcceso, generandoAcceso, esSuperadmin,
+}) => {
   const direccionMostrar = persona.direccion_override || persona.direccion;
   const hasName = Boolean(persona.nombre);
   const displayName = hasName
     ? `${persona.nombre} ${persona.apellido || ""}`.trim()
     : "Cargando...";
+  const tieneCode = loginCode && String(loginCode).trim() !== "";
   return (
     <div className="space-y-0.5 text-xs sm:text-sm">
       <p className={`font-semibold flex items-center gap-1 flex-wrap ${hasName ? "text-slate-800" : "text-slate-400 italic"}`}>
@@ -212,18 +216,34 @@ const DatosPersona = ({ persona, rol, loginCode, onCopy, counter }) => {
         CI: <span className="text-slate-700 font-medium">{persona.ci}</span>
         {rol && <span className="ml-2 text-slate-400">• {rol}</span>}
       </p>
-      {loginCode && (
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onCopy?.(loginCode);
-          }}
-          className="mt-1 inline-flex items-center gap-1 px-2 py-1 rounded-md border border-brand-200 text-brand-600 text-xs hover:bg-brand-50 transition-colors bg-transparent shadow-none"
-        >
-          <Copy className="w-3 h-3" />
-          Copiar acceso
-        </button>
-      )}
+      {/* Fila de código de acceso */}
+      {tieneCode ? (
+        <div className="mt-1 flex items-center gap-1.5 flex-wrap">
+          <span className="text-xs text-slate-500">
+            Código: <span className="font-mono font-semibold text-slate-700 select-all">{loginCode}</span>
+          </span>
+          <button
+            onClick={(e) => { e.stopPropagation(); onCopy?.(loginCode); }}
+            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border border-brand-200 text-brand-600 text-xs hover:bg-brand-50 transition-colors bg-transparent shadow-none"
+          >
+            <Copy className="w-3 h-3" />
+            Copiar
+          </button>
+        </div>
+      ) : tablaAcceso ? (
+        <div className="mt-1 flex items-center gap-1.5 flex-wrap">
+          <span className="text-xs text-slate-400 italic">Sin código de acceso</span>
+          {esSuperadmin && onGenerarAcceso && (
+            <button
+              disabled={generandoAcceso === persona.ci}
+              onClick={(e) => { e.stopPropagation(); onGenerarAcceso(tablaAcceso, persona.ci); }}
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border border-amber-300 text-amber-700 text-xs hover:bg-amber-50 transition-colors bg-transparent shadow-none disabled:opacity-50"
+            >
+              {generandoAcceso === persona.ci ? "Generando..." : "Generar acceso"}
+            </button>
+          )}
+        </div>
+      ) : null}
       <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-slate-500 mt-0.5">
         {persona.seccional && <span>Seccional: {persona.seccional}</span>}
         {persona.local_votacion && <span className="truncate">Local: {persona.local_votacion}</span>}
@@ -522,6 +542,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
   const [padronLoaded, setPadronLoaded] = useState(false);
   const [padronLoading, setPadronLoading] = useState(false);
   const [padronError, setPadronError] = useState(null);
+  const [generandoAcceso, setGenerandoAcceso] = useState(null); // ci de quien está generando
   const [loading, setLoading] = useState(true);
 
   // Modal states
@@ -692,11 +713,53 @@ const Dashboard = ({ currentUser, onLogout }) => {
   }, [cargarEstructura, cargarPadron]);
 
   // ======================= COPY =======================
-  const handleCopy = useCallback((code) => {
-    navigator.clipboard.writeText(code).catch(() => {});
+  const handleCopy = useCallback(async (code) => {
+    if (!code) {
+      alert("Este registro no tiene código de acceso.");
+      return;
+    }
+    const text = String(code);
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      // Fallback con textarea temporal para navegadores sin Clipboard API
+      try {
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.cssText = "position:fixed;top:0;left:0;opacity:0;";
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        const ok = document.execCommand("copy");
+        document.body.removeChild(ta);
+        if (!ok) throw new Error("execCommand failed");
+      } catch {
+        alert(`No se pudo copiar automáticamente. Código: ${text}`);
+        return;
+      }
+    }
     setCopiedCode(code);
-    setTimeout(() => setCopiedCode(null), 2000);
+    setTimeout(() => setCopiedCode(null), 2500);
   }, []);
+
+  // ======================= GENERAR ACCESO (para registros sin login_code) =======================
+  const handleGenerarAcceso = useCallback(async (tabla, ci) => {
+    setGenerandoAcceso(ci);
+    try {
+      const loginCode = await generarAccessCodeUnico(supabase);
+      const { error } = await supabase
+        .from(tabla)
+        .update({ login_code: loginCode })
+        .eq("ci", ci);
+      if (error) { alert("Error al generar acceso: " + error.message); return; }
+      alert(`Código generado: ${loginCode}`);
+      cargarEstructura();
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setGenerandoAcceso(null);
+    }
+  }, [cargarEstructura]);
 
   // ======================= PERSONAS DISPONIBLES =======================
   // padronLoaded siempre se pone true al finalizar cargarPadron (éxito o error).
@@ -851,7 +914,9 @@ const Dashboard = ({ currentUser, onLogout }) => {
   const handleAddCoordinadorSuperadmin = useCallback(async ({ persona, dirigenteCI }) => {
     if (!dirigenteCI) { alert("Debe seleccionar un dirigente."); return; }
     const ciCoord = normalizeCI(persona.ci);
-    const loginCode = await generarAccessCode();
+    let loginCode;
+    try { loginCode = await generarAccessCodeUnico(supabase); }
+    catch (err) { alert(err.message); return; }
     const payload = {
       ci: ciCoord,
       dirigente_ci: normalizeCI(dirigenteCI),
@@ -861,8 +926,10 @@ const Dashboard = ({ currentUser, onLogout }) => {
       login_code: loginCode,
       activo: true,
     };
-    const { error } = await supabase.from("coordinadores").insert(payload);
+    const { data, error } = await supabase.from("coordinadores").insert(payload).select().single();
     if (error) { alert("Error al agregar coordinador: " + error.message); return; }
+    const savedCode = data?.login_code || loginCode;
+    alert(`Coordinador agregado. Código de acceso: ${savedCode}`);
     setShowAgregarCoord(false);
     cargarEstructura();
   }, [currentUser, cargarEstructura]);
@@ -870,7 +937,9 @@ const Dashboard = ({ currentUser, onLogout }) => {
   // ======================= AGREGAR COORDINADOR (DIRIGENTE vía ModalAgregarCoordinador) =======================
   const handleAddCoordinadorDesdeModal = useCallback(async ({ persona, dirigenteCI }) => {
     const ciCoord = normalizeCI(persona.ci);
-    const loginCode = await generarAccessCode();
+    let loginCode;
+    try { loginCode = await generarAccessCodeUnico(supabase); }
+    catch (err) { alert(err.message); return; }
     const payload = {
       ci: ciCoord,
       dirigente_ci: normalizeCI(dirigenteCI || currentUser.ci),
@@ -880,8 +949,10 @@ const Dashboard = ({ currentUser, onLogout }) => {
       login_code: loginCode,
       activo: true,
     };
-    const { error } = await supabase.from("coordinadores").insert(payload);
+    const { data, error } = await supabase.from("coordinadores").insert(payload).select().single();
     if (error) { alert("Error al agregar coordinador: " + error.message); return; }
+    const savedCode = data?.login_code || loginCode;
+    alert(`Coordinador agregado. Código de acceso: ${savedCode}`);
     setShowAgregarCoord(false);
     cargarEstructura();
   }, [currentUser, cargarEstructura]);
@@ -889,10 +960,9 @@ const Dashboard = ({ currentUser, onLogout }) => {
   // ======================= AGREGAR SUBCOORDINADOR (SUPERADMIN/COORDINADOR) =======================
   const handleAddSubcoordinador = useCallback(async (persona) => {
     const ciSub = normalizeCI(persona.ci);
-    const loginCode = await generarAccessCode();
-    const miCoord = estructura.coordinadores.find(
-      (c) => normalizeCI(c.ci) === normalizeCI(currentUser.ci)
-    );
+    let loginCode;
+    try { loginCode = await generarAccessCodeUnico(supabase); }
+    catch (err) { alert(err.message); return; }
     const payload = {
       ci: ciSub,
       coordinador_ci: normalizeCI(currentUser.ci),
@@ -902,15 +972,19 @@ const Dashboard = ({ currentUser, onLogout }) => {
       login_code: loginCode,
       activo: true,
     };
-    const { error } = await supabase.from("subcoordinadores").insert(payload);
+    const { data, error } = await supabase.from("subcoordinadores").insert(payload).select().single();
     if (error) { alert("Error al agregar subcoordinador: " + error.message); return; }
+    const savedCode = data?.login_code || loginCode;
+    alert(`Subcoordinador agregado. Código de acceso: ${savedCode}`);
     setShowAddModal(false);
     cargarEstructura();
-  }, [currentUser, estructura, cargarEstructura]);
+  }, [currentUser, cargarEstructura]);
 
   // ======================= AGREGAR DIRIGENTE (SUPERADMIN) =======================
   const handleAgregarDirigenteDesdePadron = useCallback(async (persona) => {
-    const loginCode = await generarAccessCode();
+    let loginCode;
+    try { loginCode = await generarAccessCodeUnico(supabase); }
+    catch (err) { alert(err.message); return; }
     const payload = {
       ci: normalizeCI(persona.ci),
       nombre: persona.nombre || "",
@@ -921,14 +995,18 @@ const Dashboard = ({ currentUser, onLogout }) => {
       activo: true,
       asignado_por_nombre: `${currentUser.nombre} ${currentUser.apellido || ""}`.trim(),
     };
-    const { error } = await supabase.from("dirigentes").insert(payload);
+    const { data, error } = await supabase.from("dirigentes").insert(payload).select().single();
     if (error) { alert("Error al agregar dirigente: " + error.message); return; }
+    const savedCode = data?.login_code || loginCode;
+    alert(`Dirigente agregado. Código de acceso: ${savedCode}`);
     setShowAgregarDirigente(false);
     cargarEstructura();
   }, [currentUser, cargarEstructura]);
 
   const handleAgregarDirigenteExterno = useCallback(async (datos) => {
-    const loginCode = await generarAccessCode();
+    let loginCode;
+    try { loginCode = await generarAccessCodeUnico(supabase); }
+    catch (err) { alert(err.message); return null; }
     const payload = {
       ci: normalizeCI(datos.ci),
       nombre: datos.nombre,
@@ -939,10 +1017,10 @@ const Dashboard = ({ currentUser, onLogout }) => {
       activo: true,
       asignado_por_nombre: `${currentUser.nombre} ${currentUser.apellido || ""}`.trim(),
     };
-    const { error } = await supabase.from("dirigentes").insert(payload);
+    const { data, error } = await supabase.from("dirigentes").insert(payload).select().single();
     if (error) { alert("Error al agregar dirigente externo: " + error.message); return null; }
     cargarEstructura();
-    return loginCode;
+    return data?.login_code || loginCode;
   }, [currentUser, cargarEstructura]);
 
   // ======================= HANDLER GENERAL ADD =======================
@@ -1105,12 +1183,25 @@ const Dashboard = ({ currentUser, onLogout }) => {
                     <VoteCounter confirmed={coordsDir.length} total={totalDir} />
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
-                    <ActionBtn
-                      onClick={(e) => { e.stopPropagation(); handleCopy(dir.login_code); }}
-                      title="Copiar codigo de acceso"
-                    >
-                      {copiedCode === dir.login_code ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
-                    </ActionBtn>
+                    {dir.login_code ? (
+                      <>
+                        <span className="text-xs font-mono text-slate-500 hidden sm:inline select-all">{dir.login_code}</span>
+                        <ActionBtn
+                          onClick={(e) => { e.stopPropagation(); handleCopy(dir.login_code); }}
+                          title="Copiar codigo de acceso"
+                        >
+                          {copiedCode === dir.login_code ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                        </ActionBtn>
+                      </>
+                    ) : (
+                      <button
+                        disabled={generandoAcceso === dir.ci}
+                        onClick={(e) => { e.stopPropagation(); handleGenerarAcceso("dirigentes", dir.ci); }}
+                        className="text-xs px-2 py-1 rounded-md border border-amber-300 text-amber-700 hover:bg-amber-50 transition-colors bg-transparent shadow-none disabled:opacity-50"
+                      >
+                        {generandoAcceso === dir.ci ? "Generando..." : "Generar acceso"}
+                      </button>
+                    )}
                     {isExpandedDir ? <ChevronDown className="w-4 h-4 text-slate-400" /> : <ChevronRight className="w-4 h-4 text-slate-400" />}
                   </div>
                 </div>
@@ -1140,6 +1231,10 @@ const Dashboard = ({ currentUser, onLogout }) => {
                                     rol="Coordinador"
                                     loginCode={coord.login_code}
                                     onCopy={handleCopy}
+                                    tablaAcceso="coordinadores"
+                                    onGenerarAcceso={handleGenerarAcceso}
+                                    generandoAcceso={generandoAcceso}
+                                    esSuperadmin={currentUser.role === "superadmin"}
                                     counter={<VoteCounter confirmed={misVots.filter((v) => v.voto_confirmado).length} total={misVots.length} />}
                                   />
                                 </div>
@@ -1165,6 +1260,10 @@ const Dashboard = ({ currentUser, onLogout }) => {
                                             rol="Subcoord"
                                             loginCode={sub.login_code}
                                             onCopy={handleCopy}
+                                            tablaAcceso="subcoordinadores"
+                                            onGenerarAcceso={handleGenerarAcceso}
+                                            generandoAcceso={generandoAcceso}
+                                            esSuperadmin={currentUser.role === "superadmin"}
                                             counter={<VoteCounter confirmed={votsDeEste.filter((v) => v.voto_confirmado).length} total={votsDeEste.length} />}
                                           />
                                           <div className="shrink-0 ml-2">
@@ -1265,6 +1364,10 @@ const Dashboard = ({ currentUser, onLogout }) => {
                             rol="Coordinador"
                             loginCode={coord.login_code}
                             onCopy={handleCopy}
+                            tablaAcceso="coordinadores"
+                            onGenerarAcceso={handleGenerarAcceso}
+                            generandoAcceso={generandoAcceso}
+                            esSuperadmin={currentUser.role === "superadmin"}
                             counter={<VoteCounter confirmed={misVots.filter((v) => v.voto_confirmado).length} total={misVots.length} />}
                           />
                         </div>
@@ -1289,6 +1392,10 @@ const Dashboard = ({ currentUser, onLogout }) => {
                                     rol="Subcoord"
                                     loginCode={sub.login_code}
                                     onCopy={handleCopy}
+                                    tablaAcceso="subcoordinadores"
+                                    onGenerarAcceso={handleGenerarAcceso}
+                                    generandoAcceso={generandoAcceso}
+                                    esSuperadmin={currentUser.role === "superadmin"}
                                     counter={<VoteCounter confirmed={votsDeEste.filter((v) => v.voto_confirmado).length} total={votsDeEste.length} />}
                                   />
                                   <div className="shrink-0 ml-2">
@@ -1401,6 +1508,10 @@ const Dashboard = ({ currentUser, onLogout }) => {
                       rol="Coordinador"
                       loginCode={coord.login_code}
                       onCopy={handleCopy}
+                      tablaAcceso="coordinadores"
+                      onGenerarAcceso={handleGenerarAcceso}
+                      generandoAcceso={generandoAcceso}
+                      esSuperadmin={currentUser.role === "superadmin"}
                       counter={<VoteCounter confirmed={misVots.filter((v) => v.voto_confirmado).length} total={misVots.length} />}
                     />
                   </div>
@@ -1425,6 +1536,10 @@ const Dashboard = ({ currentUser, onLogout }) => {
                               rol="Subcoord"
                               loginCode={sub.login_code}
                               onCopy={handleCopy}
+                              tablaAcceso="subcoordinadores"
+                              onGenerarAcceso={handleGenerarAcceso}
+                              generandoAcceso={generandoAcceso}
+                              esSuperadmin={currentUser.role === "superadmin"}
                               counter={<VoteCounter confirmed={votsDeEste.filter((v) => v.voto_confirmado).length} total={votsDeEste.length} />}
                             />
                             <div className="shrink-0 ml-2">
@@ -1564,6 +1679,10 @@ const Dashboard = ({ currentUser, onLogout }) => {
                       rol="Subcoordinador"
                       loginCode={sub.login_code}
                       onCopy={handleCopy}
+                      tablaAcceso="subcoordinadores"
+                      onGenerarAcceso={handleGenerarAcceso}
+                      generandoAcceso={generandoAcceso}
+                      esSuperadmin={currentUser.role === "superadmin"}
                       counter={<VoteCounter confirmed={votsDeEste.filter((v) => v.voto_confirmado).length} total={votsDeEste.length} />}
                     />
                   </div>
