@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Search, X, UserPlus, ChevronLeft, ChevronRight, Phone, AlertCircle } from "lucide-react";
+import { supabase } from "./supabaseClient";
 
 // ======================= ADD PERSON MODAL =======================
 // Para votantes: flujo de 2 pasos.
@@ -7,9 +8,39 @@ import { Search, X, UserPlus, ChevronLeft, ChevronRight, Phone, AlertCircle } fr
 //   Paso 2: ingresar teléfono y responder si es tercera edad.
 // Para coordinador/subcoordinador: selección directa (sin paso 2).
 
+const normalize = (text) =>
+  (text ?? "")
+    .toString()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+
+const matchesSearch = (p, term) => {
+  if (!term || term.length < 2) return false;
+  const termNorm = normalize(term);
+  const termDigits = term.replace(/\D/g, "");
+
+  // Búsqueda por CI (solo dígitos, partial match)
+  const ciDigits = String(p.ci ?? "").replace(/\D/g, "");
+  if (termDigits && ciDigits.includes(termDigits)) return true;
+
+  // Búsqueda por nombre/apellido/nombre completo (cada palabra del término debe aparecer)
+  const fullName = normalize(`${p.nombre ?? ""} ${p.apellido ?? ""}`);
+  const words = termNorm.split(/\s+/).filter(Boolean);
+  if (words.length > 0 && words.every((w) => fullName.includes(w))) return true;
+
+  return false;
+};
+
 const AddPersonModal = ({ show, onClose, tipo, onAdd, disponibles }) => {
   const [searchTerm, setSearchTerm] = useState("");
   const [page, setPage] = useState(1);
+
+  // Búsqueda en Supabase como fallback si disponibles está vacío
+  const [searchResults, setSearchResults] = useState(null); // null = usar disponibles, array = fallback
+  const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState(null);
+  const debounceRef = useRef(null);
 
   // Paso 2 — solo para votantes
   const [personaSeleccionada, setPersonaSeleccionada] = useState(null);
@@ -25,6 +56,8 @@ const AddPersonModal = ({ show, onClose, tipo, onAdd, disponibles }) => {
       setPersonaSeleccionada(null);
       setTelefono("+595");
       setTerceraEdad(null);
+      setSearchResults(null);
+      setSearchError(null);
     }
   }, [show]);
 
@@ -32,32 +65,83 @@ const AddPersonModal = ({ show, onClose, tipo, onAdd, disponibles }) => {
     setPage(1);
   }, [searchTerm]);
 
+  // Fallback a Supabase cuando disponibles está vacío y hay término de búsqueda
+  useEffect(() => {
+    const term = searchTerm.trim();
+
+    if (!term || term.length < 2) {
+      setSearchResults(null);
+      setSearchError(null);
+      return;
+    }
+
+    // Si disponibles tiene datos, usarlos directamente sin fallback
+    if (disponibles && disponibles.length > 0) {
+      setSearchResults(null);
+      setSearchError(null);
+      return;
+    }
+
+    // Fallback: buscar en Supabase
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(async () => {
+      setSearching(true);
+      setSearchError(null);
+      try {
+        const termDigits = term.replace(/\D/g, "");
+        const termNorm = normalize(term);
+
+        let query = supabase.from("padron").select("ci,nombre,apellido,seccional,local_votacion,mesa,orden");
+
+        if (termDigits && /^\d+$/.test(term)) {
+          // Búsqueda numérica: buscar CI con ilike
+          query = query.ilike("ci", `%${termDigits}%`);
+        } else {
+          // Búsqueda por nombre/apellido usando ilike con los primeros tokens
+          const words = termNorm.split(/\s+/).filter(Boolean);
+          query = query.or(
+            words.map((w) => `nombre.ilike.%${w}%,apellido.ilike.%${w}%`).join(",")
+          );
+        }
+
+        const { data, error } = await query.limit(100);
+        if (error) {
+          console.error("[v0] Error buscando en padrón (fallback Supabase):", error);
+          setSearchError("Error al buscar en el padrón: " + error.message);
+          setSearchResults([]);
+        } else {
+          // Enriquecer con asignado=false ya que no tenemos estructura aquí
+          setSearchResults((data || []).map((p) => ({
+            ...p,
+            ci: String(p.ci ?? "").replace(/\D/g, ""),
+            asignado: false,
+            asignadoRol: null,
+            asignadoPorNombre: "",
+          })));
+        }
+      } catch (err) {
+        console.error("[v0] Error fallback búsqueda:", err);
+        setSearchError("Error inesperado al buscar en el padrón.");
+        setSearchResults([]);
+      } finally {
+        setSearching(false);
+      }
+    }, 400);
+
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
+  }, [searchTerm, disponibles]);
+
   if (!show) return null;
 
   const term = searchTerm.trim();
 
-  const normalize = (text) =>
-    (text || "")
-      .toLowerCase()
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "");
+  // Determinar qué array usar: disponibles locales (IndexedDB) o resultados de Supabase
+  const usandoFallback = searchResults !== null;
 
-  const filtered = term
-    ? disponibles
-        .filter((p) => {
-          const fullName = `${p.nombre ?? ""} ${p.apellido ?? ""}`;
-          const fullNameNorm = normalize(fullName);
-          const ciTxt = (p.ci ?? "").toString().toLowerCase();
-          const words = normalize(term).split(" ").filter(Boolean);
-          return words.every((w) => ciTxt.includes(w) || fullNameNorm.includes(w));
-        })
-        .sort((a, b) => {
-          const exactA = a.ci?.toString() === searchTerm;
-          const exactB = b.ci?.toString() === searchTerm;
-          if (exactA && !exactB) return -1;
-          if (!exactA && exactB) return 1;
-          return (a.nombre || "").localeCompare(b.nombre || "");
-        })
+  const filtered = term && term.length >= 2
+    ? usandoFallback
+      ? searchResults
+      : disponibles.filter((p) => matchesSearch(p, term)).sort((a, b) => (a.nombre || "").localeCompare(b.nombre || ""))
     : [];
 
   const pageSize = 20;
@@ -279,26 +363,43 @@ const AddPersonModal = ({ show, onClose, tipo, onAdd, disponibles }) => {
               </button>
             )}
           </div>
-          {searchTerm && (
+          {term && term.length >= 2 && (
             <p className="text-xs text-slate-500 mt-1.5">
-              {filtered.length} resultado{filtered.length !== 1 ? "s" : ""}
+              {searching
+                ? "Buscando..."
+                : searchError
+                ? ""
+                : `${filtered.length} resultado${filtered.length !== 1 ? "s" : ""}${usandoFallback ? " (búsqueda en servidor)" : ""}`}
             </p>
+          )}
+          {term && term.length === 1 && (
+            <p className="text-xs text-amber-500 mt-1.5">Escriba al menos 2 caracteres para buscar.</p>
           )}
         </div>
 
         {/* List */}
         <div className="flex-1 overflow-y-auto px-5 py-3 space-y-1.5">
-          {!searchTerm ? (
+          {!term || term.length < 2 ? (
             <div className="text-center py-10">
               <Search className="w-8 h-8 text-slate-200 mx-auto mb-2" />
               <p className="text-sm text-slate-400">
-                Escriba para buscar personas del padron.
+                Escriba al menos 2 caracteres para buscar por CI, nombre o apellido.
               </p>
+            </div>
+          ) : searching ? (
+            <div className="text-center py-10">
+              <div className="w-6 h-6 border-2 border-brand-500 border-t-transparent rounded-full animate-spin mx-auto mb-2" />
+              <p className="text-sm text-slate-400">Buscando en el padrón...</p>
+            </div>
+          ) : searchError ? (
+            <div className="text-center py-10">
+              <AlertCircle className="w-8 h-8 text-red-300 mx-auto mb-2" />
+              <p className="text-sm text-red-500">{searchError}</p>
             </div>
           ) : pageData.length === 0 ? (
             <div className="text-center py-10">
               <Search className="w-8 h-8 text-slate-200 mx-auto mb-2" />
-              <p className="text-sm text-slate-400">No se encontraron resultados.</p>
+              <p className="text-sm text-slate-400">No se encontraron resultados para <strong>{term}</strong>.</p>
             </div>
           ) : (
             pageData.map((persona) => {

@@ -312,17 +312,23 @@ const ModalAgregarDirigente = ({
 
   if (!show) return null;
 
-  const normalize = (text) =>
-    (text || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const normText = (text) =>
+    (text ?? "").toString().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 
   const pageSize = 20;
-  const filtered = searchTerm
+  const term = searchTerm.trim();
+  const filtered = term && term.length >= 2
     ? disponibles
         .filter((p) => {
-          const words = normalize(searchTerm).split(" ").filter(Boolean);
-          const full = normalize(`${p.nombre ?? ""} ${p.apellido ?? ""}`);
-          const ci = (p.ci ?? "").toString();
-          return words.every((w) => ci.includes(w) || full.includes(w));
+          const termNorm = normText(term);
+          const termDigits = term.replace(/\D/g, "");
+          const ciDigits = String(p.ci ?? "").replace(/\D/g, "");
+          // Búsqueda por CI parcial (solo dígitos)
+          if (termDigits && ciDigits.includes(termDigits)) return true;
+          // Búsqueda por nombre/apellido
+          const full = normText(`${p.nombre ?? ""} ${p.apellido ?? ""}`);
+          const words = termNorm.split(/\s+/).filter(Boolean);
+          return words.length > 0 && words.every((w) => full.includes(w));
         })
         .sort((a, b) => (a.nombre || "").localeCompare(b.nombre || ""))
     : [];
@@ -461,19 +467,23 @@ const ModalAgregarDirigente = ({
                 </button>
               )}
             </div>
-            {searchTerm && (
+            {term && term.length >= 2 && (
               <p className="text-xs text-slate-500 mt-1.5">{filtered.length} resultado{filtered.length !== 1 ? "s" : ""}</p>
+            )}
+            {term && term.length === 1 && (
+              <p className="text-xs text-amber-500 mt-1.5">Escriba al menos 2 caracteres para buscar.</p>
             )}
           </div>
           <div className="flex-1 overflow-y-auto px-5 py-3 space-y-1.5">
-            {!searchTerm ? (
+            {!term || term.length < 2 ? (
               <div className="text-center py-10">
                 <Search className="w-8 h-8 text-slate-200 mx-auto mb-2" />
-                <p className="text-sm text-slate-400">Escriba para buscar personas del padron.</p>
+                <p className="text-sm text-slate-400">Escriba al menos 2 caracteres para buscar por CI, nombre o apellido.</p>
               </div>
             ) : pageData.length === 0 ? (
               <div className="text-center py-10">
-                <p className="text-sm text-slate-400">No se encontraron resultados.</p>
+                <Search className="w-8 h-8 text-slate-200 mx-auto mb-2" />
+                <p className="text-sm text-slate-400">No se encontraron resultados para <strong>{term}</strong>.</p>
               </div>
             ) : (
               pageData.map((persona) => {
