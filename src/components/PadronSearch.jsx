@@ -1,94 +1,62 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { Search, X, AlertCircle, ChevronLeft, ChevronRight } from "lucide-react";
-import { supabase } from "../supabaseClient";
 
 // ======================= PADRON SEARCH =======================
-// Componente reutilizable de búsqueda en el padrón electoral.
-// Usa el padrón cargado en IndexedDB (prop `disponibles`).
-// Si disponibles está vacío, hace fallback a Supabase con debounce.
+// Busca sobre el arreglo `padron` completo cargado desde IndexedDB.
+// No realiza ninguna consulta a Supabase.
 //
 // Props:
-//   disponibles    - array de personas del padrón ya enriquecido (de getPersonasDisponibles)
-//   onSelect       - función llamada con la persona seleccionada
-//   titulo         - string, título del buscador (ej: "Buscar Coordinador")
-//   placeholder    - string, placeholder del input
-//   maxResultados  - número, máx resultados a mostrar (default 50)
-//   onBack         - función opcional para botón "volver"
-//   onClose        - función para cerrar el modal contenedor
+//   padron        - array completo del padrón (de IndexedDB / estado App)
+//   disponibles   - array enriquecido de getPersonasDisponibles (para marcar asignados)
+//   onSelect      - fn(persona) llamada al hacer click en un resultado
+//   titulo        - string
+//   placeholder   - string
+//   maxResultados - max resultados TOTALES tras filtrar y ordenar (default 200)
+//   onBack        - fn opcional para botón "volver"
+//   onClose       - fn para cerrar el modal contenedor
 
-const normText = (text) =>
-  (text ?? "")
-    .toString()
-    .toLowerCase()
+// Normaliza texto: minúsculas, sin tildes, sin espacios duplicados
+const normalize = (value = "") =>
+  String(value)
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
     .replace(/\s+/g, " ")
     .trim();
 
-// Devuelve true si la persona coincide con el término de búsqueda.
-// Búsqueda numérica y de texto son EXCLUYENTES: si el término es solo
-// dígitos se busca únicamente por CI; si tiene letras se busca SOLO por nombre.
-const matchesTerm = (p, term) => {
-  if (!term || term.length < 2) return false;
-  const isNumeric = /^\d+$/.test(term.trim());
-  const ciDigits = String(p.ci ?? "").replace(/\D/g, "");
-
+// Puntaje de relevancia — menor = más relevante
+const relevance = (p, termNorm, isNumeric) => {
   if (isNumeric) {
-    // Búsqueda por CI: el CI debe contener los dígitos escritos
-    return ciDigits.includes(term.trim());
+    const ci = String(p.ci ?? "");
+    if (ci === termNorm) return 0;              // CI exacta
+    if (ci.startsWith(termNorm)) return 1;     // CI empieza con los dígitos
+    return 2;                                  // CI contiene los dígitos
   }
-
-  // Búsqueda por nombre/apellido: TODAS las palabras deben estar en el nombre completo (AND)
-  const fullName = normText(`${p.nombre ?? ""} ${p.apellido ?? ""}`);
-  const words = normText(term).split(" ").filter(Boolean);
-  return words.length > 0 && words.every((w) => fullName.includes(w));
+  const full = normalize(`${p.nombre ?? ""} ${p.apellido ?? ""}`);
+  if (full === termNorm) return 0;             // Nombre completo exacto
+  if (full.startsWith(termNorm)) return 1;    // Empieza con la frase
+  if (full.includes(termNorm)) return 2;      // Frase completa contenida
+  return 3;                                   // Todas las palabras en diferente orden
 };
 
-// Calcula un puntaje de relevancia (menor = más relevante).
-const relevanceScore = (p, term) => {
-  const isNumeric = /^\d+$/.test(term.trim());
-  const ciDigits = String(p.ci ?? "").replace(/\D/g, "");
-  const termNorm = normText(term);
-  const fullName = normText(`${p.nombre ?? ""} ${p.apellido ?? ""}`);
-
-  if (isNumeric) {
-    if (ciDigits === term.trim()) return 0;           // CI exacta
-    if (ciDigits.startsWith(term.trim())) return 1;  // CI que empieza con los dígitos
-    return 2;                                         // CI que contiene los dígitos
-  }
-
-  if (fullName === termNorm) return 0;               // Nombre completo exacto
-  if (fullName.startsWith(termNorm)) return 1;       // Empieza con la frase completa
-  // Frase completa como subcadena (palabras juntas)
-  if (fullName.includes(termNorm)) return 2;
-  return 3;                                          // Todas las palabras presentes en cualquier orden
-};
-
-const PAGE_SIZE = 20;
+const PAGE_SIZE = 50;
 
 const PadronSearch = ({
+  padron = [],
   disponibles = [],
   onSelect,
   titulo = "Buscar en el Padron",
   placeholder = "Buscar por CI, nombre o apellido...",
-  maxResultados = 50,
+  maxResultados = 200,
   onBack,
   onClose,
 }) => {
   const [searchTerm, setSearchTerm] = useState("");
   const [page, setPage] = useState(1);
-
-  // Fallback Supabase
-  const [fallbackResults, setFallbackResults] = useState(null); // null = usar disponibles
-  const [searching, setSearching] = useState(false);
-  const [searchError, setSearchError] = useState(null);
-  const debounceRef = useRef(null);
   const inputRef = useRef(null);
 
-  // Reset page al cambiar término
-  useEffect(() => {
-    setPage(1);
-  }, [searchTerm]);
+  // Reset página al cambiar término
+  useEffect(() => { setPage(1); }, [searchTerm]);
 
   // Auto-foco al montar
   useEffect(() => {
@@ -96,113 +64,57 @@ const PadronSearch = ({
     return () => clearTimeout(t);
   }, []);
 
-  // Fallback a Supabase cuando disponibles está vacío
-  useEffect(() => {
-    const term = searchTerm.trim();
-
-    if (!term || term.length < 2) {
-      setFallbackResults(null);
-      setSearchError(null);
-      setSearching(false);
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-      return;
+  // Mapa de CIs asignados para marcar rápidamente
+  const asignadosMap = useMemo(() => {
+    const m = new Map();
+    for (const p of disponibles) {
+      if (p.asignado) m.set(String(p.ci ?? "").replace(/\D/g, ""), p);
     }
-
-    // Si hay datos en disponibles, no hacer fallback
-    if (disponibles && disponibles.length > 0) {
-      setFallbackResults(null);
-      setSearchError(null);
-      return;
-    }
-
-    // Fallback: Supabase con debounce
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    setSearching(true);
-
-    debounceRef.current = setTimeout(async () => {
-      setSearchError(null);
-      try {
-        const termDigits = term.replace(/\D/g, "");
-        const termNorm = normText(term);
-        const isNumeric = /^\d+$/.test(term.trim());
-
-        let query = supabase
-          .from("padron")
-          .select("ci,nombre,apellido,seccional,local_votacion,mesa,orden");
-
-        if (isNumeric && termDigits) {
-          // Búsqueda por CI: traer registros que contengan los dígitos
-          query = query.ilike("ci", `%${termDigits}%`);
-        } else {
-          // Búsqueda por nombre: usar la PRIMERA palabra como ancla para reducir el conjunto
-          // luego se filtra con AND localmente.
-          const words = normText(term).split(" ").filter(Boolean);
-          if (words.length > 0) {
-            // Pedir registros que contengan AL MENOS la primera palabra (OR entre nombre y apellido)
-            // El filtro AND se aplica después sobre el resultado
-            query = query.or(
-              `nombre.ilike.%${words[0]}%,apellido.ilike.%${words[0]}%`
-            );
-          }
-        }
-
-        // Traer más del límite para que el filtro AND local pueda actuar
-        const { data, error } = await query.limit(500);
-
-        if (error) {
-          console.error("[PadronSearch] Error Supabase:", error);
-          setSearchError("Error al buscar en el padron: " + error.message);
-          setFallbackResults([]);
-        } else {
-          // Normalizar CIs y marcar como no asignados; el filtro AND se aplica en `filtered`
-          setFallbackResults(
-            (data || []).map((p) => ({
-              ...p,
-              ci: String(p.ci ?? "").replace(/\D/g, ""),
-              asignado: false,
-              asignadoRol: null,
-              asignadoPorNombre: "",
-            }))
-          );
-        }
-      } catch (err) {
-        console.error("[PadronSearch] Error inesperado:", err);
-        setSearchError("Error inesperado al buscar en el padron.");
-        setFallbackResults([]);
-      } finally {
-        setSearching(false);
-      }
-    }, 350);
-
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-    };
-  }, [searchTerm, disponibles, maxResultados]);
+    return m;
+  }, [disponibles]);
 
   const term = searchTerm.trim();
-  const usandoFallback = fallbackResults !== null;
+  const termNorm = normalize(term);
+  const isNumeric = /^\d+$/.test(term);
+  const words = isNumeric ? [] : termNorm.split(" ").filter(Boolean);
 
-  const filtered =
-    term && term.length >= 2
-      ? (usandoFallback ? fallbackResults : disponibles)
-          .filter((p) => matchesTerm(p, term))
-          .sort((a, b) => {
-            const diff = relevanceScore(a, term) - relevanceScore(b, term);
-            if (diff !== 0) return diff;
-            // Mismo puntaje: ordenar alfabéticamente por nombre completo
-            return normText(`${a.nombre ?? ""} ${a.apellido ?? ""}`).localeCompare(
-              normText(`${b.nombre ?? ""} ${b.apellido ?? ""}`)
-            );
-          })
-          .slice(0, maxResultados)
-      : [];
+  const filtered = useMemo(() => {
+    if (!term || term.length < 2) return [];
+
+    const results = [];
+    for (const p of padron) {
+      const ci = String(p.ci ?? "");
+
+      if (isNumeric) {
+        // Búsqueda por CI: el CI debe contener exactamente los dígitos escritos
+        if (ci.includes(term)) results.push(p);
+      } else {
+        // Búsqueda por nombre/apellido: TODAS las palabras deben estar (AND)
+        const full = normalize(`${p.nombre ?? ""} ${p.apellido ?? ""}`);
+        if (words.length > 0 && words.every((w) => full.includes(w))) {
+          results.push(p);
+        }
+      }
+    }
+
+    // Ordenar por relevancia, luego alfabéticamente dentro del mismo score
+    results.sort((a, b) => {
+      const diff = relevance(a, termNorm, isNumeric) - relevance(b, termNorm, isNumeric);
+      if (diff !== 0) return diff;
+      return normalize(`${a.nombre ?? ""} ${a.apellido ?? ""}`).localeCompare(
+        normalize(`${b.nombre ?? ""} ${b.apellido ?? ""}`)
+      );
+    });
+
+    return results.slice(0, maxResultados);
+  }, [padron, term, termNorm, isNumeric, words, maxResultados]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const pageData = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden min-h-0">
-      {/* Header del buscador */}
+      {/* Header */}
       <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 bg-slate-50 shrink-0">
         <div className="flex items-center gap-2">
           {onBack && (
@@ -253,7 +165,6 @@ const PadronSearch = ({
           )}
         </div>
 
-        {/* Contadores / avisos */}
         {term.length === 1 && (
           <p className="text-xs text-amber-500 mt-1.5">
             Escriba al menos 2 caracteres para buscar.
@@ -261,13 +172,17 @@ const PadronSearch = ({
         )}
         {term.length >= 2 && (
           <p className="text-xs text-slate-500 mt-1.5">
-            {searching
-              ? "Buscando..."
-              : searchError
-              ? ""
+            {filtered.length === 0
+              ? "Sin resultados"
               : `${filtered.length} resultado${filtered.length !== 1 ? "s" : ""}${
-                  usandoFallback ? " (servidor)" : ""
-                }${filtered.length === maxResultados ? ` — mostrando maximo ${maxResultados}` : ""}`}
+                  filtered.length === maxResultados ? ` (mostrando los primeros ${maxResultados})` : ""
+                }`}
+          </p>
+        )}
+        {padron.length === 0 && term.length >= 2 && (
+          <p className="text-xs text-red-500 mt-1 flex items-center gap-1">
+            <AlertCircle className="w-3 h-3" />
+            El padron aun no fue cargado. Espere un momento y vuelva a intentar.
           </p>
         )}
       </div>
@@ -281,16 +196,6 @@ const PadronSearch = ({
               Escriba al menos 2 caracteres para buscar por CI, nombre o apellido.
             </p>
           </div>
-        ) : searching ? (
-          <div className="text-center py-12">
-            <div className="w-6 h-6 border-2 border-brand-500 border-t-transparent rounded-full animate-spin mx-auto mb-2" />
-            <p className="text-sm text-slate-400">Buscando en el padron...</p>
-          </div>
-        ) : searchError ? (
-          <div className="text-center py-12">
-            <AlertCircle className="w-8 h-8 text-red-300 mx-auto mb-2" />
-            <p className="text-sm text-red-500">{searchError}</p>
-          </div>
         ) : pageData.length === 0 ? (
           <div className="text-center py-12">
             <Search className="w-8 h-8 text-slate-200 mx-auto mb-2" />
@@ -301,10 +206,12 @@ const PadronSearch = ({
           </div>
         ) : (
           pageData.map((persona) => {
-            const bloqueado = persona.asignado === true;
+            const ciKey = String(persona.ci ?? "");
+            const asignadoInfo = asignadosMap.get(ciKey);
+            const bloqueado = !!asignadoInfo;
             return (
               <div
-                key={String(persona.ci)}
+                key={ciKey}
                 onClick={() => !bloqueado && onSelect(persona)}
                 className={`p-3 border rounded-xl transition-colors select-none ${
                   bloqueado
@@ -319,13 +226,9 @@ const PadronSearch = ({
                 <div className="text-xs text-slate-500 mt-0.5 space-y-0.5">
                   <p>CI: {persona.ci}</p>
                   <div className="flex flex-wrap gap-x-3">
-                    {persona.seccional && (
-                      <span>Seccional: {persona.seccional}</span>
-                    )}
+                    {persona.seccional && <span>Seccional: {persona.seccional}</span>}
                     {persona.local_votacion && (
-                      <span className="truncate">
-                        Local: {persona.local_votacion}
-                      </span>
+                      <span className="truncate">Local: {persona.local_votacion}</span>
                     )}
                     {persona.mesa && <span>Mesa: {persona.mesa}</span>}
                     {persona.orden && <span>Orden: {persona.orden}</span>}
@@ -333,7 +236,7 @@ const PadronSearch = ({
                 </div>
                 {bloqueado && (
                   <p className="text-xs text-brand-600 mt-1 font-medium truncate">
-                    Ya asignado ({persona.asignadoRol})
+                    Ya asignado ({asignadoInfo.asignadoRol})
                   </p>
                 )}
               </div>

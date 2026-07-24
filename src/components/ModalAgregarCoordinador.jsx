@@ -24,6 +24,7 @@ const ModalAgregarCoordinador = ({
   show,
   onClose,
   onAdd,
+  padron = [],
   disponibles = [],
   dirigentes = [],
   rolActual,
@@ -207,6 +208,7 @@ const ModalAgregarCoordinador = ({
         )}
 
         <PadronSearch
+          padron={padron}
           disponibles={disponibles}
           onSelect={handleSelectPersona}
           titulo="Agregar Coordinador"

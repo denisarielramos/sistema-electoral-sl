@@ -284,6 +284,7 @@ const VotanteRow = ({
 const ModalAgregarDirigente = ({
   show,
   onClose,
+  padron,
   disponibles,
   onAgregarDesdePadron,
   onAgregarExterno,
@@ -415,6 +416,7 @@ const ModalAgregarDirigente = ({
       <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-3 sm:p-4">
         <div className="bg-white rounded-2xl w-full max-w-xl shadow-modal overflow-hidden flex flex-col max-h-[90vh] animate-fade-in">
           <PadronSearch
+            padron={padron}
             disponibles={disponibles}
             onSelect={handleSelectPadron}
             titulo="Agregar Dirigente — Padron"
@@ -1730,13 +1732,15 @@ const Dashboard = ({ currentUser, onLogout }) => {
         onClose={() => setShowAddModal(false)}
         tipo={addModalTipo}
         onAdd={handleAddPersona}
-        disponibles={personasDisponibles.filter((p) => !p.asignado)}
+        padron={padron}
+        disponibles={personasDisponibles}
       />
 
       <ModalAgregarDirigente
         show={showAgregarDirigente}
         onClose={() => setShowAgregarDirigente(false)}
-        disponibles={personasDisponibles.filter((p) => !p.asignado)}
+        padron={padron}
+        disponibles={personasDisponibles}
         onAgregarDesdePadron={handleAgregarDirigenteDesdePadron}
         onAgregarExterno={handleAgregarDirigenteExterno}
       />
@@ -1749,7 +1753,8 @@ const Dashboard = ({ currentUser, onLogout }) => {
             ? handleAddCoordinadorSuperadmin
             : handleAddCoordinadorDesdeModal
         }
-        disponibles={personasDisponibles.filter((p) => !p.asignado)}
+        padron={padron}
+        disponibles={personasDisponibles}
         dirigentes={estructura.dirigentes}
         rolActual={currentUser.role}
         dirigenteCI={currentUser.role === "dirigente" ? currentUser.ci : undefined}

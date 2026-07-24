@@ -15,7 +15,7 @@ import PadronSearch from "./components/PadronSearch";
 //   onAdd        - fn(persona) — para coord/sub; fn({...persona, telefono, tercera_edad}) para votante
 //   disponibles  - array de personas del padrón enriquecido
 
-const AddPersonModal = ({ show, onClose, tipo, onAdd, disponibles }) => {
+const AddPersonModal = ({ show, onClose, tipo, onAdd, padron = [], disponibles = [] }) => {
   // Paso 2 — solo para votantes
   const [personaSeleccionada, setPersonaSeleccionada] = useState(null);
   const [telefono, setTelefono] = useState("+595");
@@ -202,6 +202,7 @@ const AddPersonModal = ({ show, onClose, tipo, onAdd, disponibles }) => {
     >
       <div className="bg-white rounded-2xl w-full max-w-xl shadow-modal overflow-hidden flex flex-col max-h-[90vh] animate-fade-in">
         <PadronSearch
+          padron={padron}
           disponibles={disponibles}
           onSelect={handleSelectPersona}
           titulo={titulo}
