@@ -21,21 +21,47 @@ const normText = (text) =>
     .toString()
     .toLowerCase()
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "");
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
 
+// Devuelve true si la persona coincide con el término de búsqueda.
+// Búsqueda numérica y de texto son EXCLUYENTES: si el término es solo
+// dígitos se busca únicamente por CI; si tiene letras se busca SOLO por nombre.
 const matchesTerm = (p, term) => {
   if (!term || term.length < 2) return false;
-  const termNorm = normText(term);
-  const termDigits = term.replace(/\D/g, "");
-
-  // Búsqueda por CI (solo dígitos, partial match)
+  const isNumeric = /^\d+$/.test(term.trim());
   const ciDigits = String(p.ci ?? "").replace(/\D/g, "");
-  if (termDigits && ciDigits.includes(termDigits)) return true;
 
-  // Búsqueda por nombre/apellido (cada palabra debe aparecer)
+  if (isNumeric) {
+    // Búsqueda por CI: el CI debe contener los dígitos escritos
+    return ciDigits.includes(term.trim());
+  }
+
+  // Búsqueda por nombre/apellido: TODAS las palabras deben estar en el nombre completo (AND)
   const fullName = normText(`${p.nombre ?? ""} ${p.apellido ?? ""}`);
-  const words = termNorm.split(/\s+/).filter(Boolean);
+  const words = normText(term).split(" ").filter(Boolean);
   return words.length > 0 && words.every((w) => fullName.includes(w));
+};
+
+// Calcula un puntaje de relevancia (menor = más relevante).
+const relevanceScore = (p, term) => {
+  const isNumeric = /^\d+$/.test(term.trim());
+  const ciDigits = String(p.ci ?? "").replace(/\D/g, "");
+  const termNorm = normText(term);
+  const fullName = normText(`${p.nombre ?? ""} ${p.apellido ?? ""}`);
+
+  if (isNumeric) {
+    if (ciDigits === term.trim()) return 0;           // CI exacta
+    if (ciDigits.startsWith(term.trim())) return 1;  // CI que empieza con los dígitos
+    return 2;                                         // CI que contiene los dígitos
+  }
+
+  if (fullName === termNorm) return 0;               // Nombre completo exacto
+  if (fullName.startsWith(termNorm)) return 1;       // Empieza con la frase completa
+  // Frase completa como subcadena (palabras juntas)
+  if (fullName.includes(termNorm)) return 2;
+  return 3;                                          // Todas las palabras presentes en cualquier orden
 };
 
 const PAGE_SIZE = 20;
@@ -105,23 +131,30 @@ const PadronSearch = ({
           .select("ci,nombre,apellido,seccional,local_votacion,mesa,orden");
 
         if (isNumeric && termDigits) {
+          // Búsqueda por CI: traer registros que contengan los dígitos
           query = query.ilike("ci", `%${termDigits}%`);
         } else {
-          const words = termNorm.split(/\s+/).filter(Boolean);
+          // Búsqueda por nombre: usar la PRIMERA palabra como ancla para reducir el conjunto
+          // luego se filtra con AND localmente.
+          const words = normText(term).split(" ").filter(Boolean);
           if (words.length > 0) {
+            // Pedir registros que contengan AL MENOS la primera palabra (OR entre nombre y apellido)
+            // El filtro AND se aplica después sobre el resultado
             query = query.or(
-              words.map((w) => `nombre.ilike.%${w}%,apellido.ilike.%${w}%`).join(",")
+              `nombre.ilike.%${words[0]}%,apellido.ilike.%${words[0]}%`
             );
           }
         }
 
-        const { data, error } = await query.limit(maxResultados);
+        // Traer más del límite para que el filtro AND local pueda actuar
+        const { data, error } = await query.limit(500);
 
         if (error) {
           console.error("[PadronSearch] Error Supabase:", error);
           setSearchError("Error al buscar en el padron: " + error.message);
           setFallbackResults([]);
         } else {
+          // Normalizar CIs y marcar como no asignados; el filtro AND se aplica en `filtered`
           setFallbackResults(
             (data || []).map((p) => ({
               ...p,
@@ -151,12 +184,17 @@ const PadronSearch = ({
 
   const filtered =
     term && term.length >= 2
-      ? usandoFallback
-        ? fallbackResults.slice(0, maxResultados)
-        : disponibles
-            .filter((p) => matchesTerm(p, term))
-            .sort((a, b) => (a.nombre || "").localeCompare(b.nombre || ""))
-            .slice(0, maxResultados)
+      ? (usandoFallback ? fallbackResults : disponibles)
+          .filter((p) => matchesTerm(p, term))
+          .sort((a, b) => {
+            const diff = relevanceScore(a, term) - relevanceScore(b, term);
+            if (diff !== 0) return diff;
+            // Mismo puntaje: ordenar alfabéticamente por nombre completo
+            return normText(`${a.nombre ?? ""} ${a.apellido ?? ""}`).localeCompare(
+              normText(`${b.nombre ?? ""} ${b.apellido ?? ""}`)
+            );
+          })
+          .slice(0, maxResultados)
       : [];
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
