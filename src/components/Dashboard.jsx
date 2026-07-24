@@ -23,6 +23,8 @@ import {
 } from "lucide-react";
 
 import AddPersonModal from "../AddPersonModal";
+import ModalAgregarCoordinador from "./ModalAgregarCoordinador";
+import PadronSearch from "./PadronSearch";
 import ModalTelefono from "./ModalTelefono";
 import ModalDireccion from "./ModalDireccion";
 import ConfirmVotoModal from "./ConfirmVotoModal";
@@ -287,8 +289,6 @@ const ModalAgregarDirigente = ({
   onAgregarExterno,
 }) => {
   const [modo, setModo] = useState(null); // null | "padron" | "externo"
-  const [searchTerm, setSearchTerm] = useState("");
-  const [page, setPage] = useState(1);
   const [extCI, setExtCI] = useState("");
   const [extNombre, setExtNombre] = useState("");
   const [extApellido, setExtApellido] = useState("");
@@ -299,8 +299,6 @@ const ModalAgregarDirigente = ({
   useEffect(() => {
     if (!show) {
       setModo(null);
-      setSearchTerm("");
-      setPage(1);
       setExtCI("");
       setExtNombre("");
       setExtApellido("");
@@ -311,29 +309,6 @@ const ModalAgregarDirigente = ({
   }, [show]);
 
   if (!show) return null;
-
-  const normText = (text) =>
-    (text ?? "").toString().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-
-  const pageSize = 20;
-  const term = searchTerm.trim();
-  const filtered = term && term.length >= 2
-    ? disponibles
-        .filter((p) => {
-          const termNorm = normText(term);
-          const termDigits = term.replace(/\D/g, "");
-          const ciDigits = String(p.ci ?? "").replace(/\D/g, "");
-          // Búsqueda por CI parcial (solo dígitos)
-          if (termDigits && ciDigits.includes(termDigits)) return true;
-          // Búsqueda por nombre/apellido
-          const full = normText(`${p.nombre ?? ""} ${p.apellido ?? ""}`);
-          const words = termNorm.split(/\s+/).filter(Boolean);
-          return words.length > 0 && words.every((w) => full.includes(w));
-        })
-        .sort((a, b) => (a.nombre || "").localeCompare(b.nombre || ""))
-    : [];
-  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
-  const pageData = filtered.slice((page - 1) * pageSize, page * pageSize);
 
   const handleSelectPadron = async (persona) => {
     await onAgregarDesdePadron(persona);
@@ -439,105 +414,14 @@ const ModalAgregarDirigente = ({
     return (
       <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-3 sm:p-4">
         <div className="bg-white rounded-2xl w-full max-w-xl shadow-modal overflow-hidden flex flex-col max-h-[90vh] animate-fade-in">
-          <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 bg-slate-50 shrink-0">
-            <div className="flex items-center gap-2">
-              <button onClick={() => setModo(null)} className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg border-0 bg-transparent shadow-none">
-                <ChevronRight className="w-4 h-4 rotate-180" />
-              </button>
-              <h3 className="text-base font-bold text-slate-800">Persona del padron</h3>
-            </div>
-            <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg border-0 bg-transparent shadow-none">
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-          <div className="px-5 py-3 border-b border-slate-100 shrink-0">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-              <input
-                type="text"
-                value={searchTerm}
-                placeholder="Buscar por CI, nombre o apellido..."
-                onChange={(e) => { setSearchTerm(e.target.value); setPage(1); }}
-                className="w-full pl-9 pr-9 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent bg-slate-50"
-                autoFocus
-              />
-              {searchTerm && (
-                <button onClick={() => setSearchTerm("")} className="absolute right-3 top-1/2 -translate-y-1/2 p-0 bg-transparent border-0 shadow-none text-slate-400 hover:text-slate-600">
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              )}
-            </div>
-            {term && term.length >= 2 && (
-              <p className="text-xs text-slate-500 mt-1.5">{filtered.length} resultado{filtered.length !== 1 ? "s" : ""}</p>
-            )}
-            {term && term.length === 1 && (
-              <p className="text-xs text-amber-500 mt-1.5">Escriba al menos 2 caracteres para buscar.</p>
-            )}
-          </div>
-          <div className="flex-1 overflow-y-auto px-5 py-3 space-y-1.5">
-            {!term || term.length < 2 ? (
-              <div className="text-center py-10">
-                <Search className="w-8 h-8 text-slate-200 mx-auto mb-2" />
-                <p className="text-sm text-slate-400">Escriba al menos 2 caracteres para buscar por CI, nombre o apellido.</p>
-              </div>
-            ) : pageData.length === 0 ? (
-              <div className="text-center py-10">
-                <Search className="w-8 h-8 text-slate-200 mx-auto mb-2" />
-                <p className="text-sm text-slate-400">No se encontraron resultados para <strong>{term}</strong>.</p>
-              </div>
-            ) : (
-              pageData.map((persona) => {
-                const bloqueado = persona.asignado === true;
-                return (
-                  <div
-                    key={persona.ci}
-                    onClick={() => !bloqueado && handleSelectPadron(persona)}
-                    className={`p-3 border rounded-xl transition-colors ${
-                      bloqueado
-                        ? "bg-slate-50 opacity-60 cursor-not-allowed border-slate-200"
-                        : "bg-white hover:bg-brand-50 hover:border-brand-200 cursor-pointer border-slate-200"
-                    }`}
-                  >
-                    <p className="font-semibold text-sm text-slate-800 truncate">
-                      {(persona.nombre || "").toUpperCase()} {(persona.apellido || "").toUpperCase()}
-                    </p>
-                    <div className="text-xs text-slate-500 mt-0.5 space-y-0.5">
-                      <p>CI: {persona.ci}</p>
-                      <div className="flex flex-wrap gap-x-3">
-                        {persona.seccional && <span>Seccional: {persona.seccional}</span>}
-                        {persona.local_votacion && <span>Local: {persona.local_votacion}</span>}
-                        {persona.mesa && <span>Mesa: {persona.mesa}</span>}
-                      </div>
-                    </div>
-                    {bloqueado && (
-                      <p className="text-xs text-brand-600 mt-1 font-medium">
-                        Ya asignado ({persona.asignadoRol})
-                      </p>
-                    )}
-                  </div>
-                );
-              })
-            )}
-          </div>
-          {filtered.length > pageSize && (
-            <div className="flex items-center justify-between px-5 py-3 border-t border-slate-100 bg-slate-50 shrink-0">
-              <button
-                disabled={page === 1}
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                className="px-3 h-8 border border-slate-200 rounded-lg text-xs text-slate-600 disabled:opacity-40 bg-white hover:bg-slate-50"
-              >
-                Anterior
-              </button>
-              <span className="text-xs text-slate-500">Pagina {page} de {totalPages}</span>
-              <button
-                disabled={page === totalPages}
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                className="px-3 h-8 border border-slate-200 rounded-lg text-xs text-slate-600 disabled:opacity-40 bg-white hover:bg-slate-50"
-              >
-                Siguiente
-              </button>
-            </div>
-          )}
+          <PadronSearch
+            disponibles={disponibles}
+            onSelect={handleSelectPadron}
+            titulo="Agregar Dirigente — Padron"
+            placeholder="Buscar dirigente por CI, nombre o apellido..."
+            onBack={() => setModo(null)}
+            onClose={onClose}
+          />
           <div className="px-5 py-4 border-t border-slate-100 shrink-0">
             <button onClick={onClose} className="w-full h-10 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-sm font-medium border-0">
               Cerrar
@@ -634,6 +518,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
   const [showAddModal, setShowAddModal] = useState(false);
   const [addModalTipo, setAddModalTipo] = useState("votante");
   const [showAgregarDirigente, setShowAgregarDirigente] = useState(false);
+  const [showAgregarCoord, setShowAgregarCoord] = useState(false);
   const [modalTelefonoState, setModalTelefonoState] = useState({ show: false, tipo: null, persona: null });
   const [modalDireccionState, setModalDireccionState] = useState({ show: false, tipo: null, persona: null });
   const [confirmVotoState, setConfirmVotoState] = useState({ show: false, votante: null, accion: null });
@@ -873,31 +758,17 @@ const Dashboard = ({ currentUser, onLogout }) => {
     cargarEstructura();
   }, [currentUser, estructura, cargarEstructura]);
 
-  // ======================= AGREGAR COORDINADOR (DIRIGENTE) =======================
-  const handleAddCoordinador = useCallback(async (persona) => {
-    const ciCoord = normalizeCI(persona.ci);
-    const loginCode = await generarAccessCode();
-    const payload = {
-      ci: ciCoord,
-      dirigente_ci: normalizeCI(currentUser.ci),
-      asignado_por_ci: normalizeCI(currentUser.ci),
-      asignado_por_rol: "dirigente",
-      asignado_por_nombre: `${currentUser.nombre} ${currentUser.apellido || ""}`.trim(),
-      login_code: loginCode,
-      activo: true,
-    };
-    const { error } = await supabase.from("coordinadores").insert(payload);
-    if (error) { alert("Error al agregar coordinador: " + error.message); return; }
-    setShowAddModal(false);
-    cargarEstructura();
-  }, [currentUser, cargarEstructura]);
+
 
   // ======================= AGREGAR COORDINADOR (SUPERADMIN) =======================
-  const handleAddCoordinadorSuperadmin = useCallback(async (persona) => {
+  // Recibe { persona, dirigenteCI } desde ModalAgregarCoordinador
+  const handleAddCoordinadorSuperadmin = useCallback(async ({ persona, dirigenteCI }) => {
+    if (!dirigenteCI) { alert("Debe seleccionar un dirigente."); return; }
     const ciCoord = normalizeCI(persona.ci);
     const loginCode = await generarAccessCode();
     const payload = {
       ci: ciCoord,
+      dirigente_ci: normalizeCI(dirigenteCI),
       asignado_por_ci: null,
       asignado_por_rol: "superadmin",
       asignado_por_nombre: `${currentUser.nombre} ${currentUser.apellido || ""}`.trim(),
@@ -906,7 +777,26 @@ const Dashboard = ({ currentUser, onLogout }) => {
     };
     const { error } = await supabase.from("coordinadores").insert(payload);
     if (error) { alert("Error al agregar coordinador: " + error.message); return; }
-    setShowAddModal(false);
+    setShowAgregarCoord(false);
+    cargarEstructura();
+  }, [currentUser, cargarEstructura]);
+
+  // ======================= AGREGAR COORDINADOR (DIRIGENTE vía ModalAgregarCoordinador) =======================
+  const handleAddCoordinadorDesdeModal = useCallback(async ({ persona, dirigenteCI }) => {
+    const ciCoord = normalizeCI(persona.ci);
+    const loginCode = await generarAccessCode();
+    const payload = {
+      ci: ciCoord,
+      dirigente_ci: normalizeCI(dirigenteCI || currentUser.ci),
+      asignado_por_ci: normalizeCI(currentUser.ci),
+      asignado_por_rol: "dirigente",
+      asignado_por_nombre: `${currentUser.nombre} ${currentUser.apellido || ""}`.trim(),
+      login_code: loginCode,
+      activo: true,
+    };
+    const { error } = await supabase.from("coordinadores").insert(payload);
+    if (error) { alert("Error al agregar coordinador: " + error.message); return; }
+    setShowAgregarCoord(false);
     cargarEstructura();
   }, [currentUser, cargarEstructura]);
 
@@ -970,16 +860,13 @@ const Dashboard = ({ currentUser, onLogout }) => {
   }, [currentUser, cargarEstructura]);
 
   // ======================= HANDLER GENERAL ADD =======================
+  // Coordinadores van por ModalAgregarCoordinador; aquí solo votante y subcoordinador
   const handleAddPersona = useCallback(
     (persona) => {
       if (addModalTipo === "votante") return handleAddVotante(persona);
-      if (addModalTipo === "coordinador") {
-        if (currentUser.role === "dirigente") return handleAddCoordinador(persona);
-        return handleAddCoordinadorSuperadmin(persona);
-      }
       if (addModalTipo === "subcoordinador") return handleAddSubcoordinador(persona);
     },
-    [addModalTipo, currentUser.role, handleAddVotante, handleAddCoordinador, handleAddCoordinadorSuperadmin, handleAddSubcoordinador]
+    [addModalTipo, handleAddVotante, handleAddSubcoordinador]
   );
 
   // ======================= BÚSQUEDA =======================
@@ -1084,7 +971,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
             Agregar Dirigente
           </button>
           <button
-            onClick={() => { setAddModalTipo("coordinador"); setShowAddModal(true); }}
+            onClick={() => setShowAgregarCoord(true)}
             className="inline-flex items-center gap-2 px-4 h-9 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 rounded-lg text-sm font-medium transition-colors"
           >
             <UserPlus className="w-4 h-4" />
@@ -1389,7 +1276,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
         {/* Botones */}
         <div className="flex flex-wrap gap-2">
           <button
-            onClick={() => { setAddModalTipo("coordinador"); setShowAddModal(true); }}
+            onClick={() => setShowAgregarCoord(true)}
             className="inline-flex items-center gap-2 px-4 h-9 bg-brand-600 hover:bg-brand-700 text-white rounded-lg text-sm font-medium border-0 transition-colors"
           >
             <UserPlus className="w-4 h-4" />
@@ -1852,6 +1739,20 @@ const Dashboard = ({ currentUser, onLogout }) => {
         disponibles={personasDisponibles.filter((p) => !p.asignado)}
         onAgregarDesdePadron={handleAgregarDirigenteDesdePadron}
         onAgregarExterno={handleAgregarDirigenteExterno}
+      />
+
+      <ModalAgregarCoordinador
+        show={showAgregarCoord}
+        onClose={() => setShowAgregarCoord(false)}
+        onAdd={
+          currentUser.role === "superadmin"
+            ? handleAddCoordinadorSuperadmin
+            : handleAddCoordinadorDesdeModal
+        }
+        disponibles={personasDisponibles.filter((p) => !p.asignado)}
+        dirigentes={estructura.dirigentes}
+        rolActual={currentUser.role}
+        dirigenteCI={currentUser.role === "dirigente" ? currentUser.ci : undefined}
       />
 
       {modalTelefonoState.show && (
