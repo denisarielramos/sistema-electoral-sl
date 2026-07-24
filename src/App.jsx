@@ -123,6 +123,29 @@ const App = () => {
         return;
       }
 
+      // ======================= DIRIGENTE =======================
+      const { data: dirigente, error: dirErr } = await supabase
+        .from("dirigentes")
+        .select("ci,nombre,apellido,telefono,login_code,activo")
+        .eq("login_code", code)
+        .eq("activo", true)
+        .maybeSingle();
+
+      if (dirErr) console.error("Error login dirigente:", dirErr);
+
+      if (dirigente) {
+        const u = {
+          ci: normalizeCI(dirigente.ci),
+          nombre: dirigente.nombre,
+          apellido: dirigente.apellido || "",
+          telefono: dirigente.telefono || "",
+          role: "dirigente",
+        };
+        setCurrentUser(u);
+        localStorage.setItem("currentUser", JSON.stringify(u));
+        return;
+      }
+
       alert("Usuario no encontrado.");
     } finally {
       setIsLogging(false);

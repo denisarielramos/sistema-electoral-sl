@@ -1,10 +1,17 @@
-import { normalizeCI } from "../utils/estructuraHelpers";
+import {
+  normalizeCI,
+  getCoordsDeDigente,
+  getSubsDeDigente,
+  getTodosVotantesDirigente,
+  getVotantesDirectosDirigente,
+} from "../utils/estructuraHelpers";
 
 export const getEstadisticas = (estructura, currentUser) => {
   if (!currentUser) return {};
 
   // ======================= SUPERADMIN =======================
   if (currentUser.role === "superadmin") {
+    const dirigentes = (estructura.dirigentes || []).length;
     const coordinadores = estructura.coordinadores.length;
     const subcoordinadores = estructura.subcoordinadores.length;
     const votantes = estructura.votantes.length;
@@ -20,19 +27,20 @@ export const getEstadisticas = (estructura, currentUser) => {
     ).length;
 
     // Coordinadores are always counted as 1 confirmed vote each (automatic).
-    // Total confirmable = coordinadores + subs + voters
-    // Total confirmed  = coordinadores (auto) + confirmedSubs + confirmedVoters
-    const totalConfirmable = coordinadores + subcoordinadores + votantes;
-    const totalConfirmados = coordinadores + subsConfirmados + votosConfirmados;
+    // Total confirmable = dirigentes + coordinadores + subs + voters
+    // Total confirmed  = dirigentes (auto) + coordinadores (auto) + confirmedSubs + confirmedVoters
+    const totalConfirmable = dirigentes + coordinadores + subcoordinadores + votantes;
+    const totalConfirmados = dirigentes + coordinadores + subsConfirmados + votosConfirmados;
     const porcentajeConfirmados =
       totalConfirmable > 0 ? Math.round((totalConfirmados / totalConfirmable) * 100) : 0;
 
     return {
+      dirigentes,
       coordinadores,
       subcoordinadores,
       subsConfirmados,
       votantes,
-      totalRed: coordinadores + subcoordinadores + votantes,
+      totalRed: dirigentes + coordinadores + subcoordinadores + votantes,
       totalVotantes: votantes,
       totalConfirmable,
       totalConfirmados,
@@ -110,6 +118,35 @@ export const getEstadisticas = (estructura, currentUser) => {
       votosConfirmados,
       votosPendientes: totalConfirmable - totalConfirmados,
       porcentajeConfirmados,
+    };
+  }
+
+  // ======================= DIRIGENTE =======================
+  if (currentUser.role === "dirigente") {
+    const miCI = normalizeCI(currentUser.ci);
+
+    const misCoords = getCoordsDeDigente(estructura, miCI);
+    const misSubs = getSubsDeDigente(estructura, miCI);
+    const votantesDirectos = getVotantesDirectosDirigente(estructura, miCI);
+    const todosVotantes = getTodosVotantesDirigente(estructura, miCI);
+
+    // Voters assigned by coordinators (direct of coord)
+    const votantesDeCoords = todosVotantes.filter(
+      (v) => normalizeCI(v.asignado_por_rol) === "coordinador"
+    ).length;
+
+    // Voters assigned by subcoordinators
+    const votantesDeSubs = todosVotantes.filter(
+      (v) => normalizeCI(v.asignado_por_rol) === "subcoordinador"
+    ).length;
+
+    return {
+      coordinadores: misCoords.length,
+      subcoordinadores: misSubs.length,
+      votantesDirectos: votantesDirectos.length,
+      votantesDeCoords,
+      votantesDeSubs,
+      totalRed: misCoords.length + misSubs.length + todosVotantes.length,
     };
   }
 

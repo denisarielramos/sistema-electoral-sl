@@ -41,6 +41,9 @@ export const getPersonasDisponibles = (padron, estructura) => {
   return padron.map((p) => {
     const ci = normalizeCI(p.ci);
 
+    const dir = (estructura.dirigentes || []).find(
+      (d) => normalizeCI(d.ci) === ci
+    );
     const coord = estructura.coordinadores.find(
       (c) => normalizeCI(c.ci) === ci
     );
@@ -52,7 +55,8 @@ export const getPersonasDisponibles = (padron, estructura) => {
     );
 
     let rol = null;
-    if (coord) rol = "coordinador";
+    if (dir) rol = "dirigente";
+    else if (coord) rol = "coordinador";
     else if (sub) rol = "subcoordinador";
     else if (vot) rol = "votante";
 
@@ -62,9 +66,46 @@ export const getPersonasDisponibles = (padron, estructura) => {
       asignado: rol !== null,
       asignadoRol: rol,
       asignadoPorNombre:
-        sub?.asignado_por_nombre || vot?.asignado_por_nombre || "",
+        dir?.asignado_por_nombre ||
+        sub?.asignado_por_nombre ||
+        vot?.asignado_por_nombre ||
+        "",
     };
   });
+};
+
+// ======================= HELPERS DIRIGENTE =======================
+
+// Coordinadores bajo un dirigente
+export const getCoordsDeDigente = (estructura, dirigenteCI) => {
+  return (estructura.coordinadores || []).filter(
+    (c) => normalizeCI(c.dirigente_ci) === normalizeCI(dirigenteCI)
+  );
+};
+
+// Subcoordinadores dentro de la rama de un dirigente
+export const getSubsDeDigente = (estructura, dirigenteCI) => {
+  const coords = getCoordsDeDigente(estructura, dirigenteCI);
+  const coordCIs = new Set(coords.map((c) => normalizeCI(c.ci)));
+  return (estructura.subcoordinadores || []).filter(
+    (s) => coordCIs.has(normalizeCI(s.coordinador_ci))
+  );
+};
+
+// Votantes directos del dirigente
+export const getVotantesDirectosDirigente = (estructura, dirigenteCI) => {
+  return (estructura.votantes || []).filter(
+    (v) =>
+      normalizeCI(v.dirigente_ci) === normalizeCI(dirigenteCI) &&
+      normalizeCI(v.asignado_por_rol) === "dirigente"
+  );
+};
+
+// Todos los votantes dentro de la rama de un dirigente (directos + de coords + de subs)
+export const getTodosVotantesDirigente = (estructura, dirigenteCI) => {
+  return (estructura.votantes || []).filter(
+    (v) => normalizeCI(v.dirigente_ci) === normalizeCI(dirigenteCI)
+  );
 };
 
 // ======================= ESTRUCTURA PROPIA =======================
