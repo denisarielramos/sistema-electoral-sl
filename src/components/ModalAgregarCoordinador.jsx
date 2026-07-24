@@ -25,6 +25,9 @@ const ModalAgregarCoordinador = ({
   onClose,
   onAdd,
   padron = [],
+  padronLoading = false,
+  padronError = null,
+  onRetryPadron,
   disponibles = [],
   dirigentes = [],
   rolActual,
@@ -209,6 +212,9 @@ const ModalAgregarCoordinador = ({
 
         <PadronSearch
           padron={padron}
+          padronLoading={padronLoading}
+          padronError={padronError}
+          onRetry={onRetryPadron}
           disponibles={disponibles}
           onSelect={handleSelectPersona}
           titulo="Agregar Coordinador"

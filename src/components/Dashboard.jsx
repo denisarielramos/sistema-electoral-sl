@@ -285,6 +285,9 @@ const ModalAgregarDirigente = ({
   show,
   onClose,
   padron,
+  padronLoading,
+  padronError,
+  onRetryPadron,
   disponibles,
   onAgregarDesdePadron,
   onAgregarExterno,
@@ -417,6 +420,9 @@ const ModalAgregarDirigente = ({
         <div className="bg-white rounded-2xl w-full max-w-xl shadow-modal overflow-hidden flex flex-col max-h-[90vh] animate-fade-in">
           <PadronSearch
             padron={padron}
+            padronLoading={padronLoading}
+            padronError={padronError}
+            onRetry={onRetryPadron}
             disponibles={disponibles}
             onSelect={handleSelectPadron}
             titulo="Agregar Dirigente — Padron"
@@ -514,6 +520,8 @@ const Dashboard = ({ currentUser, onLogout }) => {
   });
   const [padron, setPadron] = useState([]);
   const [padronLoaded, setPadronLoaded] = useState(false);
+  const [padronLoading, setPadronLoading] = useState(false);
+  const [padronError, setPadronError] = useState(null);
   const [loading, setLoading] = useState(true);
 
   // Modal states
@@ -579,30 +587,104 @@ const Dashboard = ({ currentUser, onLogout }) => {
     }
   }, []);
 
-  // ======================= CARGAR PADRÓN (INDEXEDDB) =======================
-  const cargarPadron = useCallback(async () => {
-    try {
-      const dbReq = indexedDB.open("PadronDB", 1);
-      dbReq.onsuccess = (e) => {
+  // ======================= PADRON: HELPERS INDEXEDDB =======================
+  const openPadronDB = () =>
+    new Promise((resolve, reject) => {
+      const req = indexedDB.open("PadronDB", 1);
+      req.onupgradeneeded = (e) => {
         const db = e.target.result;
         if (!db.objectStoreNames.contains("padron")) {
-          setPadronLoaded(true);
-          return;
+          db.createObjectStore("padron", { keyPath: "ci" });
         }
-        const tx = db.transaction("padron", "readonly");
-        const store = tx.objectStore("padron");
-        const req = store.getAll();
-        req.onsuccess = () => {
-          setPadron(req.result || []);
-          setPadronLoaded(true);
-        };
-        req.onerror = () => setPadronLoaded(true);
       };
-      dbReq.onerror = () => setPadronLoaded(true);
-    } catch {
-      setPadronLoaded(true);
+      req.onsuccess = (e) => resolve(e.target.result);
+      req.onerror = () => reject(req.error);
+    });
+
+  const readAllFromDB = (db) =>
+    new Promise((resolve, reject) => {
+      if (!db.objectStoreNames.contains("padron")) { resolve([]); return; }
+      const tx = db.transaction("padron", "readonly");
+      const req = tx.objectStore("padron").getAll();
+      req.onsuccess = () => resolve(req.result || []);
+      req.onerror = () => reject(req.error);
+    });
+
+  const saveAllToDB = (db, registros) =>
+    new Promise((resolve, reject) => {
+      if (!db.objectStoreNames.contains("padron")) { resolve(); return; }
+      const tx = db.transaction("padron", "readwrite");
+      const store = tx.objectStore("padron");
+      store.clear();
+      for (const r of registros) store.put(r);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+
+  // Descarga el padrón completo desde Supabase usando paginación de 1000 filas
+  const descargarPadronSupabase = async () => {
+    const PAGE = 1000;
+    let desde = 0;
+    const acum = [];
+    for (;;) {
+      const { data, error } = await supabase
+        .from("padron")
+        .select("ci,nombre,apellido,seccional,local_votacion,mesa,orden")
+        .range(desde, desde + PAGE - 1);
+      if (error) throw error;
+      if (!data || data.length === 0) break;
+      acum.push(...data);
+      if (data.length < PAGE) break;
+      desde += PAGE;
     }
-  }, []);
+    return acum;
+  };
+
+  // ======================= CARGAR PADRÓN (ensurePadronLoaded) =======================
+  const cargarPadron = useCallback(async () => {
+    // A: ya hay datos en el estado → no volver a cargar
+    if (padron.length > 0) { setPadronLoaded(true); return; }
+
+    setPadronLoading(true);
+    setPadronError(null);
+    try {
+      // B: leer IndexedDB
+      const db = await openPadronDB();
+      const cached = await readAllFromDB(db);
+
+      if (cached.length > 0) {
+        // IndexedDB tiene datos → usarlos inmediatamente
+        setPadron(cached);
+        setPadronLoaded(true);
+        setPadronLoading(false);
+
+        // D: actualización en background (sin bloquear el buscador)
+        descargarPadronSupabase()
+          .then(async (fresh) => {
+            if (fresh.length > 0 && fresh.length !== cached.length) {
+              await saveAllToDB(db, fresh);
+              setPadron(fresh);
+            }
+          })
+          .catch(() => {/* ignorar errores del refresh en background */});
+        return;
+      }
+
+      // C: IndexedDB vacío → descargar desde Supabase
+      const registros = await descargarPadronSupabase();
+      if (registros.length > 0) {
+        await saveAllToDB(db, registros);
+        setPadron(registros);
+      }
+      setPadronLoaded(true);
+    } catch (err) {
+      console.error("[Dashboard] Error cargando padrón:", err);
+      setPadronError("Error al cargar el padrón: " + (err?.message || "error desconocido"));
+      setPadronLoaded(true);
+    } finally {
+      setPadronLoading(false);
+    }
+  }, [padron.length]);  // solo re-crea si cambia la longitud (de 0 a >0)
 
   useEffect(() => {
     cargarEstructura();
@@ -617,9 +699,11 @@ const Dashboard = ({ currentUser, onLogout }) => {
   }, []);
 
   // ======================= PERSONAS DISPONIBLES =======================
+  // padronLoaded siempre se pone true al finalizar cargarPadron (éxito o error).
+  // Mientras padron sea [], getPersonasDisponibles devuelve [] correctamente.
   const personasDisponibles = useMemo(
-    () => (padronLoaded ? getPersonasDisponibles(padron, estructura) : []),
-    [padron, padronLoaded, estructura]
+    () => getPersonasDisponibles(padron, estructura),
+    [padron, estructura]
   );
 
   // ======================= ESTADÍSTICAS =======================
@@ -1733,6 +1817,9 @@ const Dashboard = ({ currentUser, onLogout }) => {
         tipo={addModalTipo}
         onAdd={handleAddPersona}
         padron={padron}
+        padronLoading={padronLoading}
+        padronError={padronError}
+        onRetryPadron={cargarPadron}
         disponibles={personasDisponibles}
       />
 
@@ -1740,6 +1827,9 @@ const Dashboard = ({ currentUser, onLogout }) => {
         show={showAgregarDirigente}
         onClose={() => setShowAgregarDirigente(false)}
         padron={padron}
+        padronLoading={padronLoading}
+        padronError={padronError}
+        onRetryPadron={cargarPadron}
         disponibles={personasDisponibles}
         onAgregarDesdePadron={handleAgregarDirigenteDesdePadron}
         onAgregarExterno={handleAgregarDirigenteExterno}
@@ -1754,6 +1844,9 @@ const Dashboard = ({ currentUser, onLogout }) => {
             : handleAddCoordinadorDesdeModal
         }
         padron={padron}
+        padronLoading={padronLoading}
+        padronError={padronError}
+        onRetryPadron={cargarPadron}
         disponibles={personasDisponibles}
         dirigentes={estructura.dirigentes}
         rolActual={currentUser.role}
