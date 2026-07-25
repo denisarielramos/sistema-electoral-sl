@@ -1,5 +1,8 @@
 import {
   normalizeCI,
+  getMisSubcoordinadores,
+  getMisVotantes,
+  getVotantesDeSubcoord,
   getCoordsDeDigente,
   getSubsDeDigente,
   getTodosVotantesDirigente,
@@ -54,53 +57,30 @@ export const getEstadisticas = (estructura, currentUser) => {
   if (currentUser.role === "coordinador") {
     const miCI = normalizeCI(currentUser.ci);
 
-    // Subcoordinadores under this coord
-    const subs = estructura.subcoordinadores.filter(
-      (s) => normalizeCI(s.coordinador_ci) === miCI
-    );
+    // Subcoordinadores bajo este coordinador
+    const subs = getMisSubcoordinadores(estructura, miCI);
 
-    // Voters assigned directly by this coord
-    const votantesDirectos = estructura.votantes.filter(
-      (v) => normalizeCI(v.asignado_por) === miCI
-    );
+    // Votantes directos (incluye compatibilidad legacy con coordinador_ci)
+    const votantesDirectos = getMisVotantes(estructura, miCI);
 
-    // Voters assigned by each sub (indirect)
-    const votantesIndirectos = subs.reduce(
-      (acc, sub) =>
-        acc +
-        estructura.votantes.filter(
-          (v) => normalizeCI(v.asignado_por) === normalizeCI(sub.ci)
-        ).length,
-      0
+    // Votantes indirectos (de subcoordinadores), sin duplicados con directos
+    const ciDirectos = new Set(votantesDirectos.map((v) => normalizeCI(v.ci)));
+    const votantesDeSubsArr = subs.flatMap((sub) =>
+      getVotantesDeSubcoord(estructura, normalizeCI(sub.ci)).filter(
+        (v) => !ciDirectos.has(normalizeCI(v.ci))
+      )
     );
+    const votantesIndirectos = votantesDeSubsArr.length;
 
-    // Total voters = direct + indirect
+    // Total sin duplicados
     const totalVotantes = votantesDirectos.length + votantesIndirectos;
 
-    // Confirmed subs
+    // Confirmados
     const subsConfirmados = subs.filter((s) => s.confirmado === true).length;
-
-    // Confirmed votes: direct confirmed + indirect confirmed
-    const votosDirectosConfirmados = votantesDirectos.filter(
-      (v) => v.voto_confirmado === true
-    ).length;
-
-    const votosIndirectosConfirmados = subs.reduce(
-      (acc, sub) =>
-        acc +
-        estructura.votantes.filter(
-          (v) =>
-            normalizeCI(v.asignado_por) === normalizeCI(sub.ci) &&
-            v.voto_confirmado === true
-        ).length,
-      0
-    );
-
+    const votosDirectosConfirmados = votantesDirectos.filter((v) => v.voto_confirmado === true).length;
+    const votosIndirectosConfirmados = votantesDeSubsArr.filter((v) => v.voto_confirmado === true).length;
     const votosConfirmados = votosDirectosConfirmados + votosIndirectosConfirmados;
 
-    // Coordinador self is always counted as 1 confirmed vote (automatic).
-    // Total confirmable = 1 (self) + subs + all voters
-    // Total confirmed  = 1 (self auto) + confirmedSubs + confirmedVoters
     const totalConfirmable = 1 + subs.length + totalVotantes;
     const totalConfirmados = 1 + subsConfirmados + votosConfirmados;
     const porcentajeConfirmados =

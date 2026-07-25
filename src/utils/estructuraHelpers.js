@@ -5,35 +5,56 @@ export const normalizeCI = (ci) =>
   String(ci || "").replace(/\D/g, "");
 
 // ======================= SUBCOORDINADORES DEL COORD =======================
-export const getMisSubcoordinadores = (estructura, currentUser) => {
-  if (!currentUser || currentUser.role !== "coordinador") return [];
-
-  return estructura.subcoordinadores.filter(
-    (s) => normalizeCI(s.coordinador_ci) === normalizeCI(currentUser.ci)
+// coordCI puede ser un string CI normalizado o un objeto { ci, role }
+export const getMisSubcoordinadores = (estructura, coordCI) => {
+  if (!coordCI) return [];
+  // Aceptar tanto objeto currentUser como CI string directamente
+  const ci = typeof coordCI === "object" ? normalizeCI(coordCI.ci) : normalizeCI(coordCI);
+  return (estructura.subcoordinadores || []).filter(
+    (s) => normalizeCI(s.coordinador_ci) === ci
   );
 };
 
 // ======================= VOTANTES DE UN SUBCOORD =======================
 export const getVotantesDeSubcoord = (estructura, subCi) => {
-  return estructura.votantes.filter(
-    (v) => normalizeCI(v.asignado_por) === normalizeCI(subCi)
+  const ci = normalizeCI(subCi);
+  return (estructura.votantes || []).filter(
+    (v) => normalizeCI(v.asignado_por) === ci
   );
 };
 
-// ======================= MIS VOTANTES =======================
-export const getMisVotantes = (estructura, currentUser) => {
-  if (!currentUser) return [];
+// ======================= MIS VOTANTES (coordinador): directos + compatibilidad legacy =======================
+// Devuelve votantes cuyo asignado_por coincide con coordCI
+// O, como compatibilidad con registros sin asignado_por_rol, aquellos cuyo
+// coordinador_ci coincide con coordCI y no tienen asignado_por_rol diferente a "coordinador".
+export const getMisVotantes = (estructura, coordCI) => {
+  if (!coordCI) return [];
+  const ci = typeof coordCI === "object" ? normalizeCI(coordCI.ci) : normalizeCI(coordCI);
 
-  return estructura.votantes.filter(
-    (v) => normalizeCI(v.asignado_por) === normalizeCI(currentUser.ci)
-  );
+  const seen = new Set();
+  const result = [];
+
+  for (const v of (estructura.votantes || [])) {
+    const vCI = normalizeCI(v.ci);
+    if (seen.has(vCI)) continue;
+
+    const porAsignadoPor = normalizeCI(v.asignado_por) === ci;
+    const porCoordCI =
+      normalizeCI(v.coordinador_ci) === ci &&
+      (v.asignado_por_rol === "coordinador" || !v.asignado_por_rol);
+
+    if (porAsignadoPor || porCoordCI) {
+      seen.add(vCI);
+      result.push(v);
+    }
+  }
+
+  return result;
 };
 
 // ======================= VOTANTES DIRECTOS DEL COORD =======================
 export const getVotantesDirectosCoord = (estructura, coordCi) => {
-  return estructura.votantes.filter(
-    (v) => normalizeCI(v.asignado_por) === normalizeCI(coordCi)
-  );
+  return getMisVotantes(estructura, coordCi);
 };
 
 // ======================= PERSONAS DISPONIBLES =======================

@@ -1613,22 +1613,22 @@ const Dashboard = ({ currentUser, onLogout }) => {
   const renderCoordinador = () => {
     const miCI = normalizeCI(currentUser.ci);
     const stats = estadisticas || {};
+    // Pasar miCI (string) directamente — los helpers ahora aceptan CI string o objeto
     const misSubs = getMisSubcoordinadores(estructura, miCI);
-    const misVotantes = getMisVotantes(estructura, miCI);
-    const votantesConfirmados = misVotantes.filter((v) => v.voto_confirmado).length;
+    const misVotantesDirectos = getMisVotantes(estructura, miCI);
 
     return (
       <div className="space-y-6">
         {/* Stats */}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-          <StatCard label="Subcoords" value={stats.subcoordinadores} icon={Users} accent />
-          <StatCard label="Votantes" value={stats.votantes} icon={CheckCircle2} />
+          <StatCard label="Subcoords" value={stats.subcoordinadores ?? misSubs.length} icon={Users} accent />
+          <StatCard label="Votantes" value={stats.totalVotantes ?? misVotantesDirectos.length} icon={CheckCircle2} />
           <VoteProgressCard
-            confirmed={stats.votosConfirmados}
-            total={stats.votantes}
-            percentage={stats.porcentajeConfirmados}
+            confirmed={stats.votosConfirmados ?? 0}
+            total={stats.totalVotantes ?? misVotantesDirectos.length}
+            percentage={stats.porcentajeConfirmados ?? 0}
           />
-          <StatCard label="Total Red" value={stats.totalRed} icon={TrendingUp} />
+          <StatCard label="Total Red" value={stats.totalRed ?? (misSubs.length + misVotantesDirectos.length)} icon={TrendingUp} />
         </div>
 
         {/* Botones */}
@@ -1715,13 +1715,15 @@ const Dashboard = ({ currentUser, onLogout }) => {
           })}
         </div>
 
-        {/* Votantes directos del coordinador */}
-        {misVotantes.filter((v) => v.asignado_por_rol === "coordinador").length > 0 && (
-          <div className="space-y-2">
-            <p className="text-sm font-semibold text-slate-700">
-              Mis Votantes Directos ({misVotantes.filter((v) => v.asignado_por_rol === "coordinador").length})
-            </p>
-            {misVotantes.filter((v) => v.asignado_por_rol === "coordinador").map((v) => (
+        {/* Votantes directos del coordinador — siempre visible */}
+        <div className="space-y-2">
+          <p className="text-sm font-semibold text-slate-700">
+            Mis Votantes Directos ({misVotantesDirectos.length})
+          </p>
+          {misVotantesDirectos.length === 0 ? (
+            <p className="text-sm text-slate-400 text-center py-6">No tiene votantes directos asignados.</p>
+          ) : (
+            misVotantesDirectos.map((v) => (
               <VotanteRow
                 key={v.ci}
                 v={v}
@@ -1732,9 +1734,9 @@ const Dashboard = ({ currentUser, onLogout }) => {
                 canConfirmar={canConfirmar}
                 canAnular={canAnular}
               />
-            ))}
-          </div>
-        )}
+            ))
+          )}
+        </div>
       </div>
     );
   };
