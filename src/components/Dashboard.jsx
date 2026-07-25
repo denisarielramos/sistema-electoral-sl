@@ -281,19 +281,19 @@ const VotanteRow = ({
       </div>
     </div>
     <div className="flex gap-1.5 shrink-0 flex-wrap">
-      <ActionBtn onClick={() => onTelefono("votante", v)} title="Editar telefono" variant="green">
+      <ActionBtn onClick={(e) => { e.stopPropagation(); onTelefono("votante", v); }} title="Editar telefono" variant="green">
         <Phone className="w-3.5 h-3.5" />
       </ActionBtn>
-      <ActionBtn onClick={() => onDireccion("votante", v)} title="Editar direccion" variant="blue">
+      <ActionBtn onClick={(e) => { e.stopPropagation(); onDireccion("votante", v); }} title="Editar direccion" variant="blue">
         <MapPin className="w-3.5 h-3.5" />
       </ActionBtn>
       {!v.voto_confirmado && canConfirmar(v) && (
-        <ActionBtn onClick={() => onConfirmar(v)} title="Confirmar voto" variant="success-solid">
+        <ActionBtn onClick={(e) => { e.stopPropagation(); onConfirmar(v); }} title="Confirmar voto" variant="success-solid">
           <Check className="w-3.5 h-3.5" />
         </ActionBtn>
       )}
       {v.voto_confirmado && canAnular(v) && (
-        <ActionBtn onClick={() => onAnular(v)} title="Anular confirmacion" variant="danger">
+        <ActionBtn onClick={(e) => { e.stopPropagation(); onAnular(v); }} title="Anular confirmacion" variant="danger">
           <X className="w-3.5 h-3.5" />
         </ActionBtn>
       )}
@@ -901,9 +901,9 @@ const Dashboard = ({ currentUser, onLogout }) => {
       .from("votantes")
       .update({ voto_confirmado: accion === "confirmar" })
       .eq("ci", votante.ci);
-    if (error) { alert("Error al actualizar voto."); return; }
+    if (error) { alert("Error al actualizar voto: " + error.message); return; }
     setConfirmVotoState({ show: false, votante: null, accion: null });
-    cargarEstructura();
+    await cargarEstructura();
   }, [confirmVotoState, cargarEstructura]);
 
   // ======================= MODALES TELEFONO / DIRECCION =======================
@@ -918,17 +918,17 @@ const Dashboard = ({ currentUser, onLogout }) => {
   const handleSaveTelefono = useCallback(async (tipo, persona, nuevoTelefono) => {
     const tabla = tipo === "coordinador" ? "coordinadores" : tipo === "subcoordinador" ? "subcoordinadores" : "votantes";
     const { error } = await supabase.from(tabla).update({ telefono: nuevoTelefono }).eq("ci", persona.ci);
-    if (error) { alert("Error al guardar telefono."); return; }
+    if (error) { alert("Error al guardar teléfono: " + error.message); throw error; }
     setModalTelefonoState({ show: false, tipo: null, persona: null });
-    cargarEstructura();
+    await cargarEstructura();
   }, [cargarEstructura]);
 
   const handleSaveDireccion = useCallback(async (tipo, persona, nuevaDireccion) => {
     const tabla = tipo === "coordinador" ? "coordinadores" : tipo === "subcoordinador" ? "subcoordinadores" : "votantes";
     const { error } = await supabase.from(tabla).update({ direccion_override: nuevaDireccion }).eq("ci", persona.ci);
-    if (error) { alert("Error al guardar direccion."); return; }
+    if (error) { alert("Error al guardar dirección: " + error.message); throw error; }
     setModalDireccionState({ show: false, tipo: null, persona: null });
-    cargarEstructura();
+    await cargarEstructura();
   }, [cargarEstructura]);
 
   // ======================= AGREGAR VOTANTE (TODOS LOS ROLES) =======================

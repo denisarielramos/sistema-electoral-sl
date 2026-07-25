@@ -1,13 +1,34 @@
-import React from "react";
+import React, { useState, useEffect } from "react";
 import { Phone, X } from "lucide-react";
 
-const ModalTelefono = ({ open, persona, value, onChange, onCancel, onSave }) => {
-  if (!open || !persona) return null;
+const ModalTelefono = ({ tipo, persona, onSave, onClose }) => {
+  const [telefono, setTelefono] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  // Inicializar con el teléfono actual de la persona cada vez que se abre
+  useEffect(() => {
+    if (persona) {
+      setTelefono(persona.telefono || "+595");
+    }
+  }, [persona]);
+
+  if (!persona) return null;
+
+  const handleSave = async () => {
+    const tel = telefono.trim();
+    if (!tel) { alert("El teléfono no puede estar vacío."); return; }
+    setSaving(true);
+    try {
+      await onSave(tel);
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <div
       className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4"
-      onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}
+      onClick={(e) => { if (e.target === e.currentTarget && !saving) onClose(); }}
     >
       <div className="bg-white rounded-2xl w-full max-w-sm shadow-modal overflow-hidden animate-fade-in">
         {/* Header */}
@@ -19,8 +40,9 @@ const ModalTelefono = ({ open, persona, value, onChange, onCancel, onSave }) => 
             <h3 className="text-base font-bold text-slate-800">Editar teléfono</h3>
           </div>
           <button
-            onClick={onCancel}
-            className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors border-0 bg-transparent shadow-none"
+            onClick={onClose}
+            disabled={saving}
+            className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors border-0 bg-transparent shadow-none disabled:opacity-40"
             aria-label="Cerrar"
           >
             <X className="w-4 h-4" />
@@ -40,11 +62,12 @@ const ModalTelefono = ({ open, persona, value, onChange, onCancel, onSave }) => 
             </label>
             <input
               type="tel"
-              value={value}
-              onChange={(e) => onChange(e.target.value)}
+              value={telefono}
+              onChange={(e) => setTelefono(e.target.value)}
               className="w-full px-4 py-2.5 text-sm border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent bg-slate-50"
               placeholder="+595 9XX XXX XXX"
               autoFocus
+              disabled={saving}
             />
             <p className="text-xs text-slate-400 mt-1">Formato sugerido: +595 9XX XXX XXX</p>
           </div>
@@ -53,16 +76,23 @@ const ModalTelefono = ({ open, persona, value, onChange, onCancel, onSave }) => 
         {/* Footer */}
         <div className="px-5 pb-5 flex gap-2">
           <button
-            onClick={onCancel}
-            className="flex-1 h-10 px-4 rounded-xl border border-slate-200 text-sm text-slate-600 hover:bg-slate-50 transition-colors bg-white"
+            onClick={onClose}
+            disabled={saving}
+            className="flex-1 h-10 px-4 rounded-xl border border-slate-200 text-sm text-slate-600 hover:bg-slate-50 transition-colors bg-white disabled:opacity-50"
           >
             Cancelar
           </button>
           <button
-            onClick={onSave}
-            className="flex-1 h-10 px-4 rounded-xl bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium transition-colors border-0 shadow-sm"
+            onClick={handleSave}
+            disabled={saving}
+            className="flex-1 h-10 px-4 rounded-xl bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium transition-colors border-0 shadow-sm disabled:opacity-60 flex items-center justify-center gap-2"
           >
-            Guardar
+            {saving ? (
+              <>
+                <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                Guardando...
+              </>
+            ) : "Guardar"}
           </button>
         </div>
       </div>
