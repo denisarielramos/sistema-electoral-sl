@@ -24,6 +24,7 @@ import {
   TrendingUp,
   Shield,
   AlertCircle,
+  ExternalLink,
 } from "lucide-react";
 
 import AddPersonModal from "../AddPersonModal";
@@ -317,34 +318,62 @@ const ModalAgregarDirigente = ({
   onAgregarDesdePadron,
   onAgregarExterno,
 }) => {
-  const [modo, setModo] = useState(null); // null | "padron" | "externo"
+  // modo: null | "padron" | "padron-contacto" | "externo"
+  const [modo, setModo] = useState(null);
+
+  // Paso 2 padrón: persona seleccionada + datos de contacto
+  const [personaPadron, setPersonaPadron] = useState(null);
+  const [padTelefono, setPadTelefono] = useState("+595");
+  const [padTelefonoError, setPadTelefonoError] = useState(null);
+  const [padUbicacion, setPadUbicacion] = useState("");
+
+  // Externo
   const [extCI, setExtCI] = useState("");
   const [extNombre, setExtNombre] = useState("");
   const [extApellido, setExtApellido] = useState("");
   const [extTelefono, setExtTelefono] = useState("+595");
   const [extTelefonoError, setExtTelefonoError] = useState(null);
+  const [extUbicacion, setExtUbicacion] = useState("");
+
   const [codigoGenerado, setCodigoGenerado] = useState(null);
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    if (!show) {
-      setModo(null);
-      setExtCI("");
-      setExtNombre("");
-      setExtApellido("");
-      setExtTelefono("+595");
-      setExtTelefonoError(null);
-      setCodigoGenerado(null);
-      setSaving(false);
-    }
-  }, [show]);
+  const resetAll = () => {
+    setModo(null);
+    setPersonaPadron(null);
+    setPadTelefono("+595");
+    setPadTelefonoError(null);
+    setPadUbicacion("");
+    setExtCI(""); setExtNombre(""); setExtApellido("");
+    setExtTelefono("+595"); setExtTelefonoError(null); setExtUbicacion("");
+    setCodigoGenerado(null); setSaving(false);
+  };
+
+  useEffect(() => { if (!show) resetAll(); }, [show]);
 
   if (!show) return null;
 
-  const handleSelectPadron = async (persona) => {
-    await onAgregarDesdePadron(persona);
+  // --- Padrón paso 1: selección ---
+  const handleSelectPadron = (persona) => {
+    setPersonaPadron(persona);
+    setModo("padron-contacto");
   };
 
+  // --- Padrón paso 2: confirmar con teléfono/ubicación ---
+  const handleConfirmarPadron = async () => {
+    const telResult = validateParaguayPhone(padTelefono);
+    if (!telResult.valid) { setPadTelefonoError(telResult.error); return; }
+    setSaving(true);
+    const code = await onAgregarDesdePadron({
+      ...personaPadron,
+      telefono: telResult.normalized,
+      direccion_override: padUbicacion.trim() || null,
+    });
+    setSaving(false);
+    if (code) setCodigoGenerado(code);
+  };
+
+  // --- Externo ---
   const handleSubmitExterno = async () => {
     const ci = String(extCI).replace(/\D/g, "");
     if (!ci) { alert("El CI es obligatorio y debe ser numerico."); return; }
@@ -356,11 +385,16 @@ const ModalAgregarDirigente = ({
       ci,
       nombre: extNombre.trim(),
       apellido: extApellido.trim(),
-      telefono: telResult.normalized, // siempre normalizado
+      telefono: telResult.normalized,
+      direccion_override: extUbicacion.trim() || null,
     });
     setSaving(false);
     if (code) setCodigoGenerado(code);
   };
+
+  const inputCls = (hasError) =>
+    `w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-slate-50 ${hasError ? "border-red-400" : "border-slate-200"}`;
+  const labelCls = "block text-xs font-semibold text-slate-700 mb-1";
 
   // --- Vista: código generado ---
   if (codigoGenerado) {
@@ -372,26 +406,18 @@ const ModalAgregarDirigente = ({
               <Check className="w-6 h-6 text-emerald-600" />
             </div>
             <h3 className="text-base font-bold text-slate-800">Dirigente creado</h3>
-            <p className="text-sm text-slate-500 mt-1">
-              Codigo de acceso generado. Comparta con el dirigente.
-            </p>
+            <p className="text-sm text-slate-500 mt-1">Codigo de acceso generado. Comparta con el dirigente.</p>
           </div>
           <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 flex items-center justify-between gap-3">
-            <span className="font-mono font-bold text-xl tracking-widest text-brand-700">
-              {codigoGenerado}
-            </span>
+            <span className="font-mono font-bold text-xl tracking-widest text-brand-700">{codigoGenerado}</span>
             <button
               onClick={() => navigator.clipboard.writeText(codigoGenerado).catch(() => {})}
               className="flex items-center gap-1.5 px-3 h-8 border border-brand-200 rounded-lg text-xs text-brand-600 hover:bg-brand-50 transition-colors bg-transparent shadow-none"
             >
-              <Copy className="w-3.5 h-3.5" />
-              Copiar
+              <Copy className="w-3.5 h-3.5" /> Copiar
             </button>
           </div>
-          <button
-            onClick={onClose}
-            className="w-full h-10 bg-brand-600 hover:bg-brand-700 text-white rounded-xl text-sm font-semibold border-0 transition-colors"
-          >
+          <button onClick={onClose} className="w-full h-10 bg-brand-600 hover:bg-brand-700 text-white rounded-xl text-sm font-semibold border-0 transition-colors">
             Cerrar
           </button>
         </div>
@@ -406,31 +432,19 @@ const ModalAgregarDirigente = ({
         <div className="bg-white rounded-2xl w-full max-w-sm shadow-modal overflow-hidden animate-fade-in">
           <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 bg-slate-50">
             <h3 className="text-base font-bold text-slate-800">Agregar Dirigente</h3>
-            <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg border-0 bg-transparent shadow-none">
-              <X className="w-4 h-4" />
-            </button>
+            <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg border-0 bg-transparent shadow-none"><X className="w-4 h-4" /></button>
           </div>
           <div className="p-5 space-y-3">
             <p className="text-sm text-slate-600">Seleccione como desea agregar al dirigente:</p>
-            <button
-              onClick={() => setModo("padron")}
-              className="w-full flex items-center gap-3 p-4 border border-slate-200 rounded-xl hover:border-brand-300 hover:bg-brand-50 transition-colors text-left bg-white"
-            >
-              <div className="p-2 bg-brand-100 rounded-lg shrink-0">
-                <Users className="w-4 h-4 text-brand-600" />
-              </div>
+            <button onClick={() => setModo("padron")} className="w-full flex items-center gap-3 p-4 border border-slate-200 rounded-xl hover:border-brand-300 hover:bg-brand-50 transition-colors text-left bg-white">
+              <div className="p-2 bg-brand-100 rounded-lg shrink-0"><Users className="w-4 h-4 text-brand-600" /></div>
               <div>
                 <p className="font-semibold text-sm text-slate-800">Persona del padron</p>
                 <p className="text-xs text-slate-500">Buscar por CI o nombre en el padron electoral.</p>
               </div>
             </button>
-            <button
-              onClick={() => setModo("externo")}
-              className="w-full flex items-center gap-3 p-4 border border-slate-200 rounded-xl hover:border-brand-300 hover:bg-brand-50 transition-colors text-left bg-white"
-            >
-              <div className="p-2 bg-slate-100 rounded-lg shrink-0">
-                <UserPlus className="w-4 h-4 text-slate-600" />
-              </div>
+            <button onClick={() => setModo("externo")} className="w-full flex items-center gap-3 p-4 border border-slate-200 rounded-xl hover:border-brand-300 hover:bg-brand-50 transition-colors text-left bg-white">
+              <div className="p-2 bg-slate-100 rounded-lg shrink-0"><UserPlus className="w-4 h-4 text-slate-600" /></div>
               <div>
                 <p className="font-semibold text-sm text-slate-800">Dirigente externo</p>
                 <p className="text-xs text-slate-500">Cargar manualmente datos de un dirigente fuera del padron.</p>
@@ -442,7 +456,7 @@ const ModalAgregarDirigente = ({
     );
   }
 
-  // --- Vista: padron ---
+  // --- Vista: búsqueda en padrón ---
   if (modo === "padron") {
     return (
       <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-3 sm:p-4">
@@ -459,9 +473,63 @@ const ModalAgregarDirigente = ({
             onBack={() => setModo(null)}
             onClose={onClose}
           />
-          <div className="px-5 py-4 border-t border-slate-100 shrink-0">
-            <button onClick={onClose} className="w-full h-10 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-sm font-medium border-0">
-              Cerrar
+        </div>
+      </div>
+    );
+  }
+
+  // --- Vista: paso 2 padrón — datos de contacto ---
+  if (modo === "padron-contacto" && personaPadron) {
+    return (
+      <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+        <div className="bg-white rounded-2xl w-full max-w-sm shadow-modal overflow-hidden animate-fade-in">
+          <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 bg-slate-50">
+            <div className="flex items-center gap-2">
+              <button onClick={() => setModo("padron")} className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg border-0 bg-transparent shadow-none">
+                <ChevronRight className="w-4 h-4 rotate-180" />
+              </button>
+              <h3 className="text-base font-bold text-slate-800">Datos de contacto</h3>
+            </div>
+            <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg border-0 bg-transparent shadow-none"><X className="w-4 h-4" /></button>
+          </div>
+          <div className="p-5 space-y-4">
+            {/* Resumen de la persona seleccionada */}
+            <div className="bg-brand-50 border border-brand-100 rounded-xl px-4 py-3">
+              <p className="font-semibold text-sm text-slate-800">{personaPadron.nombre} {personaPadron.apellido || ""}</p>
+              <p className="text-xs text-slate-500 mt-0.5">CI: {personaPadron.ci}</p>
+              {personaPadron.seccional && <p className="text-xs text-slate-500">Seccional: {personaPadron.seccional}</p>}
+            </div>
+            <div>
+              <label className={labelCls}>Telefono celular <span className="text-red-500">*</span></label>
+              <input
+                type="tel" inputMode="numeric" autoComplete="tel" maxLength={16}
+                value={padTelefono}
+                onChange={(e) => { setPadTelefono(sanitizeParaguayPhoneInput(e.target.value)); setPadTelefonoError(null); }}
+                placeholder="+595 9XX XXX XXX"
+                className={inputCls(!!padTelefonoError)}
+              />
+              {padTelefonoError
+                ? <p className="text-xs text-red-500 mt-1">{padTelefonoError}</p>
+                : <p className="text-xs text-slate-400 mt-1">Ej: 0981 123 456 o +595 981 123 456</p>
+              }
+            </div>
+            <div>
+              <label className={labelCls}>Ubicacion o direccion <span className="text-xs font-normal text-slate-400">(opcional)</span></label>
+              <input
+                type="text"
+                value={padUbicacion}
+                onChange={(e) => setPadUbicacion(e.target.value)}
+                placeholder="Direccion o enlace de Google Maps"
+                className={inputCls(false)}
+              />
+              <p className="text-xs text-slate-400 mt-1">Puede ingresar una direccion o pegar un enlace de Google Maps.</p>
+            </div>
+            <button
+              onClick={handleConfirmarPadron}
+              disabled={saving}
+              className="w-full h-10 bg-brand-600 hover:bg-brand-700 disabled:bg-brand-400 text-white rounded-xl text-sm font-semibold border-0 transition-colors"
+            >
+              {saving ? "Guardando..." : "Crear Dirigente"}
             </button>
           </div>
         </div>
@@ -480,69 +548,46 @@ const ModalAgregarDirigente = ({
             </button>
             <h3 className="text-base font-bold text-slate-800">Dirigente externo</h3>
           </div>
-          <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg border-0 bg-transparent shadow-none">
-            <X className="w-4 h-4" />
-          </button>
+          <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg border-0 bg-transparent shadow-none"><X className="w-4 h-4" /></button>
         </div>
         <div className="p-5 space-y-4">
           <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">CI <span className="text-red-500">*</span></label>
-            <input
-              type="text"
-              value={extCI}
-              onChange={(e) => setExtCI(e.target.value.replace(/\D/g, ""))}
-              placeholder="Solo numeros"
-              className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-slate-50"
-            />
+            <label className={labelCls}>CI <span className="text-red-500">*</span></label>
+            <input type="text" value={extCI} onChange={(e) => setExtCI(e.target.value.replace(/\D/g, ""))} placeholder="Solo numeros" className={inputCls(false)} />
           </div>
           <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">Nombre <span className="text-red-500">*</span></label>
-            <input
-              type="text"
-              value={extNombre}
-              onChange={(e) => setExtNombre(e.target.value)}
-              placeholder="Nombre del dirigente"
-              className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-slate-50"
-            />
+            <label className={labelCls}>Nombre <span className="text-red-500">*</span></label>
+            <input type="text" value={extNombre} onChange={(e) => setExtNombre(e.target.value)} placeholder="Nombre del dirigente" className={inputCls(false)} />
           </div>
           <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">Apellido</label>
-            <input
-              type="text"
-              value={extApellido}
-              onChange={(e) => setExtApellido(e.target.value)}
-              placeholder="Apellido (opcional)"
-              className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-slate-50"
-            />
+            <label className={labelCls}>Apellido</label>
+            <input type="text" value={extApellido} onChange={(e) => setExtApellido(e.target.value)} placeholder="Apellido (opcional)" className={inputCls(false)} />
           </div>
           <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">Telefono <span className="text-red-500">*</span></label>
+            <label className={labelCls}>Telefono celular <span className="text-red-500">*</span></label>
             <input
-              type="tel"
-              inputMode="numeric"
-              autoComplete="tel"
-              maxLength={16}
+              type="tel" inputMode="numeric" autoComplete="tel" maxLength={16}
               value={extTelefono}
-              onChange={(e) => {
-                setExtTelefono(sanitizeParaguayPhoneInput(e.target.value));
-                setExtTelefonoError(null);
-              }}
+              onChange={(e) => { setExtTelefono(sanitizeParaguayPhoneInput(e.target.value)); setExtTelefonoError(null); }}
               placeholder="+595 9XX XXX XXX"
-              className={`w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-slate-50 ${
-                extTelefonoError ? "border-red-400" : "border-slate-200"
-              }`}
+              className={inputCls(!!extTelefonoError)}
             />
-            {extTelefonoError ? (
-              <p className="text-xs text-red-500 mt-1">{extTelefonoError}</p>
-            ) : (
-              <p className="text-xs text-slate-400 mt-1">Ej: 0981 123 456 o +595 981 123 456</p>
-            )}
+            {extTelefonoError
+              ? <p className="text-xs text-red-500 mt-1">{extTelefonoError}</p>
+              : <p className="text-xs text-slate-400 mt-1">Ej: 0981 123 456 o +595 981 123 456</p>
+            }
           </div>
-          <button
-            onClick={handleSubmitExterno}
-            disabled={saving}
-            className="w-full h-10 bg-brand-600 hover:bg-brand-700 disabled:bg-brand-400 text-white rounded-xl text-sm font-semibold border-0 transition-colors"
-          >
+          <div>
+            <label className={labelCls}>Ubicacion o direccion <span className="text-xs font-normal text-slate-400">(opcional)</span></label>
+            <input
+              type="text"
+              value={extUbicacion}
+              onChange={(e) => setExtUbicacion(e.target.value)}
+              placeholder="Direccion o enlace de Google Maps"
+              className={inputCls(false)}
+            />
+          </div>
+          <button onClick={handleSubmitExterno} disabled={saving} className="w-full h-10 bg-brand-600 hover:bg-brand-700 disabled:bg-brand-400 text-white rounded-xl text-sm font-semibold border-0 transition-colors">
             {saving ? "Guardando..." : "Crear Dirigente"}
           </button>
         </div>
@@ -936,8 +981,17 @@ const Dashboard = ({ currentUser, onLogout }) => {
     setModalDireccionState({ show: true, tipo, persona });
   }, []);
 
+  // Mapa único de tipo → tabla. Nunca usar ternarios encadenados para esto.
+  const TABLE_BY_TYPE = {
+    dirigente: "dirigentes",
+    coordinador: "coordinadores",
+    subcoordinador: "subcoordinadores",
+    votante: "votantes",
+  };
+
   const handleSaveTelefono = useCallback(async (tipo, persona, nuevoTelefono) => {
-    const tabla = tipo === "coordinador" ? "coordinadores" : tipo === "subcoordinador" ? "subcoordinadores" : "votantes";
+    const tabla = TABLE_BY_TYPE[tipo];
+    if (!tabla) { alert("Tipo de persona desconocido: " + tipo); return; }
     const { error } = await supabase.from(tabla).update({ telefono: nuevoTelefono }).eq("ci", persona.ci);
     if (error) { alert("Error al guardar teléfono: " + error.message); throw error; }
     setModalTelefonoState({ show: false, tipo: null, persona: null });
@@ -945,7 +999,8 @@ const Dashboard = ({ currentUser, onLogout }) => {
   }, [cargarEstructura]);
 
   const handleSaveDireccion = useCallback(async (tipo, persona, nuevaDireccion) => {
-    const tabla = tipo === "coordinador" ? "coordinadores" : tipo === "subcoordinador" ? "subcoordinadores" : "votantes";
+    const tabla = TABLE_BY_TYPE[tipo];
+    if (!tabla) { alert("Tipo de persona desconocido: " + tipo); return; }
     const { error } = await supabase.from(tabla).update({ direccion_override: nuevaDireccion }).eq("ci", persona.ci);
     if (error) { alert("Error al guardar dirección: " + error.message); throw error; }
     setModalDireccionState({ show: false, tipo: null, persona: null });
@@ -1103,26 +1158,26 @@ const Dashboard = ({ currentUser, onLogout }) => {
   const handleAgregarDirigenteDesdePadron = useCallback(async (persona) => {
     const ciDir = normalizeCI(persona.ci);
     const chequeo = await verificarCIDisponible(ciDir);
-    if (!chequeo.disponible) { alert(chequeo.mensaje); return; }
+    if (!chequeo.disponible) { alert(chequeo.mensaje); return null; }
     let loginCode;
     try { loginCode = await generarAccessCodeUnico(supabase); }
-    catch (err) { alert(err.message); return; }
+    catch (err) { alert(err.message); return null; }
     const payload = {
       ci: ciDir,
       nombre: persona.nombre || "",
       apellido: persona.apellido || "",
       telefono: persona.telefono || null,
+      direccion_override: persona.direccion_override || null,
       login_code: loginCode,
       es_externo: false,
       activo: true,
       asignado_por_nombre: `${currentUser.nombre} ${currentUser.apellido || ""}`.trim(),
     };
     const { data, error } = await supabase.from("dirigentes").insert(payload).select().single();
-    if (error) { alert("Error al agregar dirigente: " + error.message); return; }
-    const savedCode = data?.login_code || loginCode;
-    alert(`Dirigente agregado. Código de acceso: ${savedCode}`);
+    if (error) { alert("Error al agregar dirigente: " + error.message); return null; }
     setShowAgregarDirigente(false);
     await cargarEstructura();
+    return data?.login_code || loginCode;
   }, [currentUser, cargarEstructura, verificarCIDisponible]);
 
   const handleAgregarDirigenteExterno = useCallback(async (datos) => {
@@ -1137,6 +1192,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
       nombre: datos.nombre,
       apellido: datos.apellido || "",
       telefono: datos.telefono || null,
+      direccion_override: datos.direccion_override || null,
       login_code: loginCode,
       es_externo: true,
       activo: true,
@@ -1294,23 +1350,78 @@ const Dashboard = ({ currentUser, onLogout }) => {
                   className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-slate-50 transition-colors"
                   onClick={() => toggleDir(dirCI)}
                 >
-                  <div className="flex items-center gap-3 min-w-0">
+                  <div className="flex items-center gap-3 min-w-0 flex-1">
                     <div className="p-2 bg-brand-100 rounded-lg shrink-0">
                       <Shield className="w-4 h-4 text-brand-600" />
                     </div>
-                    <div className="min-w-0">
-                      <p className="font-semibold text-slate-800 text-sm truncate">
-                        {dir.nombre} {dir.apellido || ""}
-                      </p>
-                      <p className="text-xs text-slate-500">CI: {dir.ci} {dir.es_externo && <span className="text-brand-500">• Externo</span>}</p>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="font-semibold text-slate-800 text-sm">
+                          {dir.nombre} {dir.apellido || ""}
+                        </p>
+                        <Badge variant="purple">Dirigente</Badge>
+                        {dir.es_externo && <span className="text-xs font-medium text-amber-600 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5">Externo</span>}
+                        <VoteCounter confirmed={coordsDir.length} total={totalDir} />
+                      </div>
+                      <p className="text-xs text-slate-500 mt-0.5">CI: {dir.ci}</p>
+                      {/* Datos electorales — solo si no es externo */}
+                      {!dir.es_externo && (dir.seccional || dir.local_votacion || dir.mesa || dir.orden) && (
+                        <p className="text-xs text-slate-400 mt-0.5">
+                          {[
+                            dir.seccional && `Secc: ${dir.seccional}`,
+                            dir.local_votacion && `Local: ${dir.local_votacion}`,
+                            dir.mesa && `Mesa: ${dir.mesa}`,
+                            dir.orden && `Orden: ${dir.orden}`,
+                          ].filter(Boolean).join(" · ")}
+                        </p>
+                      )}
+                      {/* Teléfono y ubicación */}
+                      {(dir.telefono || dir.direccion_override) && (
+                        <p className="text-xs text-slate-400 mt-0.5">
+                          {[
+                            dir.telefono && `Tel: ${dir.telefono}`,
+                            dir.direccion_override && `Ubic: ${dir.direccion_override.length > 30 ? dir.direccion_override.slice(0, 30) + "…" : dir.direccion_override}`,
+                          ].filter(Boolean).join(" · ")}
+                        </p>
+                      )}
                     </div>
-                    <Badge variant="purple">Dirigente</Badge>
-                    <VoteCounter confirmed={coordsDir.length} total={totalDir} />
                   </div>
-                  <div className="flex items-center gap-2 shrink-0">
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {/* Botones de edición de contacto */}
+                    <ActionBtn
+                      onClick={(e) => { e.stopPropagation(); handleOpenTelefono("dirigente", dir); }}
+                      title="Editar telefono"
+                      variant="green"
+                    >
+                      <Phone className="w-3.5 h-3.5" />
+                    </ActionBtn>
+                    <ActionBtn
+                      onClick={(e) => { e.stopPropagation(); handleOpenDireccion("dirigente", dir); }}
+                      title="Editar ubicacion"
+                      variant="blue"
+                    >
+                      <MapPin className="w-3.5 h-3.5" />
+                    </ActionBtn>
+                    {/* Botón abrir ubicación si existe */}
+                    {dir.direccion_override && (
+                      <ActionBtn
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const url = /^https?:\/\//i.test(dir.direccion_override)
+                            ? dir.direccion_override
+                            : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(dir.direccion_override)}`;
+                          window.open(url, "_blank", "noopener,noreferrer");
+                        }}
+                        title="Abrir ubicacion"
+                        variant="default"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                      </ActionBtn>
+                    )}
+                    {/* Código de acceso */}
                     {dir.login_code ? (
                       <>
-                        <span className="text-xs font-mono text-slate-500 hidden sm:inline select-all">{dir.login_code}</span>
+                        <span className="text-xs font-mono text-slate-500 hidden md:inline select-all">{dir.login_code}</span>
                         <ActionBtn
                           onClick={(e) => { e.stopPropagation(); handleCopy(dir.login_code); }}
                           title="Copiar codigo de acceso"
