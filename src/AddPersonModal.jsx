@@ -1,6 +1,10 @@
 import React, { useState, useEffect } from "react";
 import { X, UserPlus, Phone, AlertCircle } from "lucide-react";
 import PadronSearch from "./components/PadronSearch";
+import {
+  sanitizeParaguayPhoneInput,
+  validateParaguayPhone,
+} from "./utils/phoneValidation";
 
 // ======================= ADD PERSON MODAL =======================
 // Para votantes: flujo de 2 pasos.
@@ -23,6 +27,7 @@ const AddPersonModal = ({
   // Paso 2 — solo para votantes
   const [personaSeleccionada, setPersonaSeleccionada] = useState(null);
   const [telefono, setTelefono] = useState("+595");
+  const [telefonoError, setTelefonoError] = useState(null);
   const [terceraEdad, setTerceraEdad] = useState(null); // null | true | false
 
   const esVotante = tipo === "votante";
@@ -31,6 +36,7 @@ const AddPersonModal = ({
     if (!show) {
       setPersonaSeleccionada(null);
       setTelefono("+595");
+      setTelefonoError(null);
       setTerceraEdad(null);
     }
   }, [show]);
@@ -56,21 +62,22 @@ const AddPersonModal = ({
 
   // ---- Confirmar votante (paso 2) ----
   const handleConfirmarVotante = () => {
-    const tel = String(telefono || "").trim();
-    if (!tel || tel === "+595") {
-      alert("El telefono es obligatorio.");
+    const result = validateParaguayPhone(telefono);
+    if (!result.valid) {
+      setTelefonoError(result.error);
       return;
     }
     if (terceraEdad === null) {
       alert("Debe indicar si la persona es de tercera edad (Si o No).");
       return;
     }
-    onAdd({ ...personaSeleccionada, telefono: tel, tercera_edad: terceraEdad });
+    onAdd({ ...personaSeleccionada, telefono: result.normalized, tercera_edad: terceraEdad });
   };
 
   const handleVolver = () => {
     setPersonaSeleccionada(null);
     setTelefono("+595");
+    setTelefonoError(null);
     setTerceraEdad(null);
   };
 
@@ -127,14 +134,24 @@ const AddPersonModal = ({
               </label>
               <input
                 type="tel"
+                inputMode="numeric"
+                autoComplete="tel"
+                maxLength={16}
                 value={telefono}
-                onChange={(e) => setTelefono(e.target.value)}
+                onChange={(e) => {
+                  setTelefono(sanitizeParaguayPhoneInput(e.target.value));
+                  setTelefonoError(null);
+                }}
                 placeholder="+595 9XX XXX XXX"
-                className="w-full px-4 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent bg-slate-50"
+                className={`w-full px-4 py-2.5 text-sm border rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent bg-slate-50 ${
+                  telefonoError ? "border-red-400" : "border-slate-200"
+                }`}
               />
-              <p className="text-xs text-slate-400 mt-1">
-                Incluir prefijo pais, ej: +595 9XX XXX XXX
-              </p>
+              {telefonoError ? (
+                <p className="text-xs text-red-500 mt-1">{telefonoError}</p>
+              ) : (
+                <p className="text-xs text-slate-400 mt-1">Ej: 0981 123 456 o +595 981 123 456</p>
+              )}
             </div>
 
             {/* Tercera edad */}

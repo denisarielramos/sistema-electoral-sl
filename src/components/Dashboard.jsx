@@ -1,6 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "../supabaseClient";
 import { generarAccessCodeUnico } from "../utils/accessCode";
+import {
+  sanitizeParaguayPhoneInput,
+  validateParaguayPhone,
+} from "../utils/phoneValidation";
 
 import {
   UserPlus,
@@ -317,7 +321,8 @@ const ModalAgregarDirigente = ({
   const [extCI, setExtCI] = useState("");
   const [extNombre, setExtNombre] = useState("");
   const [extApellido, setExtApellido] = useState("");
-  const [extTelefono, setExtTelefono] = useState("");
+  const [extTelefono, setExtTelefono] = useState("+595");
+  const [extTelefonoError, setExtTelefonoError] = useState(null);
   const [codigoGenerado, setCodigoGenerado] = useState(null);
   const [saving, setSaving] = useState(false);
 
@@ -327,7 +332,8 @@ const ModalAgregarDirigente = ({
       setExtCI("");
       setExtNombre("");
       setExtApellido("");
-      setExtTelefono("");
+      setExtTelefono("+595");
+      setExtTelefonoError(null);
       setCodigoGenerado(null);
       setSaving(false);
     }
@@ -343,12 +349,14 @@ const ModalAgregarDirigente = ({
     const ci = String(extCI).replace(/\D/g, "");
     if (!ci) { alert("El CI es obligatorio y debe ser numerico."); return; }
     if (!extNombre.trim()) { alert("El nombre es obligatorio."); return; }
+    const telResult = validateParaguayPhone(extTelefono);
+    if (!telResult.valid) { setExtTelefonoError(telResult.error); return; }
     setSaving(true);
     const code = await onAgregarExterno({
       ci,
       nombre: extNombre.trim(),
       apellido: extApellido.trim(),
-      telefono: extTelefono.trim(),
+      telefono: telResult.normalized, // siempre normalizado
     });
     setSaving(false);
     if (code) setCodigoGenerado(code);
@@ -508,14 +516,27 @@ const ModalAgregarDirigente = ({
             />
           </div>
           <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">Telefono</label>
+            <label className="block text-xs font-semibold text-slate-700 mb-1">Telefono <span className="text-red-500">*</span></label>
             <input
               type="tel"
+              inputMode="numeric"
+              autoComplete="tel"
+              maxLength={16}
               value={extTelefono}
-              onChange={(e) => setExtTelefono(e.target.value)}
+              onChange={(e) => {
+                setExtTelefono(sanitizeParaguayPhoneInput(e.target.value));
+                setExtTelefonoError(null);
+              }}
               placeholder="+595 9XX XXX XXX"
-              className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-slate-50"
+              className={`w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-slate-50 ${
+                extTelefonoError ? "border-red-400" : "border-slate-200"
+              }`}
             />
+            {extTelefonoError ? (
+              <p className="text-xs text-red-500 mt-1">{extTelefonoError}</p>
+            ) : (
+              <p className="text-xs text-slate-400 mt-1">Ej: 0981 123 456 o +595 981 123 456</p>
+            )}
           </div>
           <button
             onClick={handleSubmitExterno}
@@ -935,10 +956,11 @@ const Dashboard = ({ currentUser, onLogout }) => {
   const handleAddVotante = useCallback(async (persona) => {
     const role = currentUser.role;
     const ciVotante = normalizeCI(persona.ci);
-    const tel = String(persona.telefono || "").trim();
+    const telResult = validateParaguayPhone(persona.telefono);
+    if (!telResult.valid) { alert(telResult.error); return; }
+    const tel = telResult.normalized;
     const terceraEdad = persona.tercera_edad;
 
-    if (!tel) { alert("El telefono es obligatorio."); return; }
     if (terceraEdad === null || terceraEdad === undefined) { alert("Debe indicar si es tercera edad."); return; }
 
     // Verificar que la CI no exista en otra jerarquía

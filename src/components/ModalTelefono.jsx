@@ -1,25 +1,52 @@
 import React, { useState, useEffect } from "react";
 import { Phone, X } from "lucide-react";
+import {
+  sanitizeParaguayPhoneInput,
+  validateParaguayPhone,
+  normalizeParaguayMobile,
+} from "../utils/phoneValidation";
 
 const ModalTelefono = ({ tipo, persona, onSave, onClose }) => {
   const [telefono, setTelefono] = useState("");
+  const [error, setError] = useState(null);
   const [saving, setSaving] = useState(false);
 
   // Inicializar con el teléfono actual de la persona cada vez que se abre
   useEffect(() => {
     if (persona) {
-      setTelefono(persona.telefono || "+595");
+      // Mostrar en formato visual si es válido, si no mostrar tal cual
+      const raw = persona.telefono || "";
+      const normalized = normalizeParaguayMobile(raw);
+      if (normalized) {
+        // Formatear: +595 9XX XXX XXX
+        const local = normalized.slice(4);
+        setTelefono(`+595 ${local.slice(0, 3)} ${local.slice(3, 6)} ${local.slice(6)}`);
+      } else {
+        setTelefono(raw || "+595");
+      }
+      setError(null);
     }
   }, [persona]);
 
   if (!persona) return null;
 
+  const handleChange = (e) => {
+    const sanitized = sanitizeParaguayPhoneInput(e.target.value);
+    setTelefono(sanitized);
+    setError(null);
+  };
+
   const handleSave = async () => {
-    const tel = telefono.trim();
-    if (!tel) { alert("El teléfono no puede estar vacío."); return; }
+    const result = validateParaguayPhone(telefono);
+    if (!result.valid) {
+      setError(result.error);
+      return;
+    }
     setSaving(true);
     try {
-      await onSave(tel);
+      await onSave(result.normalized); // siempre guarda normalizado: +595981123456
+    } catch {
+      // onSave lanza si hay error — el modal permanece abierto
     } finally {
       setSaving(false);
     }
@@ -58,18 +85,27 @@ const ModalTelefono = ({ tipo, persona, onSave, onClose }) => {
 
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1.5">
-              Número de teléfono
+              Número de celular
             </label>
             <input
               type="tel"
+              inputMode="numeric"
+              autoComplete="tel"
+              maxLength={16}
               value={telefono}
-              onChange={(e) => setTelefono(e.target.value)}
-              className="w-full px-4 py-2.5 text-sm border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent bg-slate-50"
+              onChange={handleChange}
+              className={`w-full px-4 py-2.5 text-sm border rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent bg-slate-50 ${
+                error ? "border-red-400" : "border-slate-300"
+              }`}
               placeholder="+595 9XX XXX XXX"
               autoFocus
               disabled={saving}
             />
-            <p className="text-xs text-slate-400 mt-1">Formato sugerido: +595 9XX XXX XXX</p>
+            {error ? (
+              <p className="text-xs text-red-500 mt-1">{error}</p>
+            ) : (
+              <p className="text-xs text-slate-400 mt-1">Ej: 0981 123 456 o +595 981 123 456</p>
+            )}
           </div>
         </div>
 
