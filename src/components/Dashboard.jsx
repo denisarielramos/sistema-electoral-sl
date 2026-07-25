@@ -41,6 +41,7 @@ import {
   getMisSubcoordinadores,
   getVotantesDeSubcoord,
   getMisVotantes,
+  getVotantesDirectosCoord,
   getPersonasDisponibles,
   getCoordsDeDigente,
   getSubsDeDigente,
@@ -532,12 +533,14 @@ const ModalAgregarDirigente = ({
 // ======================= MAIN DASHBOARD =======================
 const Dashboard = ({ currentUser, onLogout }) => {
   // ======================= ESTADO PRINCIPAL =======================
-  const [estructura, setEstructura] = useState({
+  // Estructura RAW: solo los datos crudos de las tablas de estructura (sin enriquecer con padrón)
+  const [estructuraRaw, setEstructuraRaw] = useState({
     dirigentes: [],
     coordinadores: [],
     subcoordinadores: [],
     votantes: [],
   });
+  const [estructuraError, setEstructuraError] = useState(null);
   const [padron, setPadron] = useState([]);
   const [padronLoaded, setPadronLoaded] = useState(false);
   const [padronLoading, setPadronLoading] = useState(false);
@@ -566,47 +569,58 @@ const Dashboard = ({ currentUser, onLogout }) => {
   // Copy feedback
   const [copiedCode, setCopiedCode] = useState(null);
 
-  // ======================= CARGAR ESTRUCTURA =======================
+  // ======================= FETCH PAGINADO DE TABLA ACTIVA =======================
+  // Trae TODAS las filas activas de una tabla, de 1000 en 1000, sin embeds.
+  // Lanza el error indicando la tabla — nunca devuelve [] silenciosamente ante un error.
+  const fetchAllActive = useCallback(async (tableName) => {
+    const PAGE = 1000;
+    let desde = 0;
+    const acum = [];
+    for (;;) {
+      const { data, error } = await supabase
+        .from(tableName)
+        .select("*")
+        .eq("activo", true)
+        .range(desde, desde + PAGE - 1);
+      if (error) {
+        throw new Error(`Error cargando ${tableName}: ${error.message}`);
+      }
+      if (!data || data.length === 0) break;
+      acum.push(...data);
+      if (data.length < PAGE) break;
+      desde += PAGE;
+    }
+    return acum;
+  }, []);
+
+  // ======================= CARGAR ESTRUCTURA (RAW) =======================
   const cargarEstructura = useCallback(async () => {
     setLoading(true);
+    setEstructuraError(null);
     try {
-      const [dirsRes, coordsRes, subsRes, votantesRes] = await Promise.all([
-        supabase.from("dirigentes").select("*").eq("activo", true),
-        supabase.from("coordinadores").select("*, padron(*)").eq("activo", true),
-        supabase.from("subcoordinadores").select("*, padron(*)").eq("activo", true),
-        supabase.from("votantes").select("*, padron(*)").eq("activo", true),
+      const [dirigentes, coordinadores, subcoordinadores, votantes] = await Promise.all([
+        fetchAllActive("dirigentes"),
+        fetchAllActive("coordinadores"),
+        fetchAllActive("subcoordinadores"),
+        fetchAllActive("votantes"),
       ]);
 
-      const enrich = (rows) =>
-        (rows || []).map((r) => ({
-          ...r,
-          ci: normalizeCI(r.ci),
-          nombre: r.padron?.nombre || r.nombre || "",
-          apellido: r.padron?.apellido || r.apellido || "",
-          seccional: r.padron?.seccional || "",
-          local_votacion: r.padron?.local_votacion || "",
-          mesa: r.padron?.mesa || "",
-          orden: r.padron?.orden || "",
-          direccion: r.padron?.direccion || "",
-        }));
+      // Guardar solo datos crudos, normalizando CI para comparaciones consistentes
+      const norm = (rows) => rows.map((r) => ({ ...r, ci: normalizeCI(r.ci) }));
 
-      const dirigentes = (dirsRes.data || []).map((d) => ({
-        ...d,
-        ci: normalizeCI(d.ci),
-      }));
-
-      setEstructura({
-        dirigentes,
-        coordinadores: enrich(coordsRes.data),
-        subcoordinadores: enrich(subsRes.data),
-        votantes: enrich(votantesRes.data),
+      setEstructuraRaw({
+        dirigentes: norm(dirigentes),
+        coordinadores: norm(coordinadores),
+        subcoordinadores: norm(subcoordinadores),
+        votantes: norm(votantes),
       });
     } catch (err) {
-      console.error("Error cargando estructura:", err);
+      console.error("[Dashboard]", err.message);
+      setEstructuraError(err.message || "Error al cargar la estructura.");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [fetchAllActive]);
 
   // ======================= PADRON: HELPERS INDEXEDDB =======================
   const openPadronDB = () =>
@@ -761,9 +775,82 @@ const Dashboard = ({ currentUser, onLogout }) => {
     }
   }, [cargarEstructura]);
 
+  // ======================= VERIFICAR CI DISPONIBLE =======================
+  // Consulta Supabase (fuente de verdad) en las 4 tablas antes de insertar.
+  // No depende de personasDisponibles porque el estado local puede estar desactualizado.
+  const verificarCIDisponible = useCallback(async (ci) => {
+    const ciNorm = normalizeCI(ci);
+    const tablas = [
+      { tabla: "dirigentes", rol: "dirigente" },
+      { tabla: "coordinadores", rol: "coordinador" },
+      { tabla: "subcoordinadores", rol: "subcoordinador" },
+      { tabla: "votantes", rol: "votante" },
+    ];
+    for (const { tabla, rol } of tablas) {
+      const { data, error } = await supabase
+        .from(tabla)
+        .select("ci, activo")
+        .eq("ci", ciNorm)
+        .maybeSingle();
+      if (error) {
+        console.error(`[verificarCIDisponible] ${tabla}: ${error.message}`);
+        continue; // no bloquear por un error de lectura puntual
+      }
+      if (data) {
+        if (data.activo === false) {
+          return {
+            disponible: false,
+            mensaje: `Esta persona está archivada como ${rol}. Debe ser restaurada por el superadmin.`,
+          };
+        }
+        return { disponible: false, mensaje: `Esta persona ya está registrada como ${rol}.` };
+      }
+    }
+    return { disponible: true };
+  }, []);
+
+  // ======================= PADRON MAP =======================
+  // Índice CI → registro de padrón, usando el padrón completo ya en memoria/IndexedDB.
+  const padronMap = useMemo(() => {
+    const map = new Map();
+    for (const p of padron) map.set(normalizeCI(p.ci), p);
+    return map;
+  }, [padron]);
+
+  // ======================= ESTRUCTURA ENRIQUECIDA =======================
+  // Combina estructuraRaw con datos del padrón. Los datos de la tabla de estructura
+  // prevalecen (telefono, activo, asignado_por, roles, dirigente_ci, coordinador_ci,
+  // tercera_edad, voto_confirmado, direccion_override). Se recalcula automáticamente
+  // cuando el padrón termina de cargar, sin volver a consultar Supabase.
+  const estructura = useMemo(() => {
+    const enrich = (rows) =>
+      rows.map((row) => {
+        const p = padronMap.get(normalizeCI(row.ci)) || {};
+        return {
+          ...p,      // datos del padrón (nombre, apellido, seccional, local_votacion, mesa, orden, direccion)
+          ...row,    // datos de estructura prevalecen
+          ci: normalizeCI(row.ci),
+          // Para dirigentes externos se conserva su nombre/apellido de la tabla dirigentes;
+          // para el resto, cae al padrón si la estructura no lo trae.
+          nombre: row.nombre || p.nombre || "",
+          apellido: row.apellido || p.apellido || "",
+          seccional: row.seccional || p.seccional || "",
+          local_votacion: row.local_votacion || p.local_votacion || "",
+          mesa: row.mesa || p.mesa || "",
+          orden: row.orden || p.orden || "",
+          direccion: p.direccion || row.direccion || "",
+        };
+      });
+
+    return {
+      dirigentes: enrich(estructuraRaw.dirigentes),
+      coordinadores: enrich(estructuraRaw.coordinadores),
+      subcoordinadores: enrich(estructuraRaw.subcoordinadores),
+      votantes: enrich(estructuraRaw.votantes),
+    };
+  }, [estructuraRaw, padronMap]);
+
   // ======================= PERSONAS DISPONIBLES =======================
-  // padronLoaded siempre se pone true al finalizar cargarPadron (éxito o error).
-  // Mientras padron sea [], getPersonasDisponibles devuelve [] correctamente.
   const personasDisponibles = useMemo(
     () => getPersonasDisponibles(padron, estructura),
     [padron, estructura]
@@ -771,7 +858,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
 
   // ======================= ESTADÍSTICAS =======================
   const estadisticas = useMemo(
-    () => getEstadisticas(currentUser, estructura),
+    () => getEstadisticas(estructura, currentUser),
     [currentUser, estructura]
   );
 
@@ -854,6 +941,10 @@ const Dashboard = ({ currentUser, onLogout }) => {
     if (!tel) { alert("El telefono es obligatorio."); return; }
     if (terceraEdad === null || terceraEdad === undefined) { alert("Debe indicar si es tercera edad."); return; }
 
+    // Verificar que la CI no exista en otra jerarquía
+    const chequeo = await verificarCIDisponible(ciVotante);
+    if (!chequeo.disponible) { alert(chequeo.mensaje); return; }
+
     let payload = {
       ci: ciVotante,
       telefono: tel,
@@ -904,8 +995,8 @@ const Dashboard = ({ currentUser, onLogout }) => {
     const { error } = await supabase.from("votantes").insert(payload);
     if (error) { alert("Error al agregar votante: " + error.message); return; }
     setShowAddModal(false);
-    cargarEstructura();
-  }, [currentUser, estructura, cargarEstructura]);
+    await cargarEstructura();
+  }, [currentUser, estructura, cargarEstructura, verificarCIDisponible]);
 
 
 
@@ -914,6 +1005,8 @@ const Dashboard = ({ currentUser, onLogout }) => {
   const handleAddCoordinadorSuperadmin = useCallback(async ({ persona, dirigenteCI }) => {
     if (!dirigenteCI) { alert("Debe seleccionar un dirigente."); return; }
     const ciCoord = normalizeCI(persona.ci);
+    const chequeo = await verificarCIDisponible(ciCoord);
+    if (!chequeo.disponible) { alert(chequeo.mensaje); return; }
     let loginCode;
     try { loginCode = await generarAccessCodeUnico(supabase); }
     catch (err) { alert(err.message); return; }
@@ -931,12 +1024,14 @@ const Dashboard = ({ currentUser, onLogout }) => {
     const savedCode = data?.login_code || loginCode;
     alert(`Coordinador agregado. Código de acceso: ${savedCode}`);
     setShowAgregarCoord(false);
-    cargarEstructura();
-  }, [currentUser, cargarEstructura]);
+    await cargarEstructura();
+  }, [currentUser, cargarEstructura, verificarCIDisponible]);
 
   // ======================= AGREGAR COORDINADOR (DIRIGENTE vía ModalAgregarCoordinador) =======================
   const handleAddCoordinadorDesdeModal = useCallback(async ({ persona, dirigenteCI }) => {
     const ciCoord = normalizeCI(persona.ci);
+    const chequeo = await verificarCIDisponible(ciCoord);
+    if (!chequeo.disponible) { alert(chequeo.mensaje); return; }
     let loginCode;
     try { loginCode = await generarAccessCodeUnico(supabase); }
     catch (err) { alert(err.message); return; }
@@ -954,12 +1049,14 @@ const Dashboard = ({ currentUser, onLogout }) => {
     const savedCode = data?.login_code || loginCode;
     alert(`Coordinador agregado. Código de acceso: ${savedCode}`);
     setShowAgregarCoord(false);
-    cargarEstructura();
-  }, [currentUser, cargarEstructura]);
+    await cargarEstructura();
+  }, [currentUser, cargarEstructura, verificarCIDisponible]);
 
   // ======================= AGREGAR SUBCOORDINADOR (SUPERADMIN/COORDINADOR) =======================
   const handleAddSubcoordinador = useCallback(async (persona) => {
     const ciSub = normalizeCI(persona.ci);
+    const chequeo = await verificarCIDisponible(ciSub);
+    if (!chequeo.disponible) { alert(chequeo.mensaje); return; }
     let loginCode;
     try { loginCode = await generarAccessCodeUnico(supabase); }
     catch (err) { alert(err.message); return; }
@@ -977,16 +1074,19 @@ const Dashboard = ({ currentUser, onLogout }) => {
     const savedCode = data?.login_code || loginCode;
     alert(`Subcoordinador agregado. Código de acceso: ${savedCode}`);
     setShowAddModal(false);
-    cargarEstructura();
-  }, [currentUser, cargarEstructura]);
+    await cargarEstructura();
+  }, [currentUser, cargarEstructura, verificarCIDisponible]);
 
   // ======================= AGREGAR DIRIGENTE (SUPERADMIN) =======================
   const handleAgregarDirigenteDesdePadron = useCallback(async (persona) => {
+    const ciDir = normalizeCI(persona.ci);
+    const chequeo = await verificarCIDisponible(ciDir);
+    if (!chequeo.disponible) { alert(chequeo.mensaje); return; }
     let loginCode;
     try { loginCode = await generarAccessCodeUnico(supabase); }
     catch (err) { alert(err.message); return; }
     const payload = {
-      ci: normalizeCI(persona.ci),
+      ci: ciDir,
       nombre: persona.nombre || "",
       apellido: persona.apellido || "",
       telefono: persona.telefono || null,
@@ -1000,15 +1100,18 @@ const Dashboard = ({ currentUser, onLogout }) => {
     const savedCode = data?.login_code || loginCode;
     alert(`Dirigente agregado. Código de acceso: ${savedCode}`);
     setShowAgregarDirigente(false);
-    cargarEstructura();
-  }, [currentUser, cargarEstructura]);
+    await cargarEstructura();
+  }, [currentUser, cargarEstructura, verificarCIDisponible]);
 
   const handleAgregarDirigenteExterno = useCallback(async (datos) => {
+    const ciDir = normalizeCI(datos.ci);
+    const chequeo = await verificarCIDisponible(ciDir);
+    if (!chequeo.disponible) { alert(chequeo.mensaje); return null; }
     let loginCode;
     try { loginCode = await generarAccessCodeUnico(supabase); }
     catch (err) { alert(err.message); return null; }
     const payload = {
-      ci: normalizeCI(datos.ci),
+      ci: ciDir,
       nombre: datos.nombre,
       apellido: datos.apellido || "",
       telefono: datos.telefono || null,
@@ -1019,9 +1122,9 @@ const Dashboard = ({ currentUser, onLogout }) => {
     };
     const { data, error } = await supabase.from("dirigentes").insert(payload).select().single();
     if (error) { alert("Error al agregar dirigente externo: " + error.message); return null; }
-    cargarEstructura();
+    await cargarEstructura();
     return data?.login_code || loginCode;
-  }, [currentUser, cargarEstructura]);
+  }, [currentUser, cargarEstructura, verificarCIDisponible]);
 
   // ======================= HANDLER GENERAL ADD =======================
   // Coordinadores van por ModalAgregarCoordinador; aquí solo votante y subcoordinador
@@ -1290,7 +1393,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                                     );
                                   })}
                                   {/* Votantes directos del coord */}
-                                  {misVots.filter((v) => normalizeCI(v.asignado_por) === coordCI || v.asignado_por_rol === "coordinador").map((v) => (
+                                  {getVotantesDirectosCoord(estructura, coordCI).map((v) => (
                                     <VotanteRow
                                       key={v.ci}
                                       v={v}
@@ -1421,7 +1524,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                               </div>
                             );
                           })}
-                          {misVots.filter((v) => v.asignado_por_rol === "coordinador").map((v) => (
+                          {misVots.map((v) => (
                             <VotanteRow
                               key={v.ci}
                               v={v}
@@ -1565,7 +1668,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                         </div>
                       );
                     })}
-                    {misVots.filter((v) => v.asignado_por_rol === "coordinador").map((v) => (
+                    {misVots.map((v) => (
                       <VotanteRow
                         key={v.ci}
                         v={v}
@@ -1917,6 +2020,17 @@ const Dashboard = ({ currentUser, onLogout }) => {
           <div className="text-center py-20">
             <div className="w-8 h-8 border-2 border-brand-200 border-t-brand-600 rounded-full animate-spin mx-auto mb-3" />
             <p className="text-sm text-slate-400">Cargando datos...</p>
+          </div>
+        ) : estructuraError ? (
+          <div className="text-center py-20">
+            <p className="text-sm font-semibold text-red-600 mb-1">No se pudo cargar la estructura</p>
+            <p className="text-xs text-slate-400 mb-4 max-w-md mx-auto">{estructuraError}</p>
+            <button
+              onClick={() => cargarEstructura()}
+              className="px-4 h-9 bg-brand-600 hover:bg-brand-700 text-white rounded-lg text-sm font-medium border-0 transition-colors"
+            >
+              Reintentar
+            </button>
           </div>
         ) : searchQuery.trim() ? (
           renderSearchResults()

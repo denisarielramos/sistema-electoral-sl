@@ -4,58 +4,58 @@
 export const normalizeCI = (ci) =>
   String(ci || "").replace(/\D/g, "");
 
+// Normaliza ROL (texto en minúsculas, sin espacios) — NUNCA usar normalizeCI para roles
+export const normalizeRole = (value) =>
+  String(value ?? "").trim().toLowerCase();
+
+// Extrae un CI normalizado de un string CI o de un objeto { ci }
+const resolveCI = (input) =>
+  typeof input === "object" && input !== null ? normalizeCI(input.ci) : normalizeCI(input);
+
+// ¿El registro está activo? (los registros sin campo activo se consideran activos)
+const esActivo = (r) => r.activo !== false;
+
 // ======================= SUBCOORDINADORES DEL COORD =======================
 // coordCI puede ser un string CI normalizado o un objeto { ci, role }
 export const getMisSubcoordinadores = (estructura, coordCI) => {
   if (!coordCI) return [];
-  // Aceptar tanto objeto currentUser como CI string directamente
-  const ci = typeof coordCI === "object" ? normalizeCI(coordCI.ci) : normalizeCI(coordCI);
+  const ci = resolveCI(coordCI);
   return (estructura.subcoordinadores || []).filter(
-    (s) => normalizeCI(s.coordinador_ci) === ci
+    (s) => esActivo(s) && normalizeCI(s.coordinador_ci) === ci
   );
 };
 
 // ======================= VOTANTES DE UN SUBCOORD =======================
+// Exige asignado_por === subCi y, cuando exista asignado_por_rol, que sea "subcoordinador".
 export const getVotantesDeSubcoord = (estructura, subCi) => {
   const ci = normalizeCI(subCi);
-  return (estructura.votantes || []).filter(
-    (v) => normalizeCI(v.asignado_por) === ci
-  );
-};
-
-// ======================= MIS VOTANTES (coordinador): directos + compatibilidad legacy =======================
-// Devuelve votantes cuyo asignado_por coincide con coordCI
-// O, como compatibilidad con registros sin asignado_por_rol, aquellos cuyo
-// coordinador_ci coincide con coordCI y no tienen asignado_por_rol diferente a "coordinador".
-export const getMisVotantes = (estructura, coordCI) => {
-  if (!coordCI) return [];
-  const ci = typeof coordCI === "object" ? normalizeCI(coordCI.ci) : normalizeCI(coordCI);
-
-  const seen = new Set();
-  const result = [];
-
-  for (const v of (estructura.votantes || [])) {
-    const vCI = normalizeCI(v.ci);
-    if (seen.has(vCI)) continue;
-
-    const porAsignadoPor = normalizeCI(v.asignado_por) === ci;
-    const porCoordCI =
-      normalizeCI(v.coordinador_ci) === ci &&
-      (v.asignado_por_rol === "coordinador" || !v.asignado_por_rol);
-
-    if (porAsignadoPor || porCoordCI) {
-      seen.add(vCI);
-      result.push(v);
-    }
-  }
-
-  return result;
+  return (estructura.votantes || []).filter((v) => {
+    if (!esActivo(v)) return false;
+    if (normalizeCI(v.asignado_por) !== ci) return false;
+    const rol = normalizeRole(v.asignado_por_rol);
+    return rol === "subcoordinador" || rol === "";
+  });
 };
 
 // ======================= VOTANTES DIRECTOS DEL COORD =======================
-export const getVotantesDirectosCoord = (estructura, coordCi) => {
-  return getMisVotantes(estructura, coordCi);
+// Estricto: asignado_por === coordCI y asignado_por_rol === "coordinador".
+// Compatibilidad legacy: coordinador_ci === coordCI y asignado_por_rol vacío.
+// NUNCA incluye votantes asignados por subcoordinadores.
+export const getVotantesDirectosCoord = (estructura, coordCI) => {
+  if (!coordCI) return [];
+  const ci = resolveCI(coordCI);
+  return (estructura.votantes || []).filter((v) => {
+    if (!esActivo(v)) return false;
+    const rol = normalizeRole(v.asignado_por_rol);
+    const estricto = normalizeCI(v.asignado_por) === ci && rol === "coordinador";
+    const legacy = normalizeCI(v.coordinador_ci) === ci && rol === "";
+    return estricto || legacy;
+  });
 };
+
+// ======================= MIS VOTANTES (coordinador) =======================
+// Alias semántico: votantes directos del coordinador.
+export const getMisVotantes = (estructura, coordCI) => getVotantesDirectosCoord(estructura, coordCI);
 
 // ======================= PERSONAS DISPONIBLES =======================
 export const getPersonasDisponibles = (padron, estructura) => {
@@ -117,8 +117,9 @@ export const getSubsDeDigente = (estructura, dirigenteCI) => {
 export const getVotantesDirectosDirigente = (estructura, dirigenteCI) => {
   return (estructura.votantes || []).filter(
     (v) =>
+      esActivo(v) &&
       normalizeCI(v.dirigente_ci) === normalizeCI(dirigenteCI) &&
-      normalizeCI(v.asignado_por_rol) === "dirigente"
+      normalizeRole(v.asignado_por_rol) === "dirigente"
   );
 };
 
@@ -151,7 +152,8 @@ export const getEstructuraPropia = (estructura, currentUser) => {
     misSubcoords = getMisSubcoordinadores(estructura, currentUser);
     misVotantes = getMisVotantes(estructura, currentUser);
   } else if (isSub) {
-    misVotantes = getMisVotantes(estructura, currentUser);
+    // Para subcoordinador sus votantes son los que él asignó
+    misVotantes = getVotantesDeSubcoord(estructura, normalizeCI(currentUser.ci));
   }
 
   const votantesIndirectos = isCoord

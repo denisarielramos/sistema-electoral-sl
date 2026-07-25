@@ -1,7 +1,8 @@
 import {
   normalizeCI,
+  normalizeRole,
   getMisSubcoordinadores,
-  getMisVotantes,
+  getVotantesDirectosCoord,
   getVotantesDeSubcoord,
   getCoordsDeDigente,
   getSubsDeDigente,
@@ -60,8 +61,8 @@ export const getEstadisticas = (estructura, currentUser) => {
     // Subcoordinadores bajo este coordinador
     const subs = getMisSubcoordinadores(estructura, miCI);
 
-    // Votantes directos (incluye compatibilidad legacy con coordinador_ci)
-    const votantesDirectos = getMisVotantes(estructura, miCI);
+    // Votantes directos (estricto por rol + compatibilidad legacy con coordinador_ci)
+    const votantesDirectos = getVotantesDirectosCoord(estructura, miCI);
 
     // Votantes indirectos (de subcoordinadores), sin duplicados con directos
     const ciDirectos = new Set(votantesDirectos.map((v) => normalizeCI(v.ci)));
@@ -91,7 +92,8 @@ export const getEstadisticas = (estructura, currentUser) => {
       subsConfirmados,
       votantesDirectos: votantesDirectos.length,
       votantesIndirectos,
-      totalRed: 1 + subs.length + totalVotantes,
+      // Total red: subcoordinadores + todos los votantes de la rama (NO incluye al propio coordinador)
+      totalRed: subs.length + totalVotantes,
       totalVotantes,
       totalConfirmable,
       totalConfirmados,
@@ -112,12 +114,12 @@ export const getEstadisticas = (estructura, currentUser) => {
 
     // Voters assigned by coordinators (direct of coord)
     const votantesDeCoords = todosVotantes.filter(
-      (v) => normalizeCI(v.asignado_por_rol) === "coordinador"
+      (v) => normalizeRole(v.asignado_por_rol) === "coordinador"
     ).length;
 
     // Voters assigned by subcoordinators
     const votantesDeSubs = todosVotantes.filter(
-      (v) => normalizeCI(v.asignado_por_rol) === "subcoordinador"
+      (v) => normalizeRole(v.asignado_por_rol) === "subcoordinador"
     ).length;
 
     return {
@@ -134,20 +136,14 @@ export const getEstadisticas = (estructura, currentUser) => {
   if (currentUser.role === "subcoordinador") {
     const miCI = normalizeCI(currentUser.ci);
 
-    const misVotantes = estructura.votantes.filter(
-      (v) => normalizeCI(v.asignado_por) === miCI
-    );
+    const misVotantes = getVotantesDeSubcoord(estructura, miCI);
 
     // Votos confirmados
     const votosConfirmados = misVotantes.filter(
       (v) => v.voto_confirmado === true
     ).length;
-    const porcentajeConfirmados =
-      misVotantes.length > 0
-        ? Math.round((votosConfirmados / misVotantes.length) * 100)
-        : 0;
 
-    // Sub self is always counted as 1 confirmed vote (automatic).
+    // El propio subcoordinador se cuenta como 1 voto confirmado automático (solo para el porcentaje de confirmación)
     const totalConfirmable = 1 + misVotantes.length;
     const totalConfirmados = 1 + votosConfirmados;
     const porcentajeTotal =
@@ -155,7 +151,8 @@ export const getEstadisticas = (estructura, currentUser) => {
 
     return {
       votantes: misVotantes.length,
-      totalRed: 1 + misVotantes.length,
+      // Total red: solo sus votantes (NO incluye al propio subcoordinador)
+      totalRed: misVotantes.length,
       totalVotantes: misVotantes.length,
       totalConfirmable,
       totalConfirmados,
