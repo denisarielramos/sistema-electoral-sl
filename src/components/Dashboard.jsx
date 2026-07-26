@@ -875,10 +875,14 @@ const Dashboard = ({ currentUser, onLogout }) => {
         setPadronLoading(false);
         setPadronError(null);
 
-        // D: actualización en background (sin bloquear el buscador)
+        // D: actualización en background (sin bloquear el buscador). Siempre se
+        // sincroniza, no solo cuando cambia la cantidad de filas: el padrón cacheado
+        // puede tener la misma cantidad de registros pero campos distintos (p. ej. una
+        // columna agregada al SELECT después de que el usuario ya tenía datos en
+        // IndexedDB), y comparar solo por longitud nunca detectaría ese caso.
         descargarPadronSupabase()
           .then(async (fresh) => {
-            if (fresh.length > 0 && fresh.length !== cached.length) {
+            if (fresh.length > 0) {
               await saveAllToDB(db, fresh);
               setPadron(fresh);
             }

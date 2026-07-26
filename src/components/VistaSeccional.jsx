@@ -120,8 +120,12 @@ export default function VistaSeccional({
             ? `${nombre === SIN_DATO ? "" : nombre} ${apellido === SIN_DATO ? "" : apellido}`.trim() || SIN_DATO
             : SIN_DATO;
 
+        // '||' (no '??'): al borrar una dirección personalizada, handleSaveDireccion
+        // guarda direccion_override como "" — debe tratarse igual que ausente y caer a
+        // persona.direccion/padronPersona.direccion, igual que en el resto del
+        // Dashboard (direccionMostrar = persona.direccion_override || persona.direccion).
         const direccion =
-          persona?.direccion_override ?? persona?.direccion ?? padronPersona?.direccion ?? null;
+          persona?.direccion_override || persona?.direccion || padronPersona?.direccion || null;
 
         list.push({
           ci,
