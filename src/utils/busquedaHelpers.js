@@ -61,6 +61,12 @@ export const personaCoincideConsulta = (persona, rawQuery) => {
 
   const ciDigits = soloDigitosCI(persona?.ci);
   const telDigits = soloDigitosTelefono(persona?.telefono);
+  // Dígitos del teléfono SIN sacar el código de país/el '0' local (a diferencia de
+  // telDigits) — necesario para el matching por token de abajo: un token aislado como
+  // "+595" en una consulta mixta ("Denis +595 981 123 456") se normaliza a "" contra
+  // telDigits (le sacamos el código de país y no queda nada), pero sigue siendo un
+  // fragmento válido del teléfono contra sus dígitos "en crudo".
+  const telDigitsRaw = soloDigitosCI(persona?.telefono);
 
   // CI: solo cuando la consulta ENTERA es una CI formateada (sin letras) se compara
   // contra el CI completo, para soportar "4630621", "4.630.621", "4 630 621" y
@@ -97,6 +103,10 @@ export const personaCoincideConsulta = (persona, rawQuery) => {
       nombreCompleto.includes(t) ||
       apellidoNombre.includes(t) ||
       (tDigitsTel.length > 0 && telDigits.includes(tDigitsTel)) ||
+      // Fragmento de teléfono "en crudo" (ej. el "+595" de una consulta mixta como
+      // "Denis +595 981 123 456"), que solo, sin sacarle el código de país, sí es un
+      // fragmento válido del teléfono.
+      (tDigitsCI.length > 0 && telDigitsRaw.includes(tDigitsCI)) ||
       (tDigitsCI.length > 0 && ciDigits.includes(tDigitsCI))
     );
   });

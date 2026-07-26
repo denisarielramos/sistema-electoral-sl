@@ -843,7 +843,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
     for (;;) {
       const { data, error } = await supabase
         .from("padron")
-        .select("ci,nombre,apellido,seccional,local_votacion,mesa,orden")
+        .select("ci,nombre,apellido,seccional,local_votacion,mesa,orden,direccion")
         .range(desde, desde + PAGE - 1);
       if (error) throw error;
       if (!data || data.length === 0) break;

@@ -109,6 +109,17 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
     );
   }
 
+  // Consulta mixta nombre + teléfono formateado: el token aislado "+595" tampoco debe
+  // romper el AND cuando además se busca por nombre.
+  assert.ok(
+    personaCoincideConsulta(persona, "Denis +595 981 123 456"),
+    'una consulta mixta con nombre correcto + teléfono formateado ("+595 981 123 456") debe matchear'
+  );
+  assert.ok(
+    !personaCoincideConsulta(persona, "Ana +595 981 123 456"),
+    'una consulta mixta con un nombre que no corresponde ("Ana") no debe matchear aunque el teléfono sea correcto'
+  );
+
   console.log("OK: caso 3 (búsqueda por CI/teléfono encuentra distintos formatos, sin falsos positivos en consultas mixtas)");
 }
 
