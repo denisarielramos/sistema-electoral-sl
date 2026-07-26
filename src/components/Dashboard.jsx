@@ -28,6 +28,9 @@ import {
   ExternalLink,
   MessageCircle,
   FileSpreadsheet,
+  ClipboardList,
+  Printer,
+  Map as MapIcon,
 } from "lucide-react";
 
 import AddPersonModal from "../AddPersonModal";
@@ -36,6 +39,7 @@ import PadronSearch from "./PadronSearch";
 import ModalTelefono from "./ModalTelefono";
 import ModalDireccion from "./ModalDireccion";
 import ConfirmVotoModal from "./ConfirmVotoModal";
+import VistaSeccional from "./VistaSeccional";
 import {
   generateSuperadminPDF,
   generateCoordinadorPDF,
@@ -77,7 +81,7 @@ const Badge = ({ children, variant = "default" }) => {
   );
 };
 
-const ActionBtn = ({ onClick, title, variant = "default", children }) => {
+const ActionBtn = ({ onClick, title, variant = "default", ariaLabel, children }) => {
   const base =
     "inline-flex items-center justify-center w-9 h-9 rounded-lg transition-colors shrink-0";
   const variants = {
@@ -92,6 +96,7 @@ const ActionBtn = ({ onClick, title, variant = "default", children }) => {
     <button
       onClick={onClick}
       title={title}
+      aria-label={ariaLabel || title}
       className={`${base} ${variants[variant]}`}
     >
       {children}
@@ -272,7 +277,7 @@ const VoteCounter = ({ confirmed, total }) => {
 
 // ======================= PERSONA DATA =======================
 const DatosPersona = ({
-  persona, rol, loginCode, onCopy, counter,
+  persona, rol, loginCode, onCopy, copiedCode, counter,
   tablaAcceso, onGenerarAcceso, generandoAcceso, esSuperadmin,
   onDescargarExcel, excelKey, excelBusyKey,
 }) => {
@@ -292,18 +297,16 @@ const DatosPersona = ({
         CI: <span className="text-slate-700 font-medium">{persona.ci}</span>
         {rol && <span className="ml-2 text-slate-400">• {rol}</span>}
       </p>
-      {/* Fila de código de acceso */}
+      {/* Fila de código de acceso — el valor NUNCA se muestra como texto, solo copiable */}
       {tieneCode ? (
         <div className="mt-1 flex items-center gap-1.5 flex-wrap">
-          <span className="text-xs text-slate-500">
-            Código: <span className="font-mono font-semibold text-slate-700 select-all">{loginCode}</span>
-          </span>
           <button
             onClick={(e) => { e.stopPropagation(); onCopy?.(loginCode); }}
-            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border border-brand-200 text-brand-600 text-xs hover:bg-brand-50 transition-colors bg-transparent shadow-none"
+            title="Copiar código de acceso"
+            aria-label="Copiar código de acceso"
+            className="inline-flex items-center justify-center w-7 h-7 rounded-md border border-brand-200 text-brand-600 hover:bg-brand-50 transition-colors bg-transparent shadow-none"
           >
-            <Copy className="w-3 h-3" />
-            Copiar
+            {copiedCode === loginCode ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
           </button>
           <WhatsAppInviteButton persona={persona} loginCode={loginCode} />
         </div>
@@ -713,6 +716,16 @@ const Dashboard = ({ currentUser, onLogout }) => {
 
   // Excel: key del botón actualmente generando el archivo (o null si ninguno)
   const [excelBusy, setExcelBusy] = useState(null);
+
+  // Verificar estructura (superadmin): seleccionar un coordinador y generar/imprimir
+  // el PDF de su estructura completa, o el de cualquiera de sus subcoordinadores.
+  const [verificarOpen, setVerificarOpen] = useState(false);
+  const [verificarCoordCI, setVerificarCoordCI] = useState("");
+  const [verificarPrinting, setVerificarPrinting] = useState(null); // "coord" | "sub-<ci>" | null
+
+  // Vista por seccional (superadmin): reemplaza el contenido del Dashboard por una
+  // vista de solo lectura filtrable, reutilizando estructura/padronMap ya en memoria.
+  const [mostrarSeccional, setMostrarSeccional] = useState(false);
 
   // ======================= FETCH PAGINADO DE TABLA ACTIVA =======================
   // Trae TODAS las filas activas de una tabla, de 1000 en 1000, sin embeds.
@@ -1487,6 +1500,20 @@ const Dashboard = ({ currentUser, onLogout }) => {
             <FileSpreadsheet className="w-4 h-4" />
             {excelBusy === "global" ? "Generando..." : "Descargar Excel"}
           </button>
+          <button
+            onClick={() => { setVerificarOpen(true); setVerificarCoordCI(""); }}
+            className="inline-flex items-center gap-2 px-4 h-9 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 rounded-lg text-sm font-medium transition-colors"
+          >
+            <ClipboardList className="w-4 h-4" />
+            Verificar estructura
+          </button>
+          <button
+            onClick={() => setMostrarSeccional(true)}
+            className="inline-flex items-center gap-2 px-4 h-9 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 rounded-lg text-sm font-medium transition-colors"
+          >
+            <MapIcon className="w-4 h-4" />
+            Vista por seccional
+          </button>
         </div>
 
         {/* Árbol de dirigentes */}
@@ -1576,13 +1603,12 @@ const Dashboard = ({ currentUser, onLogout }) => {
                         <ExternalLink className="w-3.5 h-3.5" />
                       </ActionBtn>
                     )}
-                    {/* Código de acceso */}
+                    {/* Código de acceso — nunca se muestra el valor, solo el botón para copiarlo */}
                     {dir.login_code ? (
                       <>
-                        <span className="text-xs font-mono text-slate-500 hidden md:inline select-all">{dir.login_code}</span>
                         <ActionBtn
                           onClick={(e) => { e.stopPropagation(); handleCopy(dir.login_code); }}
-                          title="Copiar codigo de acceso"
+                          title="Copiar código de acceso"
                         >
                           {copiedCode === dir.login_code ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
                         </ActionBtn>
@@ -1632,6 +1658,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                                     rol="Coordinador"
                                     loginCode={coord.login_code}
                                     onCopy={handleCopy}
+                                    copiedCode={copiedCode}
                                     tablaAcceso="coordinadores"
                                     onGenerarAcceso={handleGenerarAcceso}
                                     generandoAcceso={generandoAcceso}
@@ -1664,6 +1691,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                                             rol="Subcoord"
                                             loginCode={sub.login_code}
                                             onCopy={handleCopy}
+                                            copiedCode={copiedCode}
                                             tablaAcceso="subcoordinadores"
                                             onGenerarAcceso={handleGenerarAcceso}
                                             generandoAcceso={generandoAcceso}
@@ -1771,6 +1799,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                             rol="Coordinador"
                             loginCode={coord.login_code}
                             onCopy={handleCopy}
+                            copiedCode={copiedCode}
                             tablaAcceso="coordinadores"
                             onGenerarAcceso={handleGenerarAcceso}
                             generandoAcceso={generandoAcceso}
@@ -1802,6 +1831,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                                     rol="Subcoord"
                                     loginCode={sub.login_code}
                                     onCopy={handleCopy}
+                                    copiedCode={copiedCode}
                                     tablaAcceso="subcoordinadores"
                                     onGenerarAcceso={handleGenerarAcceso}
                                     generandoAcceso={generandoAcceso}
@@ -1930,6 +1960,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                       rol="Coordinador"
                       loginCode={coord.login_code}
                       onCopy={handleCopy}
+                      copiedCode={copiedCode}
                       tablaAcceso="coordinadores"
                       onGenerarAcceso={handleGenerarAcceso}
                       generandoAcceso={generandoAcceso}
@@ -1958,6 +1989,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                               rol="Subcoord"
                               loginCode={sub.login_code}
                               onCopy={handleCopy}
+                              copiedCode={copiedCode}
                               tablaAcceso="subcoordinadores"
                               onGenerarAcceso={handleGenerarAcceso}
                               generandoAcceso={generandoAcceso}
@@ -2110,6 +2142,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                       rol="Subcoordinador"
                       loginCode={sub.login_code}
                       onCopy={handleCopy}
+                      copiedCode={copiedCode}
                       tablaAcceso="subcoordinadores"
                       onGenerarAcceso={handleGenerarAcceso}
                       generandoAcceso={generandoAcceso}
@@ -2289,6 +2322,18 @@ const Dashboard = ({ currentUser, onLogout }) => {
     );
   };
 
+  // ======================= VISTA POR SECCIONAL (superadmin, pantalla completa) =======================
+  if (mostrarSeccional && currentUser.role === "superadmin") {
+    return (
+      <VistaSeccional
+        estructura={estructura}
+        padronMap={padronMap}
+        padronLoading={padronLoading}
+        onBack={() => setMostrarSeccional(false)}
+      />
+    );
+  }
+
   // ======================= MAIN RENDER =======================
   return (
     <div className="min-h-screen bg-slate-50">
@@ -2463,6 +2508,175 @@ const Dashboard = ({ currentUser, onLogout }) => {
           onClose={() => setConfirmVotoState({ show: false, votante: null, accion: null })}
         />
       )}
+
+      {/* =========== VERIFICAR ESTRUCTURA (superadmin) =========== */}
+      {verificarOpen && currentUser.role === "superadmin" && (() => {
+        const selectedCoord = estructura.coordinadores.find(
+          (c) => normalizeCI(c.ci) === verificarCoordCI
+        ) || null;
+
+        const coordSubs = selectedCoord
+          ? getMisSubcoordinadores(estructura, normalizeCI(selectedCoord.ci))
+          : [];
+        const coordVotantes = selectedCoord
+          ? getMisVotantes(estructura, normalizeCI(selectedCoord.ci))
+          : [];
+
+        const printCoord = async () => {
+          if (!selectedCoord) return;
+          setVerificarPrinting("coord");
+          try {
+            const doc = await generateCoordinadorPDF({
+              estructura,
+              currentUser,
+              targetPerson: selectedCoord,
+            });
+            const ts = new Date().toISOString().slice(0, 10);
+            doc.save(`estructura-coord-${normalizeCI(selectedCoord.ci)}-${ts}.pdf`);
+          } catch (e) {
+            console.error("Error generando PDF coordinador:", e);
+            alert("Error generando PDF");
+          } finally {
+            setVerificarPrinting(null);
+          }
+        };
+
+        const printSub = async (sub) => {
+          const key = `sub-${normalizeCI(sub.ci)}`;
+          setVerificarPrinting(key);
+          try {
+            const doc = await generateSubcoordinadorPDF({
+              estructura,
+              currentUser,
+              targetPerson: sub,
+            });
+            const ts = new Date().toISOString().slice(0, 10);
+            doc.save(`estructura-sub-${normalizeCI(sub.ci)}-${ts}.pdf`);
+          } catch (e) {
+            console.error("Error generando PDF sub:", e);
+            alert("Error generando PDF");
+          } finally {
+            setVerificarPrinting(null);
+          }
+        };
+
+        return (
+          <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-start justify-center p-4 overflow-y-auto">
+            <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl my-6 overflow-hidden animate-fade-in">
+
+              {/* Header */}
+              <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 bg-slate-50">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-1.5 bg-brand-100 rounded-lg">
+                    <ClipboardList className="w-4 h-4 text-brand-600" />
+                  </div>
+                  <h2 className="text-base font-bold text-slate-800">Verificar estructura</h2>
+                </div>
+                <button
+                  onClick={() => { setVerificarOpen(false); setVerificarCoordCI(""); setVerificarPrinting(null); }}
+                  className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors border-0 bg-transparent shadow-none"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="p-5 space-y-5">
+
+                {/* Selector de coordinador */}
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">
+                    Seleccionar coordinador
+                  </label>
+                  <select
+                    value={verificarCoordCI}
+                    onChange={(e) => setVerificarCoordCI(e.target.value)}
+                    className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm text-slate-700 bg-slate-50 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent"
+                  >
+                    <option value="">-- Seleccione un coordinador --</option>
+                    {estructura.coordinadores.map((c) => (
+                      <option key={normalizeCI(c.ci)} value={normalizeCI(c.ci)}>
+                        {`${c.nombre || ""} ${c.apellido || ""}`.trim() || normalizeCI(c.ci)} — CI: {normalizeCI(c.ci)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Contenido cuando hay un coordinador seleccionado */}
+                {selectedCoord && (
+                  <div className="space-y-4">
+
+                    {/* Imprimir estructura completa del coordinador */}
+                    <div className="flex items-center justify-between p-3.5 bg-brand-50 border border-brand-200 rounded-xl">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-slate-800 truncate">
+                          {`${selectedCoord.nombre || ""} ${selectedCoord.apellido || ""}`.trim() || normalizeCI(selectedCoord.ci)}
+                        </p>
+                        <p className="text-xs text-slate-500 mt-0.5">
+                          {coordSubs.length} sub{coordSubs.length !== 1 ? "s" : ""} · {coordVotantes.length} votante{coordVotantes.length !== 1 ? "s" : ""}
+                        </p>
+                      </div>
+                      <button
+                        onClick={printCoord}
+                        disabled={verificarPrinting === "coord"}
+                        className="inline-flex items-center gap-1.5 bg-brand-600 hover:bg-brand-700 disabled:opacity-60 text-white px-3 h-8 rounded-lg text-xs font-medium transition-colors shrink-0 ml-3 border-0 shadow-none"
+                      >
+                        <Printer className="w-3.5 h-3.5" />
+                        {verificarPrinting === "coord" ? "Generando..." : "Imprimir estructura completa"}
+                      </button>
+                    </div>
+
+                    {/* Listado de subcoordinadores */}
+                    {coordSubs.length > 0 && (
+                      <div>
+                        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
+                          Subcoordinadores ({coordSubs.length})
+                        </p>
+                        <div className="space-y-2">
+                          {coordSubs.map((sub) => {
+                            const subCI = normalizeCI(sub.ci);
+                            const subVoterCount = getVotantesDeSubcoord(estructura, subCI).length;
+                            const printKey = `sub-${subCI}`;
+                            return (
+                              <div
+                                key={subCI}
+                                className="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-xl"
+                              >
+                                <div className="min-w-0">
+                                  <p className="text-sm font-medium text-slate-800 truncate">
+                                    {`${sub.nombre || ""} ${sub.apellido || ""}`.trim() || subCI}
+                                  </p>
+                                  <p className="text-xs text-slate-500 mt-0.5">
+                                    CI: {subCI} · {subVoterCount} votante{subVoterCount !== 1 ? "s" : ""}
+                                  </p>
+                                </div>
+                                <button
+                                  onClick={() => printSub(sub)}
+                                  disabled={verificarPrinting === printKey}
+                                  className="inline-flex items-center gap-1.5 border border-brand-300 bg-white hover:bg-brand-50 disabled:opacity-60 text-brand-700 px-3 h-8 rounded-lg text-xs font-medium transition-colors shrink-0 ml-3 shadow-none"
+                                >
+                                  <Printer className="w-3.5 h-3.5" />
+                                  {verificarPrinting === printKey ? "Generando..." : "Imprimir estructura de este sub"}
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {coordSubs.length === 0 && (
+                      <p className="text-sm text-slate-400 italic text-center py-3">
+                        Este coordinador no tiene subcoordinadores asignados.
+                      </p>
+                    )}
+                  </div>
+                )}
+
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 };

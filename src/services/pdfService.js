@@ -399,11 +399,14 @@ export const generateSuperadminPDF = async ({ estructura, currentUser }) => {
 // ====================================================================
 // COORDINADOR PDF
 // ====================================================================
-export const generateCoordinadorPDF = async ({ estructura, currentUser }) => {
+// targetPerson: opcional — cuando el superadmin verifica la estructura de OTRO
+// coordinador (no la propia), se genera el reporte de esa persona en lugar de currentUser.
+export const generateCoordinadorPDF = async ({ estructura, currentUser, targetPerson = null }) => {
   const doc = new jsPDF(PAGE_ORIENTATION, "mm", PAGE_FORMAT);
-  const userName = name(currentUser);
+  const persona = targetPerson || currentUser;
+  const userName = name(persona);
   const logoImg = await loadLogo();
-  const miCI = normalizeCI(currentUser.ci);
+  const miCI = normalizeCI(persona.ci);
 
   const { subcoordinadores = [], votantes = [] } = estructura;
 
@@ -465,11 +468,14 @@ export const generateCoordinadorPDF = async ({ estructura, currentUser }) => {
 // ====================================================================
 // SUBCOORDINADOR PDF
 // ====================================================================
-export const generateSubcoordinadorPDF = async ({ estructura, currentUser }) => {
+// targetPerson: opcional — reporte de OTRO subcoordinador (verificación por superadmin)
+// en lugar del propio currentUser.
+export const generateSubcoordinadorPDF = async ({ estructura, currentUser, targetPerson = null }) => {
   const doc = new jsPDF(PAGE_ORIENTATION, "mm", PAGE_FORMAT);
-  const userName = name(currentUser);
+  const persona = targetPerson || currentUser;
+  const userName = name(persona);
   const logoImg = await loadLogo();
-  const miCI = normalizeCI(currentUser.ci);
+  const miCI = normalizeCI(persona.ci);
 
   const { votantes = [] } = estructura;
   const misVotantes = votantes.filter((v) => normalizeCI(v.asignado_por) === miCI);
