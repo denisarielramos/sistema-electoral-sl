@@ -27,6 +27,7 @@ import {
   AlertCircle,
   ExternalLink,
   MessageCircle,
+  FileSpreadsheet,
 } from "lucide-react";
 
 import AddPersonModal from "../AddPersonModal";
@@ -40,6 +41,8 @@ import {
   generateCoordinadorPDF,
   generateSubcoordinadorPDF,
 } from "../services/pdfService";
+// Nota: excelService se importa dinámicamente (ver handleDescargarExcel) para que
+// ExcelJS no se incluya en el bundle inicial — solo se descarga al usarse.
 
 import { getEstadisticas } from "../services/estadisticasService";
 
@@ -128,6 +131,35 @@ const WhatsAppInviteButton = ({ persona, loginCode, iconOnly = false }) => {
       <MessageCircle className="w-3.5 h-3.5" />
       {!iconOnly && <span>WhatsApp</span>}
     </a>
+  );
+};
+
+// ======================= BOTÓN DESCARGAR EXCEL (tarjetas individuales) =======================
+// excelKey identifica esta descarga puntual; busyKey es la descarga en curso (global),
+// usado tanto para deshabilitar el botón como para mostrar "Generando..." solo en el que se clickeó.
+const ExcelDownloadButton = ({ excelKey, busyKey, onDownload, iconOnly = false }) => {
+  const isBusy = busyKey === excelKey;
+  const baseIcon =
+    "inline-flex items-center justify-center w-9 h-9 rounded-lg transition-colors shrink-0 border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed";
+  const baseInline =
+    "inline-flex items-center gap-1 px-2 py-0.5 rounded-md border border-slate-200 text-slate-600 text-xs hover:bg-slate-50 transition-colors bg-transparent shadow-none disabled:opacity-50 disabled:cursor-not-allowed";
+
+  return (
+    <button
+      type="button"
+      onClick={(e) => { e.stopPropagation(); onDownload(); }}
+      disabled={!!busyKey}
+      title={isBusy ? "Generando Excel..." : "Descargar Excel"}
+      aria-label={isBusy ? "Generando Excel..." : "Descargar Excel"}
+      className={iconOnly ? baseIcon : baseInline}
+    >
+      {isBusy ? (
+        <span className="w-3.5 h-3.5 border-2 border-slate-300 border-t-slate-600 rounded-full animate-spin shrink-0" />
+      ) : (
+        <FileSpreadsheet className="w-3.5 h-3.5" />
+      )}
+      {!iconOnly && <span>{isBusy ? "Generando..." : "Excel"}</span>}
+    </button>
   );
 };
 
@@ -242,6 +274,7 @@ const VoteCounter = ({ confirmed, total }) => {
 const DatosPersona = ({
   persona, rol, loginCode, onCopy, counter,
   tablaAcceso, onGenerarAcceso, generandoAcceso, esSuperadmin,
+  onDescargarExcel, excelKey, excelBusyKey,
 }) => {
   const direccionMostrar = persona.direccion_override || persona.direccion;
   const hasName = Boolean(persona.nombre);
@@ -288,6 +321,11 @@ const DatosPersona = ({
           )}
         </div>
       ) : null}
+      {esSuperadmin && onDescargarExcel && (
+        <div className="mt-1 flex items-center gap-1.5 flex-wrap">
+          <ExcelDownloadButton excelKey={excelKey} busyKey={excelBusyKey} onDownload={onDescargarExcel} />
+        </div>
+      )}
       <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-slate-500 mt-0.5">
         {persona.seccional && <span>Seccional: {persona.seccional}</span>}
         {persona.local_votacion && <span className="truncate">Local: {persona.local_votacion}</span>}
@@ -672,6 +710,9 @@ const Dashboard = ({ currentUser, onLogout }) => {
 
   // Copy feedback
   const [copiedCode, setCopiedCode] = useState(null);
+
+  // Excel: key del botón actualmente generando el archivo (o null si ninguno)
+  const [excelBusy, setExcelBusy] = useState(null);
 
   // ======================= FETCH PAGINADO DE TABLA ACTIVA =======================
   // Trae TODAS las filas activas de una tabla, de 1000 en 1000, sin embeds.
@@ -1313,6 +1354,73 @@ const Dashboard = ({ currentUser, onLogout }) => {
     }
   }, [currentUser, estructura]);
 
+  // ======================= EXCEL: ARMADO DE PAYLOAD POR ALCANCE =======================
+  // Reutilizan los mismos helpers de utils/estructuraHelpers.js que ya filtran la
+  // jerarquía en el resto del dashboard — no se agrega ninguna relación nueva.
+  const buildEstructuraCompletaExcelPayload = useCallback(() => ({
+    prefix: "estructura-electoral-completa",
+    persona: null,
+    roles: ["dirigente", "coordinador", "subcoordinador", "votante"],
+    dirigentes: estructura.dirigentes,
+    coordinadores: estructura.coordinadores,
+    subcoordinadores: estructura.subcoordinadores,
+    votantes: estructura.votantes,
+  }), [estructura]);
+
+  const buildDirigenteExcelPayload = useCallback((dir) => {
+    const dirCI = normalizeCI(dir.ci);
+    return {
+      prefix: "estructura-dirigente",
+      persona: dir,
+      roles: ["coordinador", "subcoordinador", "votante"],
+      dirigentes: [dir],
+      coordinadores: getCoordsDeDigente(estructura, dirCI),
+      subcoordinadores: getSubsDeDigente(estructura, dirCI),
+      votantes: getTodosVotantesDirigente(estructura, dirCI),
+    };
+  }, [estructura]);
+
+  const buildCoordExcelPayload = useCallback((coord) => {
+    const coordCI = normalizeCI(coord.ci);
+    const misSubs = getMisSubcoordinadores(estructura, coordCI);
+    const votantesDirectos = getVotantesDirectosCoord(estructura, coordCI);
+    const votantesDeSubs = misSubs.flatMap((s) => getVotantesDeSubcoord(estructura, normalizeCI(s.ci)));
+    return {
+      prefix: "estructura-coordinador",
+      persona: coord,
+      roles: ["subcoordinador", "votante"],
+      coordinadores: [coord],
+      subcoordinadores: misSubs,
+      votantes: [...votantesDirectos, ...votantesDeSubs],
+    };
+  }, [estructura]);
+
+  const buildSubExcelPayload = useCallback((sub) => {
+    const subCI = normalizeCI(sub.ci);
+    return {
+      prefix: "estructura-subcoordinador",
+      persona: sub,
+      roles: ["votante"],
+      subcoordinadores: [sub],
+      votantes: getVotantesDeSubcoord(estructura, subCI),
+    };
+  }, [estructura]);
+
+  // key identifica al botón que disparó la descarga (para el estado "Generando..." y
+  // para impedir clics repetidos). payload son los argumentos de generarExcelEstructura.
+  const handleDescargarExcel = useCallback(async (key, payload) => {
+    if (excelBusy) return;
+    setExcelBusy(key);
+    try {
+      const { generarExcelEstructura } = await import("../services/excelService");
+      await generarExcelEstructura(payload);
+    } catch (err) {
+      alert("Error al generar el Excel: " + (err?.message || "error desconocido"));
+    } finally {
+      setExcelBusy(null);
+    }
+  }, [excelBusy]);
+
   // ======================= EXPAND TOGGLE =======================
   const toggleDir = (ci) => setExpandedDirs((prev) => ({ ...prev, [ci]: !prev[ci] }));
   const toggleCoord = (ci) => setExpandedCoords((prev) => ({ ...prev, [ci]: !prev[ci] }));
@@ -1366,6 +1474,14 @@ const Dashboard = ({ currentUser, onLogout }) => {
           >
             <FileText className="w-4 h-4" />
             Descargar PDF
+          </button>
+          <button
+            onClick={() => handleDescargarExcel("global", buildEstructuraCompletaExcelPayload())}
+            disabled={!!excelBusy}
+            className="inline-flex items-center gap-2 px-4 h-9 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <FileSpreadsheet className="w-4 h-4" />
+            {excelBusy === "global" ? "Generando..." : "Descargar Excel"}
           </button>
         </div>
 
@@ -1467,6 +1583,12 @@ const Dashboard = ({ currentUser, onLogout }) => {
                           {copiedCode === dir.login_code ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
                         </ActionBtn>
                         <WhatsAppInviteButton persona={dir} iconOnly />
+                        <ExcelDownloadButton
+                          excelKey={`dirigente:${dirCI}`}
+                          busyKey={excelBusy}
+                          onDownload={() => handleDescargarExcel(`dirigente:${dirCI}`, buildDirigenteExcelPayload(dir))}
+                          iconOnly
+                        />
                       </>
                     ) : (
                       <button
@@ -1511,6 +1633,9 @@ const Dashboard = ({ currentUser, onLogout }) => {
                                     generandoAcceso={generandoAcceso}
                                     esSuperadmin={currentUser.role === "superadmin"}
                                     counter={<VoteCounter confirmed={misVots.filter((v) => v.voto_confirmado).length} total={misVots.length} />}
+                                    onDescargarExcel={() => handleDescargarExcel(`coordinador:${coordCI}`, buildCoordExcelPayload(coord))}
+                                    excelKey={`coordinador:${coordCI}`}
+                                    excelBusyKey={excelBusy}
                                   />
                                 </div>
                                 <div className="shrink-0 ml-2">
@@ -1540,6 +1665,9 @@ const Dashboard = ({ currentUser, onLogout }) => {
                                             generandoAcceso={generandoAcceso}
                                             esSuperadmin={currentUser.role === "superadmin"}
                                             counter={<VoteCounter confirmed={votsDeEste.filter((v) => v.voto_confirmado).length} total={votsDeEste.length} />}
+                                            onDescargarExcel={() => handleDescargarExcel(`subcoordinador:${subCI}`, buildSubExcelPayload(sub))}
+                                            excelKey={`subcoordinador:${subCI}`}
+                                            excelBusyKey={excelBusy}
                                           />
                                           <div className="shrink-0 ml-2">
                                             {isExpandedSub ? <ChevronDown className="w-4 h-4 text-slate-400" /> : <ChevronRight className="w-4 h-4 text-slate-400" />}
@@ -1644,6 +1772,9 @@ const Dashboard = ({ currentUser, onLogout }) => {
                             generandoAcceso={generandoAcceso}
                             esSuperadmin={currentUser.role === "superadmin"}
                             counter={<VoteCounter confirmed={misVots.filter((v) => v.voto_confirmado).length} total={misVots.length} />}
+                            onDescargarExcel={() => handleDescargarExcel(`coordinador:${coordCI}`, buildCoordExcelPayload(coord))}
+                            excelKey={`coordinador:${coordCI}`}
+                            excelBusyKey={excelBusy}
                           />
                         </div>
                         <div className="shrink-0 ml-2">
@@ -1672,6 +1803,9 @@ const Dashboard = ({ currentUser, onLogout }) => {
                                     generandoAcceso={generandoAcceso}
                                     esSuperadmin={currentUser.role === "superadmin"}
                                     counter={<VoteCounter confirmed={votsDeEste.filter((v) => v.voto_confirmado).length} total={votsDeEste.length} />}
+                                    onDescargarExcel={() => handleDescargarExcel(`subcoordinador:${subCI}`, buildSubExcelPayload(sub))}
+                                    excelKey={`subcoordinador:${subCI}`}
+                                    excelBusyKey={excelBusy}
                                   />
                                   <div className="shrink-0 ml-2">
                                     {isExpandedSub ? <ChevronDown className="w-4 h-4 text-slate-400" /> : <ChevronRight className="w-4 h-4 text-slate-400" />}
@@ -1730,6 +1864,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
     const stats = estadisticas || {};
     const misCoords = getCoordsDeDigente(estructura, miCI);
     const votsDirectosMios = getVotantesDirectosDirigente(estructura, miCI);
+    const miDirigente = estructura.dirigentes.find((d) => normalizeCI(d.ci) === miCI) || currentUser;
 
     return (
       <div className="space-y-6">
@@ -1756,6 +1891,14 @@ const Dashboard = ({ currentUser, onLogout }) => {
           >
             <UserPlus className="w-4 h-4" />
             Agregar Votante
+          </button>
+          <button
+            onClick={() => handleDescargarExcel("dirigente-propio", buildDirigenteExcelPayload(miDirigente))}
+            disabled={!!excelBusy}
+            className="inline-flex items-center gap-2 px-4 h-9 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <FileSpreadsheet className="w-4 h-4" />
+            {excelBusy === "dirigente-propio" ? "Generando..." : "Descargar Excel"}
           </button>
         </div>
 
@@ -1891,6 +2034,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
     // Pasar miCI (string) directamente — los helpers ahora aceptan CI string o objeto
     const misSubs = getMisSubcoordinadores(estructura, miCI);
     const misVotantesDirectos = getMisVotantes(estructura, miCI);
+    const miCoordinador = estructura.coordinadores.find((c) => normalizeCI(c.ci) === miCI) || currentUser;
 
     return (
       <div className="space-y-6">
@@ -1928,6 +2072,14 @@ const Dashboard = ({ currentUser, onLogout }) => {
           >
             <FileText className="w-4 h-4" />
             Descargar PDF
+          </button>
+          <button
+            onClick={() => handleDescargarExcel("coordinador-propio", buildCoordExcelPayload(miCoordinador))}
+            disabled={!!excelBusy}
+            className="inline-flex items-center gap-2 px-4 h-9 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <FileSpreadsheet className="w-4 h-4" />
+            {excelBusy === "coordinador-propio" ? "Generando..." : "Descargar Excel"}
           </button>
         </div>
 
@@ -2021,6 +2173,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
     const miCI = normalizeCI(currentUser.ci);
     const stats = estadisticas || {};
     const misVotantes = getVotantesDeSubcoord(estructura, miCI);
+    const miSubcoordinador = estructura.subcoordinadores.find((s) => normalizeCI(s.ci) === miCI) || currentUser;
 
     return (
       <div className="space-y-6">
@@ -2050,6 +2203,14 @@ const Dashboard = ({ currentUser, onLogout }) => {
           >
             <FileText className="w-4 h-4" />
             Descargar PDF
+          </button>
+          <button
+            onClick={() => handleDescargarExcel("subcoordinador-propio", buildSubExcelPayload(miSubcoordinador))}
+            disabled={!!excelBusy}
+            className="inline-flex items-center gap-2 px-4 h-9 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <FileSpreadsheet className="w-4 h-4" />
+            {excelBusy === "subcoordinador-propio" ? "Generando..." : "Descargar Excel"}
           </button>
         </div>
 
