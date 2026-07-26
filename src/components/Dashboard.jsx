@@ -4,6 +4,7 @@ import { generarAccessCodeUnico } from "../utils/accessCode";
 import {
   sanitizeParaguayPhoneInput,
   validateParaguayPhone,
+  buildWhatsAppUrl,
 } from "../utils/phoneValidation";
 
 import {
@@ -25,6 +26,7 @@ import {
   Shield,
   AlertCircle,
   ExternalLink,
+  MessageCircle,
 } from "lucide-react";
 
 import AddPersonModal from "../AddPersonModal";
@@ -91,6 +93,41 @@ const ActionBtn = ({ onClick, title, variant = "default", children }) => {
     >
       {children}
     </button>
+  );
+};
+
+// ======================= INVITACIÓN POR WHATSAPP =======================
+// Reutiliza buildWhatsAppUrl (utils/phoneValidation.js) — no reimplementa
+// validación ni normalización de teléfonos.
+const buildInviteMessage = (persona, loginCode) => {
+  const nombre = `${persona?.nombre || ""} ${persona?.apellido || ""}`.trim() || "colaborador/a";
+  return `Hola ${nombre}, te comparto tu acceso al Sistema Electoral de José "Chechito" López.\nTu código de acceso es: ${loginCode}\nIngresá aquí: ${window.location.origin}`;
+};
+
+const WhatsAppInviteButton = ({ persona, loginCode, iconOnly = false }) => {
+  const code = loginCode ?? persona?.login_code;
+  if (!code) return null;
+  const waUrl = buildWhatsAppUrl(persona?.telefono, buildInviteMessage(persona, code));
+  if (!waUrl) return null;
+
+  const baseIcon =
+    "inline-flex items-center justify-center w-9 h-9 rounded-lg transition-colors shrink-0 border border-emerald-200 text-emerald-700 hover:bg-emerald-50";
+  const baseInline =
+    "inline-flex items-center gap-1 px-2 py-0.5 rounded-md border border-emerald-200 text-emerald-700 text-xs hover:bg-emerald-50 transition-colors bg-transparent shadow-none";
+
+  return (
+    <a
+      href={waUrl}
+      target="_blank"
+      rel="noopener noreferrer"
+      onClick={(e) => e.stopPropagation()}
+      title="Invitar por WhatsApp"
+      aria-label="Invitar por WhatsApp"
+      className={iconOnly ? baseIcon : baseInline}
+    >
+      <MessageCircle className="w-3.5 h-3.5" />
+      {!iconOnly && <span>WhatsApp</span>}
+    </a>
   );
 };
 
@@ -235,6 +272,7 @@ const DatosPersona = ({
             <Copy className="w-3 h-3" />
             Copiar
           </button>
+          <WhatsAppInviteButton persona={persona} loginCode={loginCode} />
         </div>
       ) : tablaAcceso ? (
         <div className="mt-1 flex items-center gap-1.5 flex-wrap">
@@ -1428,6 +1466,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                         >
                           {copiedCode === dir.login_code ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
                         </ActionBtn>
+                        <WhatsAppInviteButton persona={dir} iconOnly />
                       </>
                     ) : (
                       <button
