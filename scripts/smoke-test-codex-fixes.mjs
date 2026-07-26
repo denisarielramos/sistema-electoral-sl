@@ -88,7 +88,19 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
   assert.ok(personaCoincideConsulta(persona, "denis ramos"), "debe seguir matcheando por nombre y apellido");
   assert.ok(personaCoincideConsulta(persona, "0981123456"), "debe seguir matcheando por teléfono en formato local");
 
-  console.log("OK: caso 3 (búsqueda por CI encuentra los 4 formatos: sin separadores, con puntos, espacios y guiones)");
+  // Consulta mixta (nombre + CI formateada): el fragmento numérico NO debe matchear por
+  // sí solo si el resto de la consulta (el nombre) no corresponde a esta persona.
+  assert.ok(
+    !personaCoincideConsulta(persona, "Ana 4.630.621"),
+    'una consulta mixta con un nombre que no corresponde ("Ana") no debe matchear aunque la CI sea correcta'
+  );
+  // Pero si el nombre SÍ corresponde, la consulta mixta debe seguir matcheando.
+  assert.ok(
+    personaCoincideConsulta(persona, "Denis 4.630.621"),
+    "una consulta mixta con el nombre correcto y la CI correcta debe matchear"
+  );
+
+  console.log("OK: caso 3 (búsqueda por CI encuentra los 4 formatos, sin falsos positivos en consultas mixtas)");
 }
 
 // ======================= CASO 3: AVISO DE ERROR + REINTENTAR EN VistaSeccional =======================

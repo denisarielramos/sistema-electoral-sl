@@ -33,6 +33,14 @@ export const tokenizarBusqueda = (query) => {
   return q ? q.split(" ").filter(Boolean) : [];
 };
 
+// ¿La consulta completa es SOLO una CI formateada (dígitos + puntos/espacios/guiones),
+// sin ninguna letra? Ej.: "4630621", "4.630.621", "4 630 621", "4-630-621" -> true;
+// "Ana 4.630.621" -> false (mezcla nombre y CI, no debe tratarse como CI completa).
+const esConsultaSoloCI = (query) => {
+  const sinDigitosNiSeparadoresDeCI = String(query ?? "").replace(/[\d.\-\s]/g, "");
+  return sinDigitosNiSeparadoresDeCI.length === 0;
+};
+
 // persona: objeto con (al menos) nombre, apellido, ci, telefono.
 // rawQuery: la consulta TAL COMO la escribió el usuario (sin normalizar) — se usa una
 // copia normalizada solo para comparar CI; nombre/apellido/teléfono siguen su propia
@@ -41,11 +49,18 @@ export const personaCoincideConsulta = (persona, rawQuery) => {
   const tokens = tokenizarBusqueda(rawQuery);
   if (!tokens.length) return true;
 
-  // CI: se compara la consulta COMPLETA (sin separadores) contra el CI completo, para
-  // soportar "4630621", "4.630.621", "4 630 621" y "4-630-621" indistintamente.
-  const queryDigitsCI = soloDigitosCI(rawQuery);
   const ciDigits = soloDigitosCI(persona?.ci);
-  if (queryDigitsCI.length > 0 && ciDigits.includes(queryDigitsCI)) return true;
+
+  // CI: solo cuando la consulta ENTERA es una CI formateada (sin letras) se compara
+  // contra el CI completo, para soportar "4630621", "4.630.621", "4 630 621" y
+  // "4-630-621" indistintamente. Si la consulta mezcla texto y números (ej.
+  // "Ana 4.630.621"), no se usa este atajo: cada palabra debe matchear algo por sí
+  // misma más abajo (evita que el fragmento numérico matchee solo por los dígitos
+  // sin que el nombre también coincida).
+  if (esConsultaSoloCI(rawQuery)) {
+    const queryDigitsCI = soloDigitosCI(rawQuery);
+    if (queryDigitsCI.length > 0 && ciDigits.includes(queryDigitsCI)) return true;
+  }
 
   // Nombre/apellido/teléfono: AND entre palabras (tokens), como ya funcionaba.
   const nombre = normalizeTexto(persona?.nombre);
@@ -56,12 +71,14 @@ export const personaCoincideConsulta = (persona, rawQuery) => {
 
   return tokens.every((t) => {
     const tDigitsTel = soloDigitosTelefono(t);
+    const tDigitsCI = soloDigitosCI(t);
     return (
       nombre.includes(t) ||
       apellido.includes(t) ||
       nombreCompleto.includes(t) ||
       apellidoNombre.includes(t) ||
-      (tDigitsTel.length > 0 && telDigits.includes(tDigitsTel))
+      (tDigitsTel.length > 0 && telDigits.includes(tDigitsTel)) ||
+      (tDigitsCI.length > 0 && ciDigits.includes(tDigitsCI))
     );
   });
 };

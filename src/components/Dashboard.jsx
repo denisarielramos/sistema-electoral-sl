@@ -860,7 +860,9 @@ const Dashboard = ({ currentUser, onLogout }) => {
     if (padron.length > 0) { setPadronLoaded(true); return; }
 
     setPadronLoading(true);
-    setPadronError(null);
+    // No limpiamos padronError acá: si esto es un reintento tras un fallo previo, el
+    // aviso de error debe seguir visible (junto con el estado de carga) hasta que esta
+    // ejecución realmente termine — recién se limpia en cada rama de éxito de abajo.
     try {
       // B: leer IndexedDB
       const db = await openPadronDB();
@@ -871,6 +873,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
         setPadron(cached);
         setPadronLoaded(true);
         setPadronLoading(false);
+        setPadronError(null);
 
         // D: actualización en background (sin bloquear el buscador)
         descargarPadronSupabase()
@@ -891,6 +894,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
         setPadron(registros);
       }
       setPadronLoaded(true);
+      setPadronError(null);
     } catch (err) {
       console.error("[Dashboard] Error cargando padrón:", err);
       setPadronError("Error al cargar el padrón: " + (err?.message || "error desconocido"));
@@ -1360,8 +1364,9 @@ const Dashboard = ({ currentUser, onLogout }) => {
     } else if (currentUser.role === "coordinador") {
       const miCI = normalizeCI(currentUser.ci);
       getMisSubcoordinadores(estructura, miCI).forEach(check);
-      getMisVotantes(estructura, miCI).forEach(check);
-      getVotantesDirectosCoord(estructura, miCI).forEach(check);
+      // Directos + los de todos sus subcoordinadores, para que un votante visible
+      // bajo un subcoordinador también pueda encontrarse por búsqueda.
+      getTodosVotantesCoord(estructura, miCI).forEach(check);
     } else if (currentUser.role === "subcoordinador") {
       const miCI = normalizeCI(currentUser.ci);
       getVotantesDeSubcoord(estructura, miCI).forEach(check);
