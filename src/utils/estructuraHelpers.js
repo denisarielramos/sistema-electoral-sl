@@ -57,6 +57,19 @@ export const getVotantesDirectosCoord = (estructura, coordCI) => {
 // Alias semántico: votantes directos del coordinador.
 export const getMisVotantes = (estructura, coordCI) => getVotantesDirectosCoord(estructura, coordCI);
 
+// ======================= TODOS LOS VOTANTES DE UN COORDINADOR =======================
+// Directos + los de todos sus subcoordinadores. Usa coordinador_ci (poblado en toda
+// alta de votante, sea directa del coordinador o vía uno de sus subs) para que el
+// total coincida exactamente con "Total Red" del PDF del coordinador (pdfService.js),
+// sin duplicados: cada votante tiene un único coordinador_ci.
+export const getTodosVotantesCoord = (estructura, coordCI) => {
+  if (!coordCI) return [];
+  const ci = resolveCI(coordCI);
+  return (estructura.votantes || []).filter(
+    (v) => esActivo(v) && normalizeCI(v.coordinador_ci) === ci
+  );
+};
+
 // ======================= PERSONAS DISPONIBLES =======================
 export const getPersonasDisponibles = (padron, estructura) => {
   return padron.map((p) => {

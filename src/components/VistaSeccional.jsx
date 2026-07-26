@@ -5,7 +5,8 @@
 // Incluye Dirigente (el original solo tenía Coordinador/Subcoordinador/Votante).
 
 import React, { useState, useMemo } from "react";
-import { ArrowLeft, Search, Users, Shield, UserCog, UserCheck, User } from "lucide-react";
+import { ArrowLeft, Search, Users, Shield, UserCog, UserCheck, User, AlertTriangle } from "lucide-react";
+import { personaCoincideConsulta } from "../utils/busquedaHelpers";
 
 // ======================= HELPERS =======================
 const normalizeCI = (ci) => String(ci ?? "").replace(/\D/g, "");
@@ -72,7 +73,17 @@ const StatCard = ({ label, value, icon: Icon, color = "brand" }) => {
 //             no depender exclusivamente de que `estructura` ya haya enriquecido el campo.
 // padronLoading: opcional — si el padrón sigue cargando, se informa (los campos
 //             quedan en "Sin dato" hasta que termine, sin provocar errores).
-export default function VistaSeccional({ estructura, padronMap, padronLoading = false, onBack }) {
+// padronError: opcional — si la carga del padrón (IndexedDB/Supabase) falló, se muestra
+//             un aviso explícito en vez de dejar que todo se vea silenciosamente como
+//             "Sin dato". onRetryPadron permite reintentar sin salir de esta vista.
+export default function VistaSeccional({
+  estructura,
+  padronMap,
+  padronLoading = false,
+  padronError = null,
+  onRetryPadron,
+  onBack,
+}) {
   const [filtroSeccional, setFiltroSeccional] = useState("");
   const [filtroRol, setFiltroRol] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
@@ -162,13 +173,12 @@ export default function VistaSeccional({ estructura, padronMap, padronLoading = 
       filtered = filtered.filter((p) => p.rol === filtroRol);
     }
     if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase().trim();
-      filtered = filtered.filter((p) => {
-        return (
-          p.ci.includes(q) ||
-          p.nombreCompleto.toLowerCase().includes(q)
-        );
-      });
+      // p.ci ya son solo dígitos y p.nombreCompleto concentra nombre+apellido; se
+      // reutiliza el matcher compartido (misma lógica que Dashboard.jsx) para que una
+      // CI escrita como "4630621", "4.630.621", "4 630 621" o "4-630-621" matchee igual.
+      filtered = filtered.filter((p) =>
+        personaCoincideConsulta({ nombre: p.nombreCompleto, ci: p.ci }, searchQuery)
+      );
     }
 
     return filtered;
@@ -242,10 +252,31 @@ export default function VistaSeccional({ estructura, padronMap, padronLoading = 
       </header>
 
       <main className="max-w-7xl mx-auto px-4 py-6 space-y-6">
-        {padronLoading && (
-          <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-            Cargando datos del padrón — algunos campos pueden mostrarse como "Sin dato" hasta que termine.
-          </p>
+        {padronError ? (
+          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
+              <p className="text-sm text-red-700">
+                No se pudo cargar el padrón. Los datos mostrados pueden estar incompletos o aparecer como "Sin dato".
+                {padronLoading ? " Reintentando..." : ""}
+              </p>
+            </div>
+            {onRetryPadron && (
+              <button
+                onClick={onRetryPadron}
+                disabled={padronLoading}
+                className="px-3 py-1.5 rounded-lg text-sm font-medium bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap shrink-0"
+              >
+                {padronLoading ? "Reintentando..." : "Reintentar"}
+              </button>
+            )}
+          </div>
+        ) : (
+          padronLoading && (
+            <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+              Cargando datos del padrón — algunos campos pueden mostrarse como "Sin dato" hasta que termine.
+            </p>
+          )
         )}
 
         {/* Stats */}

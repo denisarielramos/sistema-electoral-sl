@@ -57,12 +57,14 @@ import {
   getVotantesDeSubcoord,
   getMisVotantes,
   getVotantesDirectosCoord,
+  getTodosVotantesCoord,
   getPersonasDisponibles,
   getCoordsDeDigente,
   getSubsDeDigente,
   getVotantesDirectosDirigente,
   getTodosVotantesDirigente,
 } from "../utils/estructuraHelpers";
+import { personaCoincideConsulta } from "../utils/busquedaHelpers";
 
 // ======================= SMALL REUSABLE COMPONENTS =======================
 
@@ -1332,53 +1334,17 @@ const Dashboard = ({ currentUser, onLogout }) => {
   // visibles los padres cuando un hijo coincide. El alcance sigue siendo el mismo de
   // siempre: cada rol solo evalua candidatos ya filtrados por los helpers de jerarquia
   // existentes (getCoordsDeDigente, getMisSubcoordinadores, etc.), nunca toda la base.
-  const normalize = (text) =>
-    (text || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ").trim();
-
-  // Digitos del telefono sin '+', sin codigo de pais (595) ni el '0' local, para poder
-  // matchear "0981123456", "981123456" o "+595981123456" indistintamente.
-  const soloDigitosTelefono = (v) => {
-    let d = String(v || "").replace(/\D/g, "");
-    if (d.startsWith("595")) d = d.slice(3);
-    else if (d.startsWith("0")) d = d.slice(1);
-    return d;
-  };
-
-  const personaCoincideBusqueda = useCallback((persona, tokens) => {
-    if (!tokens.length) return true;
-    const nombre = normalize(persona?.nombre);
-    const apellido = normalize(persona?.apellido);
-    const ci = normalize(persona?.ci);
-    const nombreCompleto = normalize(`${persona?.nombre || ""} ${persona?.apellido || ""}`);
-    const apellidoNombre = normalize(`${persona?.apellido || ""} ${persona?.nombre || ""}`);
-    const telDigits = soloDigitosTelefono(persona?.telefono);
-
-    return tokens.every((t) => {
-      const tDigits = soloDigitosTelefono(t);
-      return (
-        ci.includes(t) ||
-        nombre.includes(t) ||
-        apellido.includes(t) ||
-        nombreCompleto.includes(t) ||
-        apellidoNombre.includes(t) ||
-        (tDigits.length > 0 && telDigits.includes(tDigits))
-      );
-    });
-  }, []);
-
-  const busquedaTokens = useMemo(() => {
-    const q = normalize(searchQuery);
-    return q ? q.split(" ").filter(Boolean) : [];
-  }, [searchQuery]);
+  // El matching en si (nombre/apellido/CI con o sin formato/telefono) vive en
+  // utils/busquedaHelpers.js, compartido con VistaSeccional.jsx.
 
   // matchCI: null cuando no hay busqueda activa (= mostrar todo, comportamiento actual);
   // Set<ci normalizada> con los que matchean, dentro del MISMO alcance por rol que ya
   // usa el resto del dashboard (nunca se agregan candidatos fuera de la jerarquia propia).
   const matchCI = useMemo(() => {
-    if (!busquedaTokens.length) return null;
+    if (!searchQuery.trim()) return null;
     const set = new Set();
     const check = (persona) => {
-      if (personaCoincideBusqueda(persona, busquedaTokens)) set.add(normalizeCI(persona.ci));
+      if (personaCoincideConsulta(persona, searchQuery)) set.add(normalizeCI(persona.ci));
     };
 
     if (currentUser.role === "superadmin") {
@@ -1402,7 +1368,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
     }
 
     return set;
-  }, [busquedaTokens, currentUser, estructura, personaCoincideBusqueda]);
+  }, [searchQuery, currentUser, estructura]);
 
   // Helpers reutilizados en todo el arbol para respetar matchCI sin repetir logica.
   const filtrarPorBusqueda = useCallback(
@@ -2401,6 +2367,8 @@ const Dashboard = ({ currentUser, onLogout }) => {
         estructura={estructura}
         padronMap={padronMap}
         padronLoading={padronLoading}
+        padronError={padronError}
+        onRetryPadron={cargarPadron}
         onBack={() => setMostrarSeccional(false)}
       />
     );
@@ -2595,8 +2563,10 @@ const Dashboard = ({ currentUser, onLogout }) => {
         const coordSubs = selectedCoord
           ? getMisSubcoordinadores(estructura, normalizeCI(selectedCoord.ci))
           : [];
+        // Total real (directos + de todos sus subs, sin duplicados) — debe coincidir
+        // exactamente con "Total Red" del PDF completo (generateCoordinadorPDF).
         const coordVotantes = selectedCoord
-          ? getMisVotantes(estructura, normalizeCI(selectedCoord.ci))
+          ? getTodosVotantesCoord(estructura, normalizeCI(selectedCoord.ci))
           : [];
 
         const printDirigente = async () => {
