@@ -44,6 +44,7 @@ import {
   generateSuperadminPDF,
   generateCoordinadorPDF,
   generateSubcoordinadorPDF,
+  generateDirigentePDF,
 } from "../services/pdfService";
 // Nota: excelService se importa dinámicamente (ver handleDescargarExcel) para que
 // ExcelJS no se incluya en el bundle inicial — solo se descarga al usarse.
@@ -175,6 +176,23 @@ const TerceraEdadBadge = () => (
     TERCERA EDAD
   </span>
 );
+
+// ======================= AVISO DE BÚSQUEDA (dentro del árbol, sin reemplazarlo) =======================
+const BusquedaAviso = ({ matchCI, query }) => {
+  if (!matchCI) return null;
+  if (matchCI.size === 0) {
+    return (
+      <p className="text-sm text-slate-400 text-center py-6 bg-slate-50 border border-slate-200 rounded-xl">
+        Sin resultados para "{query}".
+      </p>
+    );
+  }
+  return (
+    <p className="text-xs text-brand-600 font-medium">
+      {matchCI.size} coincidencia{matchCI.size !== 1 ? "s" : ""} — mostrando en la estructura
+    </p>
+  );
+};
 
 // ======================= STAT CARD =======================
 const StatCard = ({ label, value, icon: Icon, accent = false }) => (
@@ -717,11 +735,12 @@ const Dashboard = ({ currentUser, onLogout }) => {
   // Excel: key del botón actualmente generando el archivo (o null si ninguno)
   const [excelBusy, setExcelBusy] = useState(null);
 
-  // Verificar estructura (superadmin): seleccionar un coordinador y generar/imprimir
-  // el PDF de su estructura completa, o el de cualquiera de sus subcoordinadores.
+  // Verificar estructura (superadmin): seleccionar un dirigente o un coordinador y
+  // generar/imprimir el PDF de su estructura (rama completa / individual / de sus subs).
   const [verificarOpen, setVerificarOpen] = useState(false);
+  const [verificarDirCI, setVerificarDirCI] = useState("");
   const [verificarCoordCI, setVerificarCoordCI] = useState("");
-  const [verificarPrinting, setVerificarPrinting] = useState(null); // "coord" | "sub-<ci>" | null
+  const [verificarPrinting, setVerificarPrinting] = useState(null); // "dirigente" | "coord" | "sub-<ci>" | null
 
   // Vista por seccional (superadmin): reemplaza el contenido del Dashboard por una
   // vista de solo lectura filtrable, reutilizando estructura/padronMap ya en memoria.
@@ -1306,46 +1325,94 @@ const Dashboard = ({ currentUser, onLogout }) => {
     [addModalTipo, handleAddVotante, handleAddSubcoordinador]
   );
 
-  // ======================= BÚSQUEDA =======================
+  // ======================= BUSQUEDA INTERNA POR ESTRUCTURA =======================
+  // En vez de reemplazar el arbol por una lista plana, la busqueda filtra el arbol
+  // EN EL LUGAR: se calcula el conjunto de CI que matchean (matchCI) y cada nivel del
+  // arbol se filtra/expande automaticamente en base a ese conjunto, manteniendo
+  // visibles los padres cuando un hijo coincide. El alcance sigue siendo el mismo de
+  // siempre: cada rol solo evalua candidatos ya filtrados por los helpers de jerarquia
+  // existentes (getCoordsDeDigente, getMisSubcoordinadores, etc.), nunca toda la base.
   const normalize = (text) =>
-    (text || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    (text || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ").trim();
 
-  const searchResults = useMemo(() => {
-    if (!searchQuery.trim()) return [];
+  // Digitos del telefono sin '+', sin codigo de pais (595) ni el '0' local, para poder
+  // matchear "0981123456", "981123456" o "+595981123456" indistintamente.
+  const soloDigitosTelefono = (v) => {
+    let d = String(v || "").replace(/\D/g, "");
+    if (d.startsWith("595")) d = d.slice(3);
+    else if (d.startsWith("0")) d = d.slice(1);
+    return d;
+  };
+
+  const personaCoincideBusqueda = useCallback((persona, tokens) => {
+    if (!tokens.length) return true;
+    const nombre = normalize(persona?.nombre);
+    const apellido = normalize(persona?.apellido);
+    const ci = normalize(persona?.ci);
+    const nombreCompleto = normalize(`${persona?.nombre || ""} ${persona?.apellido || ""}`);
+    const apellidoNombre = normalize(`${persona?.apellido || ""} ${persona?.nombre || ""}`);
+    const telDigits = soloDigitosTelefono(persona?.telefono);
+
+    return tokens.every((t) => {
+      const tDigits = soloDigitosTelefono(t);
+      return (
+        ci.includes(t) ||
+        nombre.includes(t) ||
+        apellido.includes(t) ||
+        nombreCompleto.includes(t) ||
+        apellidoNombre.includes(t) ||
+        (tDigits.length > 0 && telDigits.includes(tDigits))
+      );
+    });
+  }, []);
+
+  const busquedaTokens = useMemo(() => {
     const q = normalize(searchQuery);
-    const match = (p) => {
-      const full = normalize(`${p.nombre || ""} ${p.apellido || ""}`);
-      const ci = String(p.ci || "");
-      return ci.includes(q) || full.includes(q.split(" ").filter(Boolean).join(" ")) ||
-        q.split(" ").filter(Boolean).every((w) => full.includes(w) || ci.includes(w));
+    return q ? q.split(" ").filter(Boolean) : [];
+  }, [searchQuery]);
+
+  // matchCI: null cuando no hay busqueda activa (= mostrar todo, comportamiento actual);
+  // Set<ci normalizada> con los que matchean, dentro del MISMO alcance por rol que ya
+  // usa el resto del dashboard (nunca se agregan candidatos fuera de la jerarquia propia).
+  const matchCI = useMemo(() => {
+    if (!busquedaTokens.length) return null;
+    const set = new Set();
+    const check = (persona) => {
+      if (personaCoincideBusqueda(persona, busquedaTokens)) set.add(normalizeCI(persona.ci));
     };
 
-    const results = [];
-
     if (currentUser.role === "superadmin") {
-      estructura.dirigentes.filter(match).forEach((d) => results.push({ ...d, _tipo: "dirigente" }));
-      estructura.coordinadores.filter(match).forEach((c) => results.push({ ...c, _tipo: "coordinador" }));
-      estructura.subcoordinadores.filter(match).forEach((s) => results.push({ ...s, _tipo: "subcoordinador" }));
-      estructura.votantes.filter(match).forEach((v) => results.push({ ...v, _tipo: "votante" }));
+      estructura.dirigentes.forEach(check);
+      estructura.coordinadores.forEach(check);
+      estructura.subcoordinadores.forEach(check);
+      estructura.votantes.forEach(check);
     } else if (currentUser.role === "dirigente") {
       const miCI = normalizeCI(currentUser.ci);
-      const misCoords = getCoordsDeDigente(estructura, miCI);
-      const misSubs = getSubsDeDigente(estructura, miCI);
-      const todosVots = getTodosVotantesDirigente(estructura, miCI);
-      misCoords.filter(match).forEach((c) => results.push({ ...c, _tipo: "coordinador" }));
-      misSubs.filter(match).forEach((s) => results.push({ ...s, _tipo: "subcoordinador" }));
-      todosVots.filter(match).forEach((v) => results.push({ ...v, _tipo: "votante" }));
+      getCoordsDeDigente(estructura, miCI).forEach(check);
+      getSubsDeDigente(estructura, miCI).forEach(check);
+      getTodosVotantesDirigente(estructura, miCI).forEach(check);
     } else if (currentUser.role === "coordinador") {
       const miCI = normalizeCI(currentUser.ci);
-      getMisSubcoordinadores(estructura, miCI).filter(match).forEach((s) => results.push({ ...s, _tipo: "subcoordinador" }));
-      getMisVotantes(estructura, miCI).filter(match).forEach((v) => results.push({ ...v, _tipo: "votante" }));
+      getMisSubcoordinadores(estructura, miCI).forEach(check);
+      getMisVotantes(estructura, miCI).forEach(check);
+      getVotantesDirectosCoord(estructura, miCI).forEach(check);
     } else if (currentUser.role === "subcoordinador") {
       const miCI = normalizeCI(currentUser.ci);
-      getVotantesDeSubcoord(estructura, miCI).filter(match).forEach((v) => results.push({ ...v, _tipo: "votante" }));
+      getVotantesDeSubcoord(estructura, miCI).forEach(check);
     }
 
-    return results;
-  }, [searchQuery, currentUser, estructura]);
+    return set;
+  }, [busquedaTokens, currentUser, estructura, personaCoincideBusqueda]);
+
+  // Helpers reutilizados en todo el arbol para respetar matchCI sin repetir logica.
+  const filtrarPorBusqueda = useCallback(
+    (lista) => (matchCI ? lista.filter((p) => matchCI.has(normalizeCI(p.ci))) : lista),
+    [matchCI]
+  );
+  const algunaCoincide = useCallback(
+    (lista) => !!matchCI && lista.some((p) => matchCI.has(normalizeCI(p.ci))),
+    [matchCI]
+  );
 
   // ======================= PDF =======================
   const handlePDF = useCallback(async () => {
@@ -1501,7 +1568,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
             {excelBusy === "global" ? "Generando..." : "Descargar Excel"}
           </button>
           <button
-            onClick={() => { setVerificarOpen(true); setVerificarCoordCI(""); }}
+            onClick={() => { setVerificarOpen(true); setVerificarDirCI(""); setVerificarCoordCI(""); }}
             className="inline-flex items-center gap-2 px-4 h-9 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 rounded-lg text-sm font-medium transition-colors"
           >
             <ClipboardList className="w-4 h-4" />
@@ -1516,6 +1583,8 @@ const Dashboard = ({ currentUser, onLogout }) => {
           </button>
         </div>
 
+        <BusquedaAviso matchCI={matchCI} query={searchQuery} />
+
         {/* Árbol de dirigentes */}
         <div className="space-y-3">
           {estructura.dirigentes.length === 0 && (
@@ -1523,10 +1592,18 @@ const Dashboard = ({ currentUser, onLogout }) => {
           )}
           {estructura.dirigentes.map((dir) => {
             const dirCI = normalizeCI(dir.ci);
-            const isExpandedDir = expandedDirs[dirCI];
             const coordsDir = getCoordsDeDigente(estructura, dirCI);
+            const subsDir = getSubsDeDigente(estructura, dirCI);
+            const votantesDirTotal = getTodosVotantesDirigente(estructura, dirCI);
             const votsDirectosDir = getVotantesDirectosDirigente(estructura, dirCI);
-            const totalDir = coordsDir.length + getSubsDeDigente(estructura, dirCI).length + getTodosVotantesDirigente(estructura, dirCI).length;
+            const totalDir = coordsDir.length + subsDir.length + votantesDirTotal.length;
+
+            // Búsqueda: visible si matchea directamente o si algún hijo (coord/sub/votante) matchea.
+            const dirDescendantMatch =
+              algunaCoincide(coordsDir) || algunaCoincide(subsDir) || algunaCoincide(votantesDirTotal);
+            const dirVisible = !matchCI || matchCI.has(dirCI) || dirDescendantMatch;
+            if (!dirVisible) return null;
+            const isExpandedDir = expandedDirs[dirCI] || dirDescendantMatch;
 
             return (
               <div key={dirCI} className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-card">
@@ -1642,9 +1719,14 @@ const Dashboard = ({ currentUser, onLogout }) => {
                         <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Coordinadores</p>
                         {coordsDir.map((coord) => {
                           const coordCI = normalizeCI(coord.ci);
-                          const isExpandedCoord = expandedCoords[coordCI];
                           const misSubs = getMisSubcoordinadores(estructura, coordCI);
                           const misVots = getMisVotantes(estructura, coordCI);
+
+                          const votantesDeMisSubs = misSubs.flatMap((s) => getVotantesDeSubcoord(estructura, normalizeCI(s.ci)));
+                          const coordDescendantMatch = algunaCoincide(misSubs) || algunaCoincide(misVots) || algunaCoincide(votantesDeMisSubs);
+                          const coordVisible = !matchCI || matchCI.has(coordCI) || coordDescendantMatch;
+                          if (!coordVisible) return null;
+                          const isExpandedCoord = expandedCoords[coordCI] || coordDescendantMatch;
 
                           return (
                             <div key={coordCI} className="bg-white border border-slate-200 rounded-xl overflow-hidden">
@@ -1678,8 +1760,11 @@ const Dashboard = ({ currentUser, onLogout }) => {
                                   {/* Subcoordinadores */}
                                   {misSubs.map((sub) => {
                                     const subCI = normalizeCI(sub.ci);
-                                    const isExpandedSub = expandedSubs[subCI];
                                     const votsDeEste = getVotantesDeSubcoord(estructura, subCI);
+                                    const subDescendantMatch = algunaCoincide(votsDeEste);
+                                    const subVisible = !matchCI || matchCI.has(subCI) || subDescendantMatch;
+                                    if (!subVisible) return null;
+                                    const isExpandedSub = expandedSubs[subCI] || subDescendantMatch;
                                     return (
                                       <div key={subCI} className="bg-white border border-slate-200 rounded-lg overflow-hidden">
                                         <div
@@ -1707,7 +1792,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                                         </div>
                                         {isExpandedSub && votsDeEste.length > 0 && (
                                           <div className="border-t border-slate-100 bg-slate-50 px-3 py-2 space-y-1.5">
-                                            {votsDeEste.map((v) => (
+                                            {filtrarPorBusqueda(votsDeEste).map((v) => (
                                               <VotanteRow
                                                 key={v.ci}
                                                 v={v}
@@ -1725,7 +1810,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                                     );
                                   })}
                                   {/* Votantes directos del coord */}
-                                  {getVotantesDirectosCoord(estructura, coordCI).map((v) => (
+                                  {filtrarPorBusqueda(getVotantesDirectosCoord(estructura, coordCI)).map((v) => (
                                     <VotanteRow
                                       key={v.ci}
                                       v={v}
@@ -1752,7 +1837,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                     {votsDirectosDir.length > 0 && (
                       <div className="space-y-1.5">
                         <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Votantes directos</p>
-                        {votsDirectosDir.map((v) => (
+                        {filtrarPorBusqueda(votsDirectosDir).map((v) => (
                           <VotanteRow
                             key={v.ci}
                             v={v}
@@ -1783,9 +1868,14 @@ const Dashboard = ({ currentUser, onLogout }) => {
               <div className="space-y-2">
                 {estructura.coordinadores.filter((c) => !c.dirigente_ci).map((coord) => {
                   const coordCI = normalizeCI(coord.ci);
-                  const isExpandedCoord = expandedCoords[coordCI];
                   const misSubs = getMisSubcoordinadores(estructura, coordCI);
                   const misVots = getMisVotantes(estructura, coordCI);
+
+                  const votantesDeMisSubs = misSubs.flatMap((s) => getVotantesDeSubcoord(estructura, normalizeCI(s.ci)));
+                  const coordDescendantMatch = algunaCoincide(misSubs) || algunaCoincide(misVots) || algunaCoincide(votantesDeMisSubs);
+                  const coordVisible = !matchCI || matchCI.has(coordCI) || coordDescendantMatch;
+                  if (!coordVisible) return null;
+                  const isExpandedCoord = expandedCoords[coordCI] || coordDescendantMatch;
 
                   return (
                     <div key={coordCI} className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-card">
@@ -1818,8 +1908,11 @@ const Dashboard = ({ currentUser, onLogout }) => {
                         <div className="border-t border-slate-100 bg-slate-50 px-4 py-3 space-y-2">
                           {misSubs.map((sub) => {
                             const subCI = normalizeCI(sub.ci);
-                            const isExpandedSub = expandedSubs[subCI];
                             const votsDeEste = getVotantesDeSubcoord(estructura, subCI);
+                            const subDescendantMatch = algunaCoincide(votsDeEste);
+                            const subVisible = !matchCI || matchCI.has(subCI) || subDescendantMatch;
+                            if (!subVisible) return null;
+                            const isExpandedSub = expandedSubs[subCI] || subDescendantMatch;
                             return (
                               <div key={subCI} className="bg-white border border-slate-200 rounded-lg overflow-hidden">
                                 <div
@@ -1847,7 +1940,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                                 </div>
                                 {isExpandedSub && votsDeEste.length > 0 && (
                                   <div className="border-t border-slate-100 bg-slate-50 px-3 py-2 space-y-1.5">
-                                    {votsDeEste.map((v) => (
+                                    {filtrarPorBusqueda(votsDeEste).map((v) => (
                                       <VotanteRow
                                         key={v.ci}
                                         v={v}
@@ -1864,7 +1957,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                               </div>
                             );
                           })}
-                          {misVots.map((v) => (
+                          {filtrarPorBusqueda(misVots).map((v) => (
                             <VotanteRow
                               key={v.ci}
                               v={v}
@@ -1936,6 +2029,8 @@ const Dashboard = ({ currentUser, onLogout }) => {
           </button>
         </div>
 
+        <BusquedaAviso matchCI={matchCI} query={searchQuery} />
+
         {/* Coordinadores */}
         <div className="space-y-3">
           <p className="text-sm font-semibold text-slate-700">Mis Coordinadores ({misCoords.length})</p>
@@ -1944,9 +2039,14 @@ const Dashboard = ({ currentUser, onLogout }) => {
           )}
           {misCoords.map((coord) => {
             const coordCI = normalizeCI(coord.ci);
-            const isExpandedCoord = expandedCoords[coordCI];
             const misSubs = getMisSubcoordinadores(estructura, coordCI);
             const misVots = getMisVotantes(estructura, coordCI);
+
+            const votantesDeMisSubs = misSubs.flatMap((s) => getVotantesDeSubcoord(estructura, normalizeCI(s.ci)));
+            const coordDescendantMatch = algunaCoincide(misSubs) || algunaCoincide(misVots) || algunaCoincide(votantesDeMisSubs);
+            const coordVisible = !matchCI || matchCI.has(coordCI) || coordDescendantMatch;
+            if (!coordVisible) return null;
+            const isExpandedCoord = expandedCoords[coordCI] || coordDescendantMatch;
 
             return (
               <div key={coordCI} className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-card">
@@ -1976,8 +2076,11 @@ const Dashboard = ({ currentUser, onLogout }) => {
                   <div className="border-t border-slate-100 bg-slate-50 px-4 py-3 space-y-2">
                     {misSubs.map((sub) => {
                       const subCI = normalizeCI(sub.ci);
-                      const isExpandedSub = expandedSubs[subCI];
                       const votsDeEste = getVotantesDeSubcoord(estructura, subCI);
+                      const subDescendantMatch = algunaCoincide(votsDeEste);
+                      const subVisible = !matchCI || matchCI.has(subCI) || subDescendantMatch;
+                      if (!subVisible) return null;
+                      const isExpandedSub = expandedSubs[subCI] || subDescendantMatch;
                       return (
                         <div key={subCI} className="bg-white border border-slate-200 rounded-lg overflow-hidden">
                           <div
@@ -2002,7 +2105,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                           </div>
                           {isExpandedSub && votsDeEste.length > 0 && (
                             <div className="border-t border-slate-100 bg-slate-50 px-3 py-2 space-y-1.5">
-                              {votsDeEste.map((v) => (
+                              {filtrarPorBusqueda(votsDeEste).map((v) => (
                                 <VotanteRow
                                   key={v.ci}
                                   v={v}
@@ -2019,7 +2122,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                         </div>
                       );
                     })}
-                    {misVots.map((v) => (
+                    {filtrarPorBusqueda(misVots).map((v) => (
                       <VotanteRow
                         key={v.ci}
                         v={v}
@@ -2045,7 +2148,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
         {votsDirectosMios.length > 0 && (
           <div className="space-y-2">
             <p className="text-sm font-semibold text-slate-700">Mis Votantes Directos ({votsDirectosMios.length})</p>
-            {votsDirectosMios.map((v) => (
+            {filtrarPorBusqueda(votsDirectosMios).map((v) => (
               <VotanteRow
                 key={v.ci}
                 v={v}
@@ -2119,6 +2222,8 @@ const Dashboard = ({ currentUser, onLogout }) => {
           </button>
         </div>
 
+        <BusquedaAviso matchCI={matchCI} query={searchQuery} />
+
         {/* Subcoordinadores */}
         <div className="space-y-2">
           <p className="text-sm font-semibold text-slate-700">Mis Subcoordinadores ({misSubs.length})</p>
@@ -2127,8 +2232,11 @@ const Dashboard = ({ currentUser, onLogout }) => {
           )}
           {misSubs.map((sub) => {
             const subCI = normalizeCI(sub.ci);
-            const isExpandedSub = expandedSubs[subCI];
             const votsDeEste = getVotantesDeSubcoord(estructura, subCI);
+            const subDescendantMatch = algunaCoincide(votsDeEste);
+            const subVisible = !matchCI || matchCI.has(subCI) || subDescendantMatch;
+            if (!subVisible) return null;
+            const isExpandedSub = expandedSubs[subCI] || subDescendantMatch;
 
             return (
               <div key={subCI} className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-card">
@@ -2154,26 +2262,31 @@ const Dashboard = ({ currentUser, onLogout }) => {
                     {isExpandedSub ? <ChevronDown className="w-4 h-4 text-slate-400" /> : <ChevronRight className="w-4 h-4 text-slate-400" />}
                   </div>
                 </div>
-                {isExpandedSub && (
-                  <div className="border-t border-slate-100 bg-slate-50 px-4 py-3 space-y-1.5">
-                    {votsDeEste.length === 0 ? (
-                      <p className="text-xs text-slate-400 py-2">Sin votantes asignados.</p>
-                    ) : (
-                      votsDeEste.map((v) => (
-                        <VotanteRow
-                          key={v.ci}
-                          v={v}
-                          onTelefono={handleOpenTelefono}
-                          onDireccion={handleOpenDireccion}
-                          onConfirmar={handleConfirmar}
-                          onAnular={handleAnular}
-                          canConfirmar={canConfirmar}
-                          canAnular={canAnular}
-                        />
-                      ))
-                    )}
-                  </div>
-                )}
+                {isExpandedSub && (() => {
+                  const votsVisibles = filtrarPorBusqueda(votsDeEste);
+                  return (
+                    <div className="border-t border-slate-100 bg-slate-50 px-4 py-3 space-y-1.5">
+                      {votsVisibles.length === 0 ? (
+                        <p className="text-xs text-slate-400 py-2">
+                          {matchCI ? "Sin coincidencias en votantes." : "Sin votantes asignados."}
+                        </p>
+                      ) : (
+                        votsVisibles.map((v) => (
+                          <VotanteRow
+                            key={v.ci}
+                            v={v}
+                            onTelefono={handleOpenTelefono}
+                            onDireccion={handleOpenDireccion}
+                            onConfirmar={handleConfirmar}
+                            onAnular={handleAnular}
+                            canConfirmar={canConfirmar}
+                            canAnular={canAnular}
+                          />
+                        ))
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
             );
           })}
@@ -2184,10 +2297,12 @@ const Dashboard = ({ currentUser, onLogout }) => {
           <p className="text-sm font-semibold text-slate-700">
             Mis Votantes Directos ({misVotantesDirectos.length})
           </p>
-          {misVotantesDirectos.length === 0 ? (
-            <p className="text-sm text-slate-400 text-center py-6">No tiene votantes directos asignados.</p>
+          {filtrarPorBusqueda(misVotantesDirectos).length === 0 ? (
+            <p className="text-sm text-slate-400 text-center py-6">
+              {matchCI ? "Sin coincidencias en votantes." : "No tiene votantes directos asignados."}
+            </p>
           ) : (
-            misVotantesDirectos.map((v) => (
+            filtrarPorBusqueda(misVotantesDirectos).map((v) => (
               <VotanteRow
                 key={v.ci}
                 v={v}
@@ -2251,13 +2366,17 @@ const Dashboard = ({ currentUser, onLogout }) => {
           </button>
         </div>
 
+        <BusquedaAviso matchCI={matchCI} query={searchQuery} />
+
         {/* Votantes */}
         <div className="space-y-2">
           <p className="text-sm font-semibold text-slate-700">Mis Votantes ({misVotantes.length})</p>
-          {misVotantes.length === 0 ? (
-            <p className="text-sm text-slate-400 text-center py-8">No tiene votantes asignados.</p>
+          {filtrarPorBusqueda(misVotantes).length === 0 ? (
+            <p className="text-sm text-slate-400 text-center py-8">
+              {matchCI ? "Sin coincidencias en votantes." : "No tiene votantes asignados."}
+            </p>
           ) : (
-            misVotantes.map((v) => (
+            filtrarPorBusqueda(misVotantes).map((v) => (
               <VotanteRow
                 key={v.ci}
                 v={v}
@@ -2271,53 +2390,6 @@ const Dashboard = ({ currentUser, onLogout }) => {
             ))
           )}
         </div>
-      </div>
-    );
-  };
-
-  // ======================= RENDER SEARCH RESULTS =======================
-  const renderSearchResults = () => {
-    if (searchResults.length === 0) {
-      return (
-        <div className="text-center py-16">
-          <Search className="w-10 h-10 text-slate-200 mx-auto mb-3" />
-          <p className="text-sm text-slate-400">No se encontraron resultados.</p>
-        </div>
-      );
-    }
-    return (
-      <div className="space-y-2">
-        <p className="text-xs text-slate-500 mb-3">{searchResults.length} resultado{searchResults.length !== 1 ? "s" : ""}</p>
-        {searchResults.map((r) => (
-          <div key={`${r._tipo}-${r.ci}`} className="bg-white border border-slate-200 rounded-xl p-3 shadow-card">
-            <div className="flex items-start justify-between gap-2">
-              <div className="flex-1 min-w-0">
-                <DatosPersona persona={r} rol={null} />
-                <div className="mt-1.5 flex flex-wrap gap-1.5">
-                  <Badge variant={r._tipo === "votante" ? "blue" : r._tipo === "coordinador" ? "purple" : r._tipo === "dirigente" ? "amber" : "default"}>
-                    {r._tipo.charAt(0).toUpperCase() + r._tipo.slice(1)}
-                  </Badge>
-                  {r.voto_confirmado && <Badge variant="green"><Check className="w-3 h-3 mr-1" />Confirmado</Badge>}
-                  {r.tercera_edad === true && <TerceraEdadBadge />}
-                </div>
-              </div>
-              {r._tipo === "votante" && (
-                <div className="flex gap-1.5 shrink-0">
-                  {!r.voto_confirmado && canConfirmar(r) && (
-                    <ActionBtn onClick={() => handleConfirmar(r)} title="Confirmar voto" variant="success-solid">
-                      <Check className="w-3.5 h-3.5" />
-                    </ActionBtn>
-                  )}
-                  {r.voto_confirmado && canAnular(r) && (
-                    <ActionBtn onClick={() => handleAnular(r)} title="Anular confirmacion" variant="danger">
-                      <X className="w-3.5 h-3.5" />
-                    </ActionBtn>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-        ))}
       </div>
     );
   };
@@ -2359,7 +2431,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
               <input
                 type="text"
                 value={searchQuery}
-                placeholder="Buscar..."
+                placeholder="Buscar por nombre, CI o teléfono..."
                 onFocus={() => setSearchActive(true)}
                 onBlur={() => { if (!searchQuery) setSearchActive(false); }}
                 onChange={(e) => setSearchQuery(e.target.value)}
@@ -2414,8 +2486,6 @@ const Dashboard = ({ currentUser, onLogout }) => {
               Reintentar
             </button>
           </div>
-        ) : searchQuery.trim() ? (
-          renderSearchResults()
         ) : currentUser.role === "superadmin" ? (
           renderSuperadmin()
         ) : currentUser.role === "dirigente" ? (
@@ -2511,6 +2581,13 @@ const Dashboard = ({ currentUser, onLogout }) => {
 
       {/* =========== VERIFICAR ESTRUCTURA (superadmin) =========== */}
       {verificarOpen && currentUser.role === "superadmin" && (() => {
+        const selectedDir = estructura.dirigentes.find(
+          (d) => normalizeCI(d.ci) === verificarDirCI
+        ) || null;
+        const dirCoords = selectedDir ? getCoordsDeDigente(estructura, normalizeCI(selectedDir.ci)) : [];
+        const dirSubs = selectedDir ? getSubsDeDigente(estructura, normalizeCI(selectedDir.ci)) : [];
+        const dirVotantes = selectedDir ? getTodosVotantesDirigente(estructura, normalizeCI(selectedDir.ci)) : [];
+
         const selectedCoord = estructura.coordinadores.find(
           (c) => normalizeCI(c.ci) === verificarCoordCI
         ) || null;
@@ -2521,6 +2598,25 @@ const Dashboard = ({ currentUser, onLogout }) => {
         const coordVotantes = selectedCoord
           ? getMisVotantes(estructura, normalizeCI(selectedCoord.ci))
           : [];
+
+        const printDirigente = async () => {
+          if (!selectedDir) return;
+          setVerificarPrinting("dirigente");
+          try {
+            const doc = await generateDirigentePDF({
+              estructura,
+              currentUser,
+              targetPerson: selectedDir,
+            });
+            const ts = new Date().toISOString().slice(0, 10);
+            doc.save(`estructura-dirigente-${normalizeCI(selectedDir.ci)}-${ts}.pdf`);
+          } catch (e) {
+            console.error("Error generando PDF dirigente:", e);
+            alert("Error generando PDF");
+          } finally {
+            setVerificarPrinting(null);
+          }
+        };
 
         const printCoord = async () => {
           if (!selectedCoord) return;
@@ -2573,16 +2669,61 @@ const Dashboard = ({ currentUser, onLogout }) => {
                   <h2 className="text-base font-bold text-slate-800">Verificar estructura</h2>
                 </div>
                 <button
-                  onClick={() => { setVerificarOpen(false); setVerificarCoordCI(""); setVerificarPrinting(null); }}
+                  onClick={() => { setVerificarOpen(false); setVerificarDirCI(""); setVerificarCoordCI(""); setVerificarPrinting(null); }}
                   className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors border-0 bg-transparent shadow-none"
                 >
                   <X className="w-4 h-4" />
                 </button>
               </div>
 
-              <div className="p-5 space-y-5">
+              <div className="p-5 space-y-6">
 
-                {/* Selector de coordinador */}
+                {/* ============ Verificar por dirigente ============ */}
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-sm font-semibold text-slate-700 mb-2">
+                      Seleccionar dirigente
+                    </label>
+                    <select
+                      value={verificarDirCI}
+                      onChange={(e) => setVerificarDirCI(e.target.value)}
+                      className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm text-slate-700 bg-slate-50 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent"
+                    >
+                      <option value="">-- Seleccione un dirigente --</option>
+                      {estructura.dirigentes.map((d) => (
+                        <option key={normalizeCI(d.ci)} value={normalizeCI(d.ci)}>
+                          {`${d.nombre || ""} ${d.apellido || ""}`.trim() || normalizeCI(d.ci)} — CI: {normalizeCI(d.ci)}
+                          {d.es_externo ? " (externo)" : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {selectedDir && (
+                    <div className="flex items-center justify-between p-3.5 bg-purple-50 border border-purple-200 rounded-xl">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-slate-800 truncate">
+                          {`${selectedDir.nombre || ""} ${selectedDir.apellido || ""}`.trim() || normalizeCI(selectedDir.ci)}
+                        </p>
+                        <p className="text-xs text-slate-500 mt-0.5">
+                          {dirCoords.length} coordinador{dirCoords.length !== 1 ? "es" : ""} · {dirSubs.length} sub{dirSubs.length !== 1 ? "s" : ""} · {dirVotantes.length} votante{dirVotantes.length !== 1 ? "s" : ""}
+                        </p>
+                      </div>
+                      <button
+                        onClick={printDirigente}
+                        disabled={verificarPrinting === "dirigente"}
+                        className="inline-flex items-center gap-1.5 bg-purple-600 hover:bg-purple-700 disabled:opacity-60 text-white px-3 h-8 rounded-lg text-xs font-medium transition-colors shrink-0 ml-3 border-0 shadow-none"
+                      >
+                        <Printer className="w-3.5 h-3.5" />
+                        {verificarPrinting === "dirigente" ? "Generando..." : "Imprimir rama completa"}
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                <div className="border-t border-slate-100" />
+
+                {/* ============ Verificar por coordinador (incluye sin dirigente) ============ */}
                 <div>
                   <label className="block text-sm font-semibold text-slate-700 mb-2">
                     Seleccionar coordinador
@@ -2596,6 +2737,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                     {estructura.coordinadores.map((c) => (
                       <option key={normalizeCI(c.ci)} value={normalizeCI(c.ci)}>
                         {`${c.nombre || ""} ${c.apellido || ""}`.trim() || normalizeCI(c.ci)} — CI: {normalizeCI(c.ci)}
+                        {!c.dirigente_ci ? " (sin dirigente)" : ""}
                       </option>
                     ))}
                   </select>

@@ -1,6 +1,14 @@
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
-import { normalizeCI } from "../utils/estructuraHelpers";
+import {
+  normalizeCI,
+  getCoordsDeDigente,
+  getSubsDeDigente,
+  getVotantesDirectosDirigente,
+  getTodosVotantesDirigente,
+  getVotantesDirectosCoord,
+  getVotantesDeSubcoord,
+} from "../utils/estructuraHelpers";
 
 // ======================= CONSTANTS =======================
 const PAGE_FORMAT = "a4";
@@ -506,6 +514,86 @@ export const generateSubcoordinadorPDF = async ({ estructura, currentUser, targe
     doc.text("No tiene votantes asignados.", M.left, y + 5);
   } else {
     addVoterTable(doc, y, misVotantes);
+  }
+
+  addFooterToAllPages(doc);
+  return doc;
+};
+
+// ====================================================================
+// DIRIGENTE PDF (rama completa de un dirigente)
+// ====================================================================
+// targetPerson: opcional — reporte de OTRO dirigente (verificación por superadmin)
+// en lugar del propio currentUser. Reutiliza los mismos helpers de jerarquía que
+// ya usa el resto de la app (utils/estructuraHelpers.js).
+export const generateDirigentePDF = async ({ estructura, currentUser, targetPerson = null }) => {
+  const doc = new jsPDF(PAGE_ORIENTATION, "mm", PAGE_FORMAT);
+  const persona = targetPerson || currentUser;
+  const userName = name(persona);
+  const logoImg = await loadLogo();
+  const dirCI = normalizeCI(persona.ci);
+
+  const misCoords = getCoordsDeDigente(estructura, dirCI);
+  const misSubs = getSubsDeDigente(estructura, dirCI);
+  const votantesDirectosDirigente = getVotantesDirectosDirigente(estructura, dirCI);
+  const todosVotantes = getTodosVotantesDirigente(estructura, dirCI);
+
+  const subsConf = misSubs.filter((s) => s.confirmado === true).length;
+  const votersConf = todosVotantes.filter((v) => v.voto_confirmado === true).length;
+  const totalConfirmable = misCoords.length + misSubs.length + todosVotantes.length;
+  const totalConfirmados = misCoords.length + subsConf + votersConf;
+  const pct = totalConfirmable > 0 ? Math.round((totalConfirmados / totalConfirmable) * 100) : 0;
+
+  // ---- Summary ----
+  let y = addHeader(doc, "Reporte Dirigente", userName, logoImg);
+  y = sectionTitle(doc, "Resumen de Rama", y);
+  y = addSummaryBox(doc, y, [
+    ["Total Red", String(totalConfirmable)],
+    ["Coordinadores", String(misCoords.length)],
+    ["Subcoordinadores", String(misSubs.length)],
+    ["Votantes", String(todosVotantes.length)],
+    ["Confirmados", String(totalConfirmados)],
+    ["Pendientes", String(totalConfirmable - totalConfirmados)],
+    ["Porcentaje", `${pct}%`],
+  ]);
+  y += 6;
+
+  // ---- Per coordinator sections ----
+  misCoords.forEach((coord) => {
+    const coordCI = normalizeCI(coord.ci);
+    const subsDeEste = misSubs.filter((s) => normalizeCI(s.coordinador_ci) === coordCI);
+    const directVotersDeEste = getVotantesDirectosCoord(estructura, coordCI);
+
+    y = ensureSpace(doc, 30, y);
+    y = subSectionTitle(doc, `Coordinador: ${name(coord)}`, y);
+
+    if (subsDeEste.length > 0) {
+      y = addSubTable(doc, y, subsDeEste, estructura);
+      y += 5;
+
+      subsDeEste.forEach((sub) => {
+        const subVoters = getVotantesDeSubcoord(estructura, normalizeCI(sub.ci));
+        if (subVoters.length === 0) return;
+        y = ensureSpace(doc, 25, y);
+        y = subSectionTitle(doc, `Votantes de ${name(sub)}`, y);
+        y = addVoterTable(doc, y, subVoters);
+        y += 5;
+      });
+    }
+
+    if (directVotersDeEste.length > 0) {
+      y = ensureSpace(doc, 25, y);
+      y = subSectionTitle(doc, `Votantes directos de ${name(coord)}`, y);
+      y = addVoterTable(doc, y, directVotersDeEste);
+      y += 5;
+    }
+  });
+
+  // ---- Direct voters of the dirigente itself ----
+  if (votantesDirectosDirigente.length > 0) {
+    y = ensureSpace(doc, 25, y);
+    y = subSectionTitle(doc, "Votantes directos del dirigente", y);
+    y = addVoterTable(doc, y, votantesDirectosDirigente);
   }
 
   addFooterToAllPages(doc);
