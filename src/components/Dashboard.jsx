@@ -2565,6 +2565,13 @@ const Dashboard = ({ currentUser, onLogout }) => {
           (c) => normalizeCI(c.ci) === verificarCoordCI
         ) || null;
 
+        // Selector de coordinador: si hay un dirigente seleccionado, solo los
+        // coordinadores de su estructura; si no, se puede elegir entre todos
+        // (incluidos los que no tienen dirigente asignado).
+        const coordinadorOptions = verificarDirCI
+          ? getCoordsDeDigente(estructura, verificarDirCI)
+          : estructura.coordinadores;
+
         const coordSubs = selectedCoord
           ? getMisSubcoordinadores(estructura, normalizeCI(selectedCoord.ci))
           : [];
@@ -2573,6 +2580,35 @@ const Dashboard = ({ currentUser, onLogout }) => {
         const coordVotantes = selectedCoord
           ? getTodosVotantesCoord(estructura, normalizeCI(selectedCoord.ci))
           : [];
+
+        const haySeleccion = !!verificarDirCI || !!verificarCoordCI;
+
+        const limpiarSeleccion = () => {
+          setVerificarDirCI("");
+          setVerificarCoordCI("");
+        };
+
+        // Cambiar el dirigente manualmente filtra el selector de coordinador; si el
+        // coordinador ya elegido no pertenece al nuevo dirigente, se limpia.
+        const handleSelectDirigente = (newDirCI) => {
+          setVerificarDirCI(newDirCI);
+          if (verificarCoordCI) {
+            const coordActual = estructura.coordinadores.find(
+              (c) => normalizeCI(c.ci) === verificarCoordCI
+            );
+            const pertenece = coordActual && normalizeCI(coordActual.dirigente_ci) === newDirCI;
+            if (!pertenece) setVerificarCoordCI("");
+          }
+        };
+
+        // Elegir un coordinador autocompleta arriba su dirigente correspondiente
+        // (o lo deja vacío si no tiene uno asignado).
+        const handleSelectCoordinador = (newCoordCI) => {
+          setVerificarCoordCI(newCoordCI);
+          if (!newCoordCI) return;
+          const coord = estructura.coordinadores.find((c) => normalizeCI(c.ci) === newCoordCI);
+          setVerificarDirCI(coord ? normalizeCI(coord.dirigente_ci) : "");
+        };
 
         const printDirigente = async () => {
           if (!selectedDir) return;
@@ -2643,12 +2679,22 @@ const Dashboard = ({ currentUser, onLogout }) => {
                   </div>
                   <h2 className="text-base font-bold text-slate-800">Verificar estructura</h2>
                 </div>
-                <button
-                  onClick={() => { setVerificarOpen(false); setVerificarDirCI(""); setVerificarCoordCI(""); setVerificarPrinting(null); }}
-                  className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors border-0 bg-transparent shadow-none"
-                >
-                  <X className="w-4 h-4" />
-                </button>
+                <div className="flex items-center gap-1">
+                  {haySeleccion && (
+                    <button
+                      onClick={limpiarSeleccion}
+                      className="text-xs font-medium text-slate-500 hover:text-slate-700 hover:underline bg-transparent border-0 shadow-none px-2 py-1"
+                    >
+                      Limpiar selección
+                    </button>
+                  )}
+                  <button
+                    onClick={() => { setVerificarOpen(false); setVerificarDirCI(""); setVerificarCoordCI(""); setVerificarPrinting(null); }}
+                    className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors border-0 bg-transparent shadow-none"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
 
               <div className="p-5 space-y-6">
@@ -2661,7 +2707,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                     </label>
                     <select
                       value={verificarDirCI}
-                      onChange={(e) => setVerificarDirCI(e.target.value)}
+                      onChange={(e) => handleSelectDirigente(e.target.value)}
                       className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm text-slate-700 bg-slate-50 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent"
                     >
                       <option value="">-- Seleccione un dirigente --</option>
@@ -2672,26 +2718,41 @@ const Dashboard = ({ currentUser, onLogout }) => {
                         </option>
                       ))}
                     </select>
+                    {!verificarDirCI && selectedCoord && !selectedCoord.dirigente_ci && (
+                      <p className="text-xs text-slate-400 italic mt-1.5">
+                        El coordinador seleccionado no tiene dirigente asignado.
+                      </p>
+                    )}
                   </div>
 
                   {selectedDir && (
-                    <div className="flex items-center justify-between p-3.5 bg-purple-50 border border-purple-200 rounded-xl">
+                    <div className="flex items-center justify-between gap-3 p-3.5 bg-purple-50 border border-purple-200 rounded-xl">
                       <div className="min-w-0">
                         <p className="text-sm font-semibold text-slate-800 truncate">
                           {`${selectedDir.nombre || ""} ${selectedDir.apellido || ""}`.trim() || normalizeCI(selectedDir.ci)}
+                          {selectedDir.es_externo && (
+                            <span className="ml-1.5 text-xs font-normal text-purple-600">(externo)</span>
+                          )}
                         </p>
                         <p className="text-xs text-slate-500 mt-0.5">
                           {dirCoords.length} coordinador{dirCoords.length !== 1 ? "es" : ""} · {dirSubs.length} sub{dirSubs.length !== 1 ? "s" : ""} · {dirVotantes.length} votante{dirVotantes.length !== 1 ? "s" : ""}
                         </p>
                       </div>
-                      <button
-                        onClick={printDirigente}
-                        disabled={verificarPrinting === "dirigente"}
-                        className="inline-flex items-center gap-1.5 bg-purple-600 hover:bg-purple-700 disabled:opacity-60 text-white px-3 h-8 rounded-lg text-xs font-medium transition-colors shrink-0 ml-3 border-0 shadow-none"
-                      >
-                        <Printer className="w-3.5 h-3.5" />
-                        {verificarPrinting === "dirigente" ? "Generando..." : "Imprimir rama completa"}
-                      </button>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <ExcelDownloadButton
+                          excelKey={`dirigente:${normalizeCI(selectedDir.ci)}`}
+                          busyKey={excelBusy}
+                          onDownload={() => handleDescargarExcel(`dirigente:${normalizeCI(selectedDir.ci)}`, buildDirigenteExcelPayload(selectedDir))}
+                        />
+                        <button
+                          onClick={printDirigente}
+                          disabled={verificarPrinting === "dirigente"}
+                          className="inline-flex items-center gap-1.5 bg-purple-600 hover:bg-purple-700 disabled:opacity-60 text-white px-3 h-8 rounded-lg text-xs font-medium transition-colors border-0 shadow-none"
+                        >
+                          <Printer className="w-3.5 h-3.5" />
+                          {verificarPrinting === "dirigente" ? "Generando..." : "Imprimir rama completa"}
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -2705,41 +2766,59 @@ const Dashboard = ({ currentUser, onLogout }) => {
                   </label>
                   <select
                     value={verificarCoordCI}
-                    onChange={(e) => setVerificarCoordCI(e.target.value)}
+                    onChange={(e) => handleSelectCoordinador(e.target.value)}
                     className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm text-slate-700 bg-slate-50 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent"
                   >
                     <option value="">-- Seleccione un coordinador --</option>
-                    {estructura.coordinadores.map((c) => (
+                    {coordinadorOptions.map((c) => (
                       <option key={normalizeCI(c.ci)} value={normalizeCI(c.ci)}>
                         {`${c.nombre || ""} ${c.apellido || ""}`.trim() || normalizeCI(c.ci)} — CI: {normalizeCI(c.ci)}
                         {!c.dirigente_ci ? " (sin dirigente)" : ""}
                       </option>
                     ))}
                   </select>
+                  {selectedDir && (
+                    <p className="text-xs text-slate-400 mt-1.5">
+                      Mostrando únicamente los coordinadores de{" "}
+                      {`${selectedDir.nombre || ""} ${selectedDir.apellido || ""}`.trim() || normalizeCI(selectedDir.ci)}.
+                    </p>
+                  )}
                 </div>
 
                 {/* Contenido cuando hay un coordinador seleccionado */}
                 {selectedCoord && (
                   <div className="space-y-4">
 
-                    {/* Imprimir estructura completa del coordinador */}
-                    <div className="flex items-center justify-between p-3.5 bg-brand-50 border border-brand-200 rounded-xl">
+                    {/* Imprimir/Excel estructura completa del coordinador */}
+                    <div className="flex items-center justify-between gap-3 p-3.5 bg-brand-50 border border-brand-200 rounded-xl">
                       <div className="min-w-0">
-                        <p className="text-sm font-semibold text-slate-800 truncate">
-                          {`${selectedCoord.nombre || ""} ${selectedCoord.apellido || ""}`.trim() || normalizeCI(selectedCoord.ci)}
+                        <p className="text-sm font-semibold text-slate-800 truncate flex items-center gap-2 flex-wrap">
+                          <span>{`${selectedCoord.nombre || ""} ${selectedCoord.apellido || ""}`.trim() || normalizeCI(selectedCoord.ci)}</span>
+                          {!selectedCoord.dirigente_ci && (
+                            <span className="text-xs font-semibold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded">
+                              Sin dirigente
+                            </span>
+                          )}
                         </p>
                         <p className="text-xs text-slate-500 mt-0.5">
                           {coordSubs.length} sub{coordSubs.length !== 1 ? "s" : ""} · {coordVotantes.length} votante{coordVotantes.length !== 1 ? "s" : ""}
                         </p>
                       </div>
-                      <button
-                        onClick={printCoord}
-                        disabled={verificarPrinting === "coord"}
-                        className="inline-flex items-center gap-1.5 bg-brand-600 hover:bg-brand-700 disabled:opacity-60 text-white px-3 h-8 rounded-lg text-xs font-medium transition-colors shrink-0 ml-3 border-0 shadow-none"
-                      >
-                        <Printer className="w-3.5 h-3.5" />
-                        {verificarPrinting === "coord" ? "Generando..." : "Imprimir estructura completa"}
-                      </button>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <ExcelDownloadButton
+                          excelKey={`coordinador:${normalizeCI(selectedCoord.ci)}`}
+                          busyKey={excelBusy}
+                          onDownload={() => handleDescargarExcel(`coordinador:${normalizeCI(selectedCoord.ci)}`, buildCoordExcelPayload(selectedCoord))}
+                        />
+                        <button
+                          onClick={printCoord}
+                          disabled={verificarPrinting === "coord"}
+                          className="inline-flex items-center gap-1.5 bg-brand-600 hover:bg-brand-700 disabled:opacity-60 text-white px-3 h-8 rounded-lg text-xs font-medium transition-colors border-0 shadow-none"
+                        >
+                          <Printer className="w-3.5 h-3.5" />
+                          {verificarPrinting === "coord" ? "Generando..." : "Imprimir estructura completa"}
+                        </button>
+                      </div>
                     </div>
 
                     {/* Listado de subcoordinadores */}
@@ -2756,7 +2835,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                             return (
                               <div
                                 key={subCI}
-                                className="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-xl"
+                                className="flex items-center justify-between gap-3 p-3 bg-slate-50 border border-slate-200 rounded-xl"
                               >
                                 <div className="min-w-0">
                                   <p className="text-sm font-medium text-slate-800 truncate">
@@ -2766,14 +2845,21 @@ const Dashboard = ({ currentUser, onLogout }) => {
                                     CI: {subCI} · {subVoterCount} votante{subVoterCount !== 1 ? "s" : ""}
                                   </p>
                                 </div>
-                                <button
-                                  onClick={() => printSub(sub)}
-                                  disabled={verificarPrinting === printKey}
-                                  className="inline-flex items-center gap-1.5 border border-brand-300 bg-white hover:bg-brand-50 disabled:opacity-60 text-brand-700 px-3 h-8 rounded-lg text-xs font-medium transition-colors shrink-0 ml-3 shadow-none"
-                                >
-                                  <Printer className="w-3.5 h-3.5" />
-                                  {verificarPrinting === printKey ? "Generando..." : "Imprimir estructura de este sub"}
-                                </button>
+                                <div className="flex items-center gap-2 shrink-0">
+                                  <ExcelDownloadButton
+                                    excelKey={`subcoordinador:${subCI}`}
+                                    busyKey={excelBusy}
+                                    onDownload={() => handleDescargarExcel(`subcoordinador:${subCI}`, buildSubExcelPayload(sub))}
+                                  />
+                                  <button
+                                    onClick={() => printSub(sub)}
+                                    disabled={verificarPrinting === printKey}
+                                    className="inline-flex items-center gap-1.5 border border-brand-300 bg-white hover:bg-brand-50 disabled:opacity-60 text-brand-700 px-3 h-8 rounded-lg text-xs font-medium transition-colors shadow-none"
+                                  >
+                                    <Printer className="w-3.5 h-3.5" />
+                                    {verificarPrinting === printKey ? "Generando..." : "Imprimir estructura de este sub"}
+                                  </button>
+                                </div>
                               </div>
                             );
                           })}
