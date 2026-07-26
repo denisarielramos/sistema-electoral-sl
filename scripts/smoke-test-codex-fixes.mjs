@@ -100,7 +100,16 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
     "una consulta mixta con el nombre correcto y la CI correcta debe matchear"
   );
 
-  console.log("OK: caso 3 (búsqueda por CI encuentra los 4 formatos, sin falsos positivos en consultas mixtas)");
+  // Teléfono con formato completo (con espacios entre código de país y el resto): el
+  // token aislado "+595" no debe romper el AND por palabra.
+  for (const consulta of ["+595 981 123456", "+595 981 123 456", "0981 123 456"]) {
+    assert.ok(
+      personaCoincideConsulta(persona, consulta),
+      `debe encontrar el teléfono al buscar "${consulta}"`
+    );
+  }
+
+  console.log("OK: caso 3 (búsqueda por CI/teléfono encuentra distintos formatos, sin falsos positivos en consultas mixtas)");
 }
 
 // ======================= CASO 3: AVISO DE ERROR + REINTENTAR EN VistaSeccional =======================

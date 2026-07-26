@@ -41,6 +41,16 @@ const esConsultaSoloCI = (query) => {
   return sinDigitosNiSeparadoresDeCI.length === 0;
 };
 
+// ¿La consulta completa es SOLO un teléfono formateado (dígitos + '+', espacios,
+// guiones o paréntesis), sin ninguna letra? Ej.: "+595 981 123 456", "0981-123-456"
+// -> true. Un token aislado como "+595" se normaliza a "" (le sacamos el código de
+// país y no queda nada), así que sin este atajo de consulta completa el AND por
+// palabra de más abajo fallaría aunque el resto de los dígitos sí coincidan.
+const esConsultaSoloTelefono = (query) => {
+  const sinDigitosNiSeparadoresDeTelefono = String(query ?? "").replace(/[\d+().\-\s]/g, "");
+  return sinDigitosNiSeparadoresDeTelefono.length === 0;
+};
+
 // persona: objeto con (al menos) nombre, apellido, ci, telefono.
 // rawQuery: la consulta TAL COMO la escribió el usuario (sin normalizar) — se usa una
 // copia normalizada solo para comparar CI; nombre/apellido/teléfono siguen su propia
@@ -50,6 +60,7 @@ export const personaCoincideConsulta = (persona, rawQuery) => {
   if (!tokens.length) return true;
 
   const ciDigits = soloDigitosCI(persona?.ci);
+  const telDigits = soloDigitosTelefono(persona?.telefono);
 
   // CI: solo cuando la consulta ENTERA es una CI formateada (sin letras) se compara
   // contra el CI completo, para soportar "4630621", "4.630.621", "4 630 621" y
@@ -62,12 +73,20 @@ export const personaCoincideConsulta = (persona, rawQuery) => {
     if (queryDigitsCI.length > 0 && ciDigits.includes(queryDigitsCI)) return true;
   }
 
+  // Teléfono: mismo criterio que con la CI — si la consulta ENTERA es un teléfono
+  // formateado, se compara contra el teléfono completo normalizado en vez de partirla
+  // en palabras (soluciona "+595 981 123 456", donde el token "+595" por sí solo se
+  // normaliza a vacío y rompía el AND aunque el resto de los dígitos coincidiera).
+  if (esConsultaSoloTelefono(rawQuery)) {
+    const queryDigitsTel = soloDigitosTelefono(rawQuery);
+    if (queryDigitsTel.length > 0 && telDigits.includes(queryDigitsTel)) return true;
+  }
+
   // Nombre/apellido/teléfono: AND entre palabras (tokens), como ya funcionaba.
   const nombre = normalizeTexto(persona?.nombre);
   const apellido = normalizeTexto(persona?.apellido);
   const nombreCompleto = normalizeTexto(`${persona?.nombre || ""} ${persona?.apellido || ""}`);
   const apellidoNombre = normalizeTexto(`${persona?.apellido || ""} ${persona?.nombre || ""}`);
-  const telDigits = soloDigitosTelefono(persona?.telefono);
 
   return tokens.every((t) => {
     const tDigitsTel = soloDigitosTelefono(t);
