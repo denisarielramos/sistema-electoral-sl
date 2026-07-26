@@ -1365,7 +1365,8 @@ const Dashboard = ({ currentUser, onLogout }) => {
     coordinadores: estructura.coordinadores,
     subcoordinadores: estructura.subcoordinadores,
     votantes: estructura.votantes,
-  }), [estructura]);
+    padronMap,
+  }), [estructura, padronMap]);
 
   const buildDirigenteExcelPayload = useCallback((dir) => {
     const dirCI = normalizeCI(dir.ci);
@@ -1377,8 +1378,9 @@ const Dashboard = ({ currentUser, onLogout }) => {
       coordinadores: getCoordsDeDigente(estructura, dirCI),
       subcoordinadores: getSubsDeDigente(estructura, dirCI),
       votantes: getTodosVotantesDirigente(estructura, dirCI),
+      padronMap,
     };
-  }, [estructura]);
+  }, [estructura, padronMap]);
 
   const buildCoordExcelPayload = useCallback((coord) => {
     const coordCI = normalizeCI(coord.ci);
@@ -1392,8 +1394,9 @@ const Dashboard = ({ currentUser, onLogout }) => {
       coordinadores: [coord],
       subcoordinadores: misSubs,
       votantes: [...votantesDirectos, ...votantesDeSubs],
+      padronMap,
     };
-  }, [estructura]);
+  }, [estructura, padronMap]);
 
   const buildSubExcelPayload = useCallback((sub) => {
     const subCI = normalizeCI(sub.ci);
@@ -1403,8 +1406,9 @@ const Dashboard = ({ currentUser, onLogout }) => {
       roles: ["votante"],
       subcoordinadores: [sub],
       votantes: getVotantesDeSubcoord(estructura, subCI),
+      padronMap,
     };
-  }, [estructura]);
+  }, [estructura, padronMap]);
 
   // key identifica al botón que disparó la descarga (para el estado "Generando..." y
   // para impedir clics repetidos). payload son los argumentos de generarExcelEstructura.

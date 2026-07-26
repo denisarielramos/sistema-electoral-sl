@@ -16,13 +16,14 @@ const ROLE_LABELS = {
 
 const HEADER_FILL = "FFB91C1C"; // brand-700 (#b91c1c), mismo tono que los encabezados del PDF
 const HEADER_FONT = "FFFFFFFF";
+const TEXT_FORMAT = "@"; // fuerza formato de texto (sin notación científica, sin perder '+' ni ceros iniciales)
 
 const COLUMNS = [
   { header: "Nivel o rol", key: "nivel", width: 16 },
   { header: "Nombre", key: "nombre", width: 18 },
   { header: "Apellido", key: "apellido", width: 18 },
-  { header: "CI", key: "ci", width: 12 },
-  { header: "Teléfono", key: "telefono", width: 16 },
+  { header: "CI", key: "ci", width: 12, style: { numFmt: TEXT_FORMAT } },
+  { header: "Teléfono", key: "telefono", width: 16, style: { numFmt: TEXT_FORMAT } },
   { header: "Seccional", key: "seccional", width: 12 },
   { header: "Local de votación", key: "local", width: 28 },
   { header: "Mesa", key: "mesa", width: 10 },
@@ -35,9 +36,16 @@ const COLUMNS = [
 ];
 
 // ======================= HELPERS =======================
+// str(): convierte a texto sin inventar valores — null/undefined -> "" (celda vacía).
+// Nunca usar '||' para esto: perdería 0 o false como valores válidos en otros campos.
 const str = (v) => (v === null || v === undefined ? "" : String(v));
 
-const boolLabel = (v) => (typeof v === "boolean" ? (v ? "Sí" : "No") : "");
+// boolLabel(): true -> "Sí", false -> "No", cualquier otra cosa (null/undefined) -> "" (no inventa "No").
+const boolLabel = (v) => {
+  if (v === true) return "Sí";
+  if (v === false) return "No";
+  return "";
+};
 
 const normalizeCILocal = (ci) => String(ci ?? "").replace(/\D/g, "");
 
@@ -69,8 +77,9 @@ export const buildExcelFileName = (prefix, persona = null) => {
 };
 
 // ======================= DEDUP POR ROL + CI NORMALIZADA =======================
-// Requisito: una misma persona no debe contarse ni listarse dos veces aunque
-// aparezca repetida dentro de un mismo array (estructuras derivadas/conteos auxiliares).
+// Una misma persona no debe contarse ni listarse dos veces aunque aparezca repetida
+// dentro de un mismo array (estructuras derivadas/conteos auxiliares). La dedup es
+// por rol: una misma CI puede existir legítimamente con roles distintos.
 const dedupeByCI = (list = []) => {
   const seen = new Set();
   const out = [];
@@ -84,12 +93,43 @@ const dedupeByCI = (list = []) => {
   return out;
 };
 
-// ======================= FILAS (a partir de arrays ya deduplicados) =======================
-const buildRows = ({ dirigentes = [], coordinadores = [], subcoordinadores = [], votantes = [] }) => {
+// ======================= ENRIQUECIMIENTO ÚNICO (persona + padrón) =======================
+// Único lugar donde se combinan los datos de la tabla de rol con los del padrón.
+// - nombre/apellido: prevalece el propio de la tabla de rol si existe (p. ej. dirigente
+//   externo, que no está en el padrón); si no existe, se completa con el padrón.
+// - seccional/local_votacion/mesa/orden: siempre provienen del padrón (ninguna tabla de
+//   rol los almacena); si la persona no está en el padrón, quedan vacíos.
+// - teléfono/dirección/tercera_edad/voto_confirmado/confirmado/asignado_por*: siempre
+//   provienen de la tabla de rol (el padrón no tiene estas columnas).
+// Se usa '??' en todos los casos para no descartar valores válidos como 0 o false.
+const enrichPersona = (persona, padronMap) => {
+  const ci = normalizeCILocal(persona?.ci);
+  const padronPersona = padronMap instanceof Map ? padronMap.get(ci) : undefined;
+
+  return {
+    ci,
+    nombre: persona?.nombre ?? padronPersona?.nombre ?? "",
+    apellido: persona?.apellido ?? padronPersona?.apellido ?? "",
+    seccional: persona?.seccional ?? padronPersona?.seccional ?? "",
+    local_votacion: persona?.local_votacion ?? padronPersona?.local_votacion ?? "",
+    mesa: persona?.mesa ?? padronPersona?.mesa ?? "",
+    orden: persona?.orden ?? padronPersona?.orden ?? "",
+    telefono: persona?.telefono ?? "",
+    direccion: persona?.direccion_override ?? padronPersona?.direccion ?? "",
+    tercera_edad: persona?.tercera_edad ?? null,
+    voto_confirmado: persona?.voto_confirmado ?? null,
+    confirmado: persona?.confirmado ?? null,
+    asignado_por_nombre: persona?.asignado_por_nombre ?? "",
+    asignado_por_rol: persona?.asignado_por_rol ?? "",
+  };
+};
+
+// ======================= FILAS (enriquece cada persona antes de mapear columnas) =======================
+const buildRows = ({ dirigentes = [], coordinadores = [], subcoordinadores = [], votantes = [] }, padronMap) => {
   const rows = [];
 
-  const push = (role, persona) => {
-    const direccion = persona.direccion_override || persona.direccion || "";
+  const push = (role, rawPersona) => {
+    const persona = enrichPersona(rawPersona, padronMap);
     const votoConfirmado =
       role === "votante"
         ? boolLabel(persona.voto_confirmado)
@@ -101,7 +141,7 @@ const buildRows = ({ dirigentes = [], coordinadores = [], subcoordinadores = [],
       nivel: ROLE_LABELS[role],
       nombre: str(persona.nombre),
       apellido: str(persona.apellido),
-      ci: str(normalizeCILocal(persona.ci)),
+      ci: str(persona.ci),
       telefono: str(persona.telefono),
       seccional: str(persona.seccional),
       local: str(persona.local_votacion),
@@ -111,7 +151,7 @@ const buildRows = ({ dirigentes = [], coordinadores = [], subcoordinadores = [],
       votoConfirmado,
       asignadoPor: str(persona.asignado_por_nombre),
       asignadoPorRol: str(persona.asignado_por_rol),
-      direccion: str(direccion),
+      direccion: str(persona.direccion),
     });
   };
 
@@ -123,24 +163,19 @@ const buildRows = ({ dirigentes = [], coordinadores = [], subcoordinadores = [],
   return rows;
 };
 
-// ======================= TOTALES (misma convención que estadisticasService: =======================
-// dirigentes y coordinadores se cuentan como confirmados automáticamente porque no
-// tienen columna propia de confirmación; subcoordinadores usan `confirmado`; votantes
-// usan `voto_confirmado`.
+// ======================= TOTALES =======================
+// "Voto confirmado" se refiere exclusivamente a votantes (voto_confirmado === true).
+// Dirigentes, coordinadores y subcoordinadores NO se cuentan como votos confirmados.
 const buildTotales = ({ dirigentes = [], coordinadores = [], subcoordinadores = [], votantes = [] }) => {
   const totalDirigentes = dirigentes.length;
   const totalCoordinadores = coordinadores.length;
   const totalSubcoordinadores = subcoordinadores.length;
   const totalVotantes = votantes.length;
 
-  const subsConfirmados = subcoordinadores.filter((s) => s.confirmado === true).length;
-  const votosConfirmados = votantes.filter((v) => v.voto_confirmado === true).length;
+  const votosConfirmados = votantes.filter((v) => v?.voto_confirmado === true).length;
+  const porcentaje = totalVotantes > 0 ? Math.round((votosConfirmados / totalVotantes) * 100) : 0;
 
-  const totalConfirmable = totalDirigentes + totalCoordinadores + totalSubcoordinadores + totalVotantes;
-  const totalConfirmados = totalDirigentes + totalCoordinadores + subsConfirmados + votosConfirmados;
-  const porcentaje = totalConfirmable > 0 ? Math.round((totalConfirmados / totalConfirmable) * 100) : 0;
-
-  return { totalDirigentes, totalCoordinadores, totalSubcoordinadores, totalVotantes, totalConfirmados, porcentaje };
+  return { totalDirigentes, totalCoordinadores, totalSubcoordinadores, totalVotantes, votosConfirmados, porcentaje };
 };
 
 // ======================= ESTILOS =======================
@@ -169,6 +204,7 @@ const downloadBlob = (blob, filename) => {
 // persona: entidad dueña del export (para el nombre de archivo); null en el export global del superadmin
 // roles: subconjunto de ["dirigente","coordinador","subcoordinador","votante"] — qué totales mostrar en "Resumen"
 // dirigentes/coordinadores/subcoordinadores/votantes: arrays ya filtrados por el alcance jerárquico del usuario
+// padronMap: Map<ciNormalizada, registroPadron> ya cargado en memoria (IndexedDB/estado) — no se consulta Supabase
 export const generarExcelEstructura = async ({
   prefix,
   persona = null,
@@ -177,9 +213,9 @@ export const generarExcelEstructura = async ({
   coordinadores = [],
   subcoordinadores = [],
   votantes = [],
+  padronMap = null,
 }) => {
-  // Dedup por rol + CI normalizada antes de contar o listar — una misma persona
-  // no debe duplicarse aunque el array recibido la traiga repetida.
+  // Dedup por rol + CI normalizada antes de contar o listar.
   const scoped = {
     dirigentes: dedupeByCI(dirigentes),
     coordinadores: dedupeByCI(coordinadores),
@@ -187,7 +223,7 @@ export const generarExcelEstructura = async ({
     votantes: dedupeByCI(votantes),
   };
 
-  const rows = buildRows(scoped);
+  const rows = buildRows(scoped, padronMap);
   const totales = buildTotales(scoped);
 
   const workbook = new ExcelJS.Workbook();
@@ -205,7 +241,7 @@ export const generarExcelEstructura = async ({
   if (roles.includes("coordinador")) resumen.addRow({ metrica: "Total de coordinadores", valor: totales.totalCoordinadores });
   if (roles.includes("subcoordinador")) resumen.addRow({ metrica: "Total de subcoordinadores", valor: totales.totalSubcoordinadores });
   if (roles.includes("votante")) resumen.addRow({ metrica: "Total de votantes", valor: totales.totalVotantes });
-  resumen.addRow({ metrica: "Total de votos confirmados", valor: totales.totalConfirmados });
+  resumen.addRow({ metrica: "Total de votos confirmados", valor: totales.votosConfirmados });
   resumen.addRow({ metrica: "Porcentaje de confirmación", valor: `${totales.porcentaje}%` });
   resumen.addRow({ metrica: "Generado", valor: new Date().toLocaleString("es-PY") });
 
