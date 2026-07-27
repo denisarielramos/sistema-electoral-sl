@@ -61,11 +61,13 @@ export const getMisVotantes = (estructura, coordCI) => getVotantesDirectosCoord(
 // Directos + los de todos sus subcoordinadores. Usa coordinador_ci (poblado en toda
 // alta de votante, sea directa del coordinador o vía uno de sus subs) para que el
 // total coincida exactamente con "Total Red" del PDF del coordinador (pdfService.js).
-// Además une los directos "estrictos" (getVotantesDirectosCoord: asignado_por +
-// asignado_por_rol === "coordinador") que, por dato legacy, no tengan coordinador_ci
-// poblado — igual son visibles en el árbol vía ese helper, así que también deben
-// contarse acá. Dedup por CI: cada votante aparece una sola vez aunque matchee ambos
-// criterios.
+// Además une, por dato legacy sin coordinador_ci poblado:
+// - los directos "estrictos" (getVotantesDirectosCoord: asignado_por + asignado_por_rol
+//   === "coordinador"), y
+// - los de cada subcoordinador (getVotantesDeSubcoord: asignado_por + asignado_por_rol
+//   === "subcoordinador") — igual visibles en el árbol/PDF bajo ese sub, así que también
+//   deben contarse acá.
+// Dedup por CI: cada votante aparece una sola vez aunque matchee varios criterios.
 export const getTodosVotantesCoord = (estructura, coordCI) => {
   if (!coordCI) return [];
   const ci = resolveCI(coordCI);
@@ -73,10 +75,16 @@ export const getTodosVotantesCoord = (estructura, coordCI) => {
     (v) => esActivo(v) && normalizeCI(v.coordinador_ci) === ci
   );
   const vistos = new Set(porCoordinadorCI.map((v) => normalizeCI(v.ci)));
-  const directosSinCoordinadorCI = getVotantesDirectosCoord(estructura, ci).filter(
-    (v) => !vistos.has(normalizeCI(v.ci))
+  const agregar = (candidatos) => {
+    const nuevos = candidatos.filter((v) => !vistos.has(normalizeCI(v.ci)));
+    nuevos.forEach((v) => vistos.add(normalizeCI(v.ci)));
+    return nuevos;
+  };
+  const directosSinCoordinadorCI = agregar(getVotantesDirectosCoord(estructura, ci));
+  const deSubsSinCoordinadorCI = agregar(
+    getMisSubcoordinadores(estructura, ci).flatMap((s) => getVotantesDeSubcoord(estructura, normalizeCI(s.ci)))
   );
-  return [...porCoordinadorCI, ...directosSinCoordinadorCI];
+  return [...porCoordinadorCI, ...directosSinCoordinadorCI, ...deSubsSinCoordinadorCI];
 };
 
 // ======================= PERSONAS DISPONIBLES =======================

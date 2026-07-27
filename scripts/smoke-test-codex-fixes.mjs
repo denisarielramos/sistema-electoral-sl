@@ -105,6 +105,32 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
   console.log("OK: caso 1b (coordinador con un único directo sin coordinador_ci: total=1, directos=1, indirectos=0)");
 }
 
+// ======================= CASO 1B2: VOTANTE DE UN SUB SIN coordinador_ci =======================
+// Mismo hallazgo, para votantes asignados por un subcoordinador (no directos del
+// coordinador): visibles en el árbol/PDF bajo ese sub vía getVotantesDeSubcoord, pero
+// getTodosVotantesCoord no los unía si les faltaba coordinador_ci.
+{
+  const { getVotantesDeSubcoord, getTodosVotantesCoord } = await import("../src/utils/estructuraHelpers.js");
+
+  const estructura = {
+    dirigentes: [],
+    coordinadores: [{ ci: "2222221" }],
+    subcoordinadores: [{ ci: "5000001", coordinador_ci: "2222221" }],
+    votantes: [
+      { ci: "6000001", nombre: "SinCoordCI", apellido: "DeSub", asignado_por: "5000001", asignado_por_rol: "subcoordinador", activo: true },
+    ],
+  };
+
+  const deSub = getVotantesDeSubcoord(estructura, "5000001");
+  const total = getTodosVotantesCoord(estructura, "2222221");
+
+  assert.equal(deSub.length, 1, "getVotantesDeSubcoord debe seguir viendo al votante del sub");
+  assert.equal(total.length, 1, "getTodosVotantesCoord debe incluir al votante del sub aunque no tenga coordinador_ci");
+  assert.ok(total.some((v) => v.ci === "6000001"), "la persona debe estar en el conjunto completo del coordinador");
+
+  console.log("OK: caso 1b2 (coordinador cuenta a los votantes de sus subs aunque no tengan coordinador_ci)");
+}
+
 // ======================= CASO 1C: DIRIGENTE — VOTANTE DIRECTO DE UN COORDINADOR SIN dirigente_ci =======================
 // Mismo hallazgo P1, un nivel más arriba: getTodosVotantesDirigente solo miraba
 // dirigente_ci, así que un votante directo "estricto" de un coordinador de la rama
