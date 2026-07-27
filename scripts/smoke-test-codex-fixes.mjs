@@ -77,6 +77,34 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
   console.log("OK: caso 1 (total del coordinador = directos + de todos sus subs, sin duplicados, incluidos directos sin coordinador_ci)");
 }
 
+// ======================= CASO 1B: COORDINADOR CON UN ÚNICO DIRECTO SIN coordinador_ci =======================
+// Escenario mínimo del hallazgo P1: sin ese votante contado, "Votantes indirectos" en el
+// PDF terminaba en -1 (0 del conjunto completo - 1 directo). Total/directos/indirectos
+// deben coincidir exactamente entre "Verificar estructura", el PDF y el Excel.
+{
+  const { getVotantesDirectosCoord, getTodosVotantesCoord } = await import("../src/utils/estructuraHelpers.js");
+
+  const estructura = {
+    dirigentes: [],
+    coordinadores: [{ ci: "2222221" }],
+    subcoordinadores: [],
+    votantes: [
+      { ci: "3000008", nombre: "SinCoordCI", apellido: "Directo", asignado_por: "2222221", asignado_por_rol: "coordinador", activo: true },
+    ],
+  };
+
+  const directos = getVotantesDirectosCoord(estructura, "2222221");
+  const total = getTodosVotantesCoord(estructura, "2222221");
+  const indirectos = Math.max(0, total.length - directos.length);
+
+  assert.equal(total.length, 1, "Total de votantes debe ser 1");
+  assert.equal(directos.length, 1, "Directos debe ser 1");
+  assert.equal(indirectos, 0, "Indirectos debe ser 0, nunca negativo");
+  assert.ok(total.some((v) => v.ci === "3000008"), "la persona debe estar en el conjunto completo (mismo que alimenta PDF y Excel)");
+
+  console.log("OK: caso 1b (coordinador con un único directo sin coordinador_ci: total=1, directos=1, indirectos=0)");
+}
+
 // ======================= CASO 2: CI CON CUALQUIER FORMATO =======================
 {
   const { personaCoincideConsulta } = await import("../src/utils/busquedaHelpers.js");

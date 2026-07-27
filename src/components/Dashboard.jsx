@@ -1469,15 +1469,16 @@ const Dashboard = ({ currentUser, onLogout }) => {
   const buildCoordExcelPayload = useCallback((coord) => {
     const coordCI = normalizeCI(coord.ci);
     const misSubs = getMisSubcoordinadores(estructura, coordCI);
-    const votantesDirectos = getVotantesDirectosCoord(estructura, coordCI);
-    const votantesDeSubs = misSubs.flatMap((s) => getVotantesDeSubcoord(estructura, normalizeCI(s.ci)));
     return {
       prefix: "estructura-coordinador",
       persona: coord,
       roles: ["subcoordinador", "votante"],
       coordinadores: [coord],
       subcoordinadores: misSubs,
-      votantes: [...votantesDirectos, ...votantesDeSubs],
+      // Mismo conjunto completo y deduplicado que "Verificar estructura" y el PDF
+      // (incluye directos "estrictos" sin coordinador_ci), para que modal/PDF/Excel
+      // siempre coincidan en totales y personas.
+      votantes: getTodosVotantesCoord(estructura, coordCI),
       padronMap,
     };
   }, [estructura, padronMap]);

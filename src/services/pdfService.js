@@ -7,6 +7,7 @@ import {
   getVotantesDirectosDirigente,
   getTodosVotantesDirigente,
   getVotantesDirectosCoord,
+  getTodosVotantesCoord,
   getVotantesDeSubcoord,
 } from "../utils/estructuraHelpers";
 
@@ -419,8 +420,11 @@ export const generateCoordinadorPDF = async ({ estructura, currentUser, targetPe
   const { subcoordinadores = [], votantes = [] } = estructura;
 
   const subs = subcoordinadores.filter((s) => normalizeCI(s.coordinador_ci) === miCI);
-  const directVoters = votantes.filter((v) => normalizeCI(v.asignado_por) === miCI);
-  const allVoters = votantes.filter((v) => normalizeCI(v.coordinador_ci) === miCI);
+  // Mismos helpers que "Verificar estructura" y el Excel del coordinador, para que
+  // Total Red/directos/indirectos siempre coincidan con lo mostrado ahí — incluye a
+  // los directos "estrictos" sin coordinador_ci poblado.
+  const directVoters = getVotantesDirectosCoord(estructura, miCI);
+  const allVoters = getTodosVotantesCoord(estructura, miCI);
 
   const subsConf = subs.filter((s) => s.confirmado === true).length;
   const votersConf = allVoters.filter((v) => v.voto_confirmado === true).length;
@@ -435,7 +439,7 @@ export const generateCoordinadorPDF = async ({ estructura, currentUser, targetPe
     ["Total Red", String(totalConfirmable)],
     ["Subcoordinadores", String(subs.length)],
     ["Votantes directos", String(directVoters.length)],
-    ["Votantes indirectos", String(allVoters.length - directVoters.length)],
+    ["Votantes indirectos", String(Math.max(0, allVoters.length - directVoters.length))],
     ["Confirmados", String(totalConfirmados)],
     ["Pendientes", String(totalConfirmable - totalConfirmados)],
     ["Porcentaje", `${pct}%`],
