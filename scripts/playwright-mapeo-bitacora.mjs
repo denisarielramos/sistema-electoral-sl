@@ -120,6 +120,10 @@ function createMockBackend(dataset) {
 
   const hogarEnAlcance = (hogarId, actorCi, actorRol) => {
     if (actorRol === "superadmin") return true;
+    // El creador siempre ve/gestiona su propio hogar, incluso sin votantes
+    // asociados todavía (espejo de mapeo_hogar_en_alcance en el SQL real).
+    const hogar = hogares.find((h) => h.id === hogarId);
+    if (hogar && hogar.creado_por_ci === actorCi) return true;
     return hogarVotantes.some((hv) => hv.hogar_id === hogarId && hv.activo && votanteEnAlcance(hv.votante_ci, actorCi, actorRol));
   };
 
@@ -360,7 +364,7 @@ await (async () => {
         // Captura por GPS en vez de click en el mapa: más robusto en un entorno de
         // test que depender de coordenadas de píxel sobre el canvas de Leaflet.
         await page.getByRole("button", { name: /Usar mi ubicación actual/ }).click();
-        await page.waitForTimeout(800);
+        await page.locator("text=Ubicación marcada").waitFor({ timeout: 5000 });
         await page.getByRole("button", { name: "Guardar" }).click();
         await page.waitForTimeout(800);
         const estado = backend._state();
@@ -426,7 +430,7 @@ await (async () => {
         await page.waitForTimeout(300);
         await page.locator('input[placeholder="Ej: Familia González"]').fill("Hogar E2E");
         await page.getByRole("button", { name: /Usar mi ubicación actual/ }).click();
-        await page.waitForTimeout(800);
+        await page.locator("text=Ubicación marcada").waitFor({ timeout: 5000 });
         await page.getByRole("button", { name: "Guardar" }).click();
         await page.waitForTimeout(800);
         assert.equal(backend._state().hogares.length, 1, "El hogar debe haberse creado");

@@ -348,14 +348,25 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
 -- ¿El hogar p_hogar_id está dentro del alcance de (p_actor_ci, p_actor_rol)? Un
--- hogar está en el alcance de un actor no-superadmin si al menos uno de sus
--- votantes asociados activos lo está.
+-- hogar está en el alcance de un actor no-superadmin si:
+--   a) él mismo lo creó (creado_por_ci) — así un hogar recién creado sin ningún
+--      votante asociado todavía sigue siendo visible/gestionable por quien lo
+--      acaba de cargar, en vez de desaparecer hasta que se le asocie alguien; o
+--   b) al menos uno de sus votantes asociados activos está en su alcance.
 CREATE OR REPLACE FUNCTION mapeo_hogar_en_alcance(p_hogar_id uuid, p_actor_ci text, p_actor_rol text)
 RETURNS boolean AS $$
+DECLARE
+  v_creado_por_ci text;
 BEGIN
   IF p_actor_rol = 'superadmin' THEN
     RETURN EXISTS (SELECT 1 FROM hogares h WHERE h.id = p_hogar_id);
   END IF;
+
+  SELECT creado_por_ci INTO v_creado_por_ci FROM hogares WHERE id = p_hogar_id;
+  IF v_creado_por_ci IS NOT NULL AND v_creado_por_ci = p_actor_ci THEN
+    RETURN true;
+  END IF;
+
   RETURN EXISTS (
     SELECT 1 FROM hogar_votantes hv
     WHERE hv.hogar_id = p_hogar_id AND hv.activo = true
