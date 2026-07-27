@@ -60,6 +60,15 @@ const MapeoTerritorial = ({ currentUser, estructura, onVolver }) => {
     [hogares, modalHogar]
   );
 
+  // Miembros actuales del hogar en edición, recalculados desde el estado vivo de
+  // `hogares` (no del snapshot congelado en modalHogar.hogarExistente) — así el modal
+  // refleja de inmediato cada asociar/desasociar sin necesidad de cerrarlo y reabrirlo.
+  const votantesAsociadosEnVivo = useMemo(() => {
+    const id = modalHogar?.hogarExistente?.id;
+    if (!id) return undefined;
+    return hogares.find((h) => h.id === id)?.votantes ?? modalHogar.hogarExistente.votantes ?? [];
+  }, [hogares, modalHogar]);
+
   const votantesDisponibles = useMemo(() => {
     const propios = votantesDelRolEnMapeo(estructura, currentUser);
     return propios.filter((v) => !votantesEnHogarCI.has(normalizeCI(v.ci)));
@@ -264,6 +273,7 @@ const MapeoTerritorial = ({ currentUser, estructura, onVolver }) => {
           onClose={() => setModalHogar(null)}
           saving={saving}
           hogarExistente={modalHogar.hogarExistente}
+          votantesAsociadosOverride={votantesAsociadosEnVivo}
           votantesDisponibles={votantesDisponibles}
           onGuardar={handleGuardarHogar}
           onAsociarVotante={async (hogarId, votanteCi) => {

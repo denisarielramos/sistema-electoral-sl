@@ -20,6 +20,10 @@ const ModalHogar = ({
   votantesDisponibles = [],
   saving = false,
   onConfirmarVisita, // (hogar) => void — opcional, muestra el botón "Confirmar visita"
+  // Lista de votantes asociados recalculada en vivo por el padre a partir de su propio
+  // estado (p. ej. tras un asociar/desasociar). Si se omite, se usa hogarExistente.votantes
+  // como antes (snapshot tomado al abrir el modal).
+  votantesAsociadosOverride,
 }) => {
   const [nombreFamilia, setNombreFamilia] = useState("");
   const [direccion, setDireccion] = useState("");
@@ -30,6 +34,12 @@ const ModalHogar = ({
   const [pendienteConfirmarReemplazo, setPendienteConfirmarReemplazo] = useState(null);
   const [busquedaVotante, setBusquedaVotante] = useState("");
   const [error, setError] = useState(null);
+  // Hogar recién creado en un intento previo dentro de esta misma apertura del modal
+  // (solo aplica cuando hogarExistente venía null, es decir, flujo de creación). Si la
+  // asociación del votante preseleccionado falla después de crear el hogar, un reintento
+  // de "Guardar" no debe volver a crear otro hogar vacío: reutiliza este y solo repite
+  // la asociación fallida.
+  const [hogarCreadoLocal, setHogarCreadoLocal] = useState(null);
 
   const { loading: cargandoUbicacion, error: errorUbicacion, solicitarUbicacion } = useGeolocation();
 
@@ -44,10 +54,13 @@ const ModalHogar = ({
     setPendienteConfirmarReemplazo(null);
     setBusquedaVotante("");
     setError(null);
+    setHogarCreadoLocal(null);
   }, [show, hogarExistente]);
 
-  const votantesAsociadosHogar = hogarExistente?.votantes;
-  const votantesAsociados = useMemo(() => votantesAsociadosHogar || [], [votantesAsociadosHogar]);
+  const votantesAsociados = useMemo(
+    () => votantesAsociadosOverride ?? hogarExistente?.votantes ?? [],
+    [votantesAsociadosOverride, hogarExistente]
+  );
 
   const resultadosBusqueda = useMemo(() => {
     if (!busquedaVotante.trim()) return [];
@@ -96,14 +109,21 @@ const ModalHogar = ({
       return;
     }
     try {
-      const hogar = await onGuardar({
-        nombreFamilia: nombreFamilia.trim(),
-        direccion: direccion.trim(),
-        referencia: referencia.trim(),
-        latitud,
-        longitud,
-        precisionGps,
-      });
+      // Si ya creamos el hogar en un intento anterior de este mismo guardado (falló
+      // solo la asociación), no lo volvemos a crear — evita hogares vacíos duplicados
+      // en cada reintento.
+      let hogar = hogarExistente || hogarCreadoLocal;
+      if (!hogar || hogarExistente) {
+        hogar = await onGuardar({
+          nombreFamilia: nombreFamilia.trim(),
+          direccion: direccion.trim(),
+          referencia: referencia.trim(),
+          latitud,
+          longitud,
+          precisionGps,
+        });
+        if (!hogarExistente && hogar?.id) setHogarCreadoLocal(hogar);
+      }
       if (votantePreseleccionado && hogar?.id) {
         await onAsociarVotante(hogar.id, normalizeCI(votantePreseleccionado.ci));
       }

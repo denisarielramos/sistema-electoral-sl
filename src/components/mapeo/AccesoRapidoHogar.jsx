@@ -17,23 +17,41 @@ const AccesoRapidoHogar = ({ currentUser, votante, votantesDisponibles, onClose 
   const [hogarExistente, setHogarExistente] = useState(null);
   const [saving, setSaving] = useState(false);
   const [modalVisitaHogar, setModalVisitaHogar] = useState(null);
+  // Votantes del hogar recalculados tras cada asociar/desasociar dentro del modal, para
+  // que la lista mostrada no quede congelada en el snapshot inicial (hogarExistente solo
+  // se resuelve una vez, al abrir el flujo).
+  const [votantesLive, setVotantesLive] = useState(null);
   const { config } = useMapeoConfiguracion();
+
+  const refrescarVotantes = async (hogarId) => {
+    try {
+      const lista = await listarHogares(currentUser);
+      const actualizado = lista.find((h) => h.id === hogarId);
+      setVotantesLive(actualizado?.votantes || []);
+    } catch {
+      // Silencioso: si falla el refresco, el modal sigue mostrando la última lista
+      // conocida en vez de romper el flujo por un error secundario de recarga.
+    }
+  };
 
   useEffect(() => {
     if (!votante) {
       setHogarExistente(null);
+      setVotantesLive(null);
       setError(null);
       return;
     }
     let cancelado = false;
     setCargando(true);
     setError(null);
+    setVotantesLive(null);
     listarHogares(currentUser)
       .then((hogares) => {
         if (cancelado) return;
         const ci = normalizeCI(votante.ci);
         const existente = hogares.find((h) => (h.votantes || []).some((v) => normalizeCI(v.ci) === ci));
         setHogarExistente(existente || null);
+        setVotantesLive(existente?.votantes || null);
       })
       .catch((err) => {
         if (!cancelado) setError(err.message || "No se pudo verificar si el votante ya tiene un hogar asignado.");
@@ -83,6 +101,7 @@ const AccesoRapidoHogar = ({ currentUser, votante, votantesDisponibles, onClose 
         onClose={onClose}
         saving={saving}
         hogarExistente={hogarExistente}
+        votantesAsociadosOverride={votantesLive ?? undefined}
         votantePreseleccionado={hogarExistente ? null : votante}
         votantesDisponibles={votantesDisponibles}
         onGuardar={async (payload) => {
@@ -98,9 +117,11 @@ const AccesoRapidoHogar = ({ currentUser, votante, votantesDisponibles, onClose 
         }}
         onAsociarVotante={async (hogarId, votanteCi) => {
           await asociarVotanteAHogar(currentUser, hogarId, votanteCi);
+          await refrescarVotantes(hogarId);
         }}
         onDesasociarVotante={async (hogarId, votanteCi) => {
           await desasociarVotanteDeHogar(currentUser, hogarId, votanteCi);
+          await refrescarVotantes(hogarId);
         }}
         onConfirmarVisita={(hogar) => setModalVisitaHogar(hogar)}
       />

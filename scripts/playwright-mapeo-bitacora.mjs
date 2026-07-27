@@ -85,11 +85,13 @@ function createMockBackend(dataset) {
   let idCounter = 1;
 
   const resolverIdentidad = (loginCode) => {
-    const d = dirigentes.find((x) => x.login_code === loginCode);
+    // Espejo de mapeo_identidad: dirigente/coordinador/subcoordinador desactivados
+    // (activo === false) no resuelven identidad, igual que un login_code inválido.
+    const d = dirigentes.find((x) => x.login_code === loginCode && x.activo !== false);
     if (d) return { ci: d.ci, rol: "dirigente" };
-    const c = coordinadores.find((x) => x.login_code === loginCode);
+    const c = coordinadores.find((x) => x.login_code === loginCode && x.activo !== false);
     if (c) return { ci: c.ci, rol: "coordinador" };
-    const s = subcoordinadores.find((x) => x.login_code === loginCode);
+    const s = subcoordinadores.find((x) => x.login_code === loginCode && x.activo !== false);
     if (s) return { ci: s.ci, rol: "subcoordinador" };
     return null;
   };
@@ -107,6 +109,9 @@ function createMockBackend(dataset) {
     if (actorRol === "superadmin") return true;
     if (actorRol === "dirigente") {
       if (v.dirigente_ci === actorCi) return true;
+      // Compatibilidad legacy: fila sin dirigente_ci poblado pero con asignado_por +
+      // asignado_por_rol === "dirigente" (espejo del fallback agregado en el SQL real).
+      if (v.asignado_por === actorCi && v.asignado_por_rol === "dirigente") return true;
       const coordCIs = coordinadores.filter((c) => c.dirigente_ci === actorCi).map((c) => c.ci);
       if (coordCIs.includes(v.coordinador_ci)) return true;
       const subCIs = subcoordinadores.filter((s) => coordCIs.includes(s.coordinador_ci)).map((s) => s.ci);
@@ -114,6 +119,8 @@ function createMockBackend(dataset) {
     }
     if (actorRol === "coordinador") {
       if (v.coordinador_ci === actorCi) return true;
+      // Compatibilidad legacy: mismo fallback "estricto" que getVotantesDirectosCoord.
+      if (v.asignado_por === actorCi && v.asignado_por_rol === "coordinador") return true;
       const subCIs = subcoordinadores.filter((s) => s.coordinador_ci === actorCi).map((s) => s.ci);
       return v.asignado_por_rol === "subcoordinador" && subCIs.includes(v.asignado_por);
     }
@@ -137,12 +144,19 @@ function createMockBackend(dataset) {
     return hogarVotantes.some((hv) => hv.hogar_id === hogarId && hv.activo && votanteEnAlcance(hv.votante_ci, actorCi, actorRol));
   };
 
-  const embedHogar = (h) => ({
+  // actor: si se provee, filtra los miembros embebidos a los que están en su alcance
+  // individual (espejo del filtro por-votante agregado a mapeo_listar_hogares /
+  // mapeo_listar_visitas — un hogar compartido entre ramas no debe exponer los
+  // miembros de otra rama solo porque el hogar en sí está en alcance). Sin actor
+  // (uso interno vía _state()/seed) no filtra, para no romper las aserciones que
+  // inspeccionan el estado crudo del mock.
+  const embedHogar = (h, actor) => ({
     ...h,
     votantes: hogarVotantes
       .filter((hv) => hv.hogar_id === h.id && hv.activo)
       .map((hv) => votantes.find((x) => x.ci === hv.votante_ci))
       .filter(Boolean)
+      .filter((v) => !actor || actor.rol === "superadmin" || votanteEnAlcance(v.ci, actor.ci, actor.rol))
       .map((v) => ({ ci: v.ci, nombre: v.nombre, apellido: v.apellido, telefono: v.telefono, dirigente_ci: v.dirigente_ci, coordinador_ci: v.coordinador_ci, asignado_por: v.asignado_por, asignado_por_rol: v.asignado_por_rol })),
     ultima_visita: (() => {
       const vs = visitasHogar.filter((x) => x.hogar_id === h.id).sort((a, b) => new Date(b.fecha_hora) - new Date(a.fecha_hora));
@@ -154,7 +168,7 @@ function createMockBackend(dataset) {
     mapeo_configuracion_actual: () => configuracion,
     mapeo_listar_hogares: (body) => {
       const actor = resolverActor(body);
-      return hogares.filter((h) => h.activo !== false && hogarEnAlcance(h.id, actor.ci, actor.rol)).map(embedHogar);
+      return hogares.filter((h) => h.activo !== false && hogarEnAlcance(h.id, actor.ci, actor.rol)).map((h) => embedHogar(h, actor));
     },
     mapeo_crear_hogar: (body) => {
       const actor = resolverActor(body);
@@ -165,10 +179,10 @@ function createMockBackend(dataset) {
         fecha_verificacion: null, activo: true, created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
       };
       hogares.push(hogar);
-      return embedHogar(hogar);
+      return embedHogar(hogar, actor);
     },
     mapeo_actualizar_hogar: (body) => {
-      resolverActor(body);
+      const actor = resolverActor(body);
       const h = hogares.find((x) => x.id === body.p_hogar_id);
       const cambiaUbicacion = h.latitud !== body.p_latitud || h.longitud !== body.p_longitud;
       Object.assign(h, {
@@ -176,7 +190,7 @@ function createMockBackend(dataset) {
         latitud: body.p_latitud, longitud: body.p_longitud, precision_gps: body.p_precision_gps,
       });
       if (cambiaUbicacion) { h.estado = "pendiente"; h.verificado_por_ci = null; h.verificado_por_rol = null; h.fecha_verificacion = null; }
-      return embedHogar(h);
+      return embedHogar(h, actor);
     },
     mapeo_verificar_hogar: (body) => {
       const actor = resolverActor(body);
@@ -186,7 +200,7 @@ function createMockBackend(dataset) {
       h.verificado_por_ci = actor.ci;
       h.verificado_por_rol = actor.rol;
       h.fecha_verificacion = new Date().toISOString();
-      return embedHogar(h);
+      return embedHogar(h, actor);
     },
     mapeo_asociar_votante: (body) => {
       const actor = resolverActor(body);
@@ -198,7 +212,13 @@ function createMockBackend(dataset) {
       return { hogar_id: body.p_hogar_id, votante_ci: body.p_votante_ci, activo: true };
     },
     mapeo_desasociar_votante: (body) => {
-      resolverActor(body);
+      const actor = resolverActor(body);
+      if (!hogarEnAlcance(body.p_hogar_id, actor.ci, actor.rol)) throw new Error("El hogar no está dentro de su alcance.");
+      // Un hogar compartido entre ramas no autoriza a desasociar a un votante de OTRA
+      // rama solo porque el hogar está en alcance (espejo del chequeo agregado al RPC).
+      if (actor.rol !== "superadmin" && !votanteEnAlcance(body.p_votante_ci, actor.ci, actor.rol)) {
+        throw new Error("El votante no está dentro de su alcance.");
+      }
       const fila = hogarVotantes.find((hv) => hv.hogar_id === body.p_hogar_id && hv.votante_ci === body.p_votante_ci);
       if (fila) fila.activo = false;
       return null;
@@ -228,7 +248,7 @@ function createMockBackend(dataset) {
         .filter((v) => actor.rol === "superadmin" || hogarEnAlcance(v.hogar_id, actor.ci, actor.rol))
         .map((v) => {
           const h = hogares.find((x) => x.id === v.hogar_id);
-          return { ...v, hogar_nombre_familia: h?.nombre_familia, hogar_direccion: h?.direccion, votantes: embedHogar(h).votantes };
+          return { ...v, hogar_nombre_familia: h?.nombre_familia, hogar_direccion: h?.direccion, votantes: embedHogar(h, actor).votantes };
         });
     },
   };

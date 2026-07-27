@@ -56,6 +56,15 @@ BEGIN
   END IF;
 END $$;
 
+-- coordinadores/subcoordinadores no tienen columna "activo" hoy (a diferencia de
+-- dirigentes, que sí la tiene y ya se usa para bloquear el login — ver src/App.jsx).
+-- La agregamos de forma aditiva (default true) para que mapeo_identidad pueda negar
+-- el acceso a un coordinador/subcoordinador desactivado en el futuro sin depender de
+-- que la columna ya exista en la base actual; no cambia el login real (src/App.jsx no
+-- se toca) ni el comportamiento de ninguna fila existente.
+ALTER TABLE coordinadores ADD COLUMN IF NOT EXISTS activo boolean NOT NULL DEFAULT true;
+ALTER TABLE subcoordinadores ADD COLUMN IF NOT EXISTS activo boolean NOT NULL DEFAULT true;
+
 -- ============================================================================
 -- 1) TABLAS
 -- ============================================================================
@@ -256,13 +265,13 @@ BEGIN
     RETURN;
   END IF;
 
-  SELECT c.ci INTO v_ci FROM coordinadores c WHERE c.login_code = p_login_code;
+  SELECT c.ci INTO v_ci FROM coordinadores c WHERE c.login_code = p_login_code AND c.activo IS DISTINCT FROM false;
   IF v_ci IS NOT NULL THEN
     RETURN QUERY SELECT v_ci, 'coordinador'::text;
     RETURN;
   END IF;
 
-  SELECT s.ci INTO v_ci FROM subcoordinadores s WHERE s.login_code = p_login_code;
+  SELECT s.ci INTO v_ci FROM subcoordinadores s WHERE s.login_code = p_login_code AND s.activo IS DISTINCT FROM false;
   IF v_ci IS NOT NULL THEN
     RETURN QUERY SELECT v_ci, 'subcoordinador'::text;
     RETURN;
@@ -321,6 +330,7 @@ BEGIN
       SELECT 1 FROM votantes v
       WHERE v.ci = p_votante_ci AND v.activo IS DISTINCT FROM false AND (
         v.dirigente_ci = p_actor_ci
+        OR (v.asignado_por = p_actor_ci AND v.asignado_por_rol = 'dirigente')
         OR v.coordinador_ci IN (SELECT c.ci FROM coordinadores c WHERE c.dirigente_ci = p_actor_ci)
         OR (
           v.asignado_por_rol = 'subcoordinador'
@@ -336,6 +346,10 @@ BEGIN
       SELECT 1 FROM votantes v
       WHERE v.ci = p_votante_ci AND v.activo IS DISTINCT FROM false AND (
         v.coordinador_ci = p_actor_ci
+        -- Compatibilidad legacy: filas anteriores a la convención actual (que siempre
+        -- puebla coordinador_ci) solo tienen asignado_por + asignado_por_rol='coordinador'
+        -- — mismo fallback "estricto" que getVotantesDirectosCoord en estructuraHelpers.js.
+        OR (v.asignado_por = p_actor_ci AND v.asignado_por_rol = 'coordinador')
         OR (
           v.asignado_por_rol = 'subcoordinador'
           AND v.asignado_por IN (SELECT s.ci FROM subcoordinadores s WHERE s.coordinador_ci = p_actor_ci)
@@ -480,6 +494,11 @@ BEGIN
       FROM hogar_votantes hv
       JOIN votantes v ON v.ci = hv.votante_ci
       WHERE hv.hogar_id = h.id AND hv.activo = true
+        -- Un hogar puede tener miembros de ramas distintas (p. ej. familia repartida
+        -- entre dos subcoordinadores). Estar en alcance del HOGAR no implica estar en
+        -- alcance de CADA votante — solo se embeben los miembros que el actor puede
+        -- ver individualmente (superadmin ve todos).
+        AND (v_rol = 'superadmin' OR mapeo_votante_en_alcance(v.ci, v_ci, v_rol))
     ), '[]'::jsonb) AS votantes,
     (
       SELECT jsonb_build_object(
@@ -691,6 +710,13 @@ BEGIN
   IF NOT mapeo_hogar_en_alcance(p_hogar_id, v_ci, v_rol) THEN
     RAISE EXCEPTION 'El hogar % no está dentro de su alcance.', p_hogar_id;
   END IF;
+  -- Un hogar puede tener miembros de ramas distintas: estar en alcance del hogar (por
+  -- OTRO miembro) no autoriza a desasociar a ESTE votante si él mismo está fuera de
+  -- alcance — sin este chequeo, un actor podría quitar a un votante de otra rama de un
+  -- hogar compartido.
+  IF v_rol <> 'superadmin' AND NOT mapeo_votante_en_alcance(p_votante_ci, v_ci, v_rol) THEN
+    RAISE EXCEPTION 'El votante % no está dentro de su alcance.', p_votante_ci;
+  END IF;
 
   -- Desasociar (activo=false) — nunca borra la fila ni toca hogares/visitas_hogar.
   UPDATE hogar_votantes
@@ -815,6 +841,9 @@ BEGIN
       FROM hogar_votantes hv
       JOIN votantes v ON v.ci = hv.votante_ci
       WHERE hv.hogar_id = h.id AND hv.activo = true
+        -- Mismo filtro por-votante que mapeo_listar_hogares: un hogar compartido entre
+        -- ramas no debe exponer los miembros fuera del alcance del actor.
+        AND (v_rol = 'superadmin' OR mapeo_votante_en_alcance(v.ci, v_ci, v_rol))
     ), '[]'::jsonb) AS votantes
   FROM visitas_hogar vh
   JOIN hogares h ON h.id = vh.hogar_id
