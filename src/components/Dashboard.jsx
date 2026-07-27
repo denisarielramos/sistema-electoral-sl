@@ -1397,14 +1397,9 @@ const Dashboard = ({ currentUser, onLogout }) => {
     } else if (currentUser.role === "coordinador") {
       const miCI = normalizeCI(currentUser.ci);
       getMisSubcoordinadores(estructura, miCI).forEach(check);
-      // Directos + los de todos sus subcoordinadores, para que un votante visible
-      // bajo un subcoordinador también pueda encontrarse por búsqueda.
+      // Directos (incluidos los "estrictos" sin coordinador_ci poblado) + los de
+      // todos sus subcoordinadores — getTodosVotantesCoord ya une ambos criterios.
       getTodosVotantesCoord(estructura, miCI).forEach(check);
-      // getTodosVotantesCoord solo filtra por coordinador_ci: un votante directo
-      // "estricto" (asignado_por === coordCI + rol "coordinador") sin coordinador_ci
-      // poblado igual se ve en el árbol vía getVotantesDirectosCoord, así que también
-      // debe poder encontrarse por búsqueda. check() ya deduplica por CI (Set).
-      getVotantesDirectosCoord(estructura, miCI).forEach(check);
     } else if (currentUser.role === "subcoordinador") {
       const miCI = normalizeCI(currentUser.ci);
       getVotantesDeSubcoord(estructura, miCI).forEach(check);

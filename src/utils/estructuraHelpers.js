@@ -60,14 +60,23 @@ export const getMisVotantes = (estructura, coordCI) => getVotantesDirectosCoord(
 // ======================= TODOS LOS VOTANTES DE UN COORDINADOR =======================
 // Directos + los de todos sus subcoordinadores. Usa coordinador_ci (poblado en toda
 // alta de votante, sea directa del coordinador o vía uno de sus subs) para que el
-// total coincida exactamente con "Total Red" del PDF del coordinador (pdfService.js),
-// sin duplicados: cada votante tiene un único coordinador_ci.
+// total coincida exactamente con "Total Red" del PDF del coordinador (pdfService.js).
+// Además une los directos "estrictos" (getVotantesDirectosCoord: asignado_por +
+// asignado_por_rol === "coordinador") que, por dato legacy, no tengan coordinador_ci
+// poblado — igual son visibles en el árbol vía ese helper, así que también deben
+// contarse acá. Dedup por CI: cada votante aparece una sola vez aunque matchee ambos
+// criterios.
 export const getTodosVotantesCoord = (estructura, coordCI) => {
   if (!coordCI) return [];
   const ci = resolveCI(coordCI);
-  return (estructura.votantes || []).filter(
+  const porCoordinadorCI = (estructura.votantes || []).filter(
     (v) => esActivo(v) && normalizeCI(v.coordinador_ci) === ci
   );
+  const vistos = new Set(porCoordinadorCI.map((v) => normalizeCI(v.ci)));
+  const directosSinCoordinadorCI = getVotantesDirectosCoord(estructura, ci).filter(
+    (v) => !vistos.has(normalizeCI(v.ci))
+  );
+  return [...porCoordinadorCI, ...directosSinCoordinadorCI];
 };
 
 // ======================= PERSONAS DISPONIBLES =======================

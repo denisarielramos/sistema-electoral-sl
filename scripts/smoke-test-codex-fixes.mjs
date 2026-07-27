@@ -47,6 +47,10 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
       { ci: "3000006", coordinador_ci: "1000001", asignado_por: "2000002", asignado_por_rol: "subcoordinador", activo: false },
       // Votante de OTRO coordinador: no debe filtrarse acá
       { ci: "3000007", coordinador_ci: "9999998", asignado_por: "9999998", asignado_por_rol: "coordinador" },
+      // Directo "estricto" (asignado_por + asignado_por_rol) pero SIN coordinador_ci
+      // poblado (dato legacy) — igual visible en el árbol vía getVotantesDirectosCoord,
+      // así que también debe contarse en el total y encontrarse por búsqueda.
+      { ci: "3000008", nombre: "SinCoordCI", apellido: "Directo", telefono: "+595981000008", asignado_por: "1000001", asignado_por_rol: "coordinador", activo: true },
     ],
   };
 
@@ -54,16 +58,23 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
   const misVotantes = getMisVotantes(estructura, "1000001");
   const total = getTodosVotantesCoord(estructura, "1000001");
 
-  assert.equal(directos.length, 2, "getVotantesDirectosCoord debe devolver solo los 2 directos");
-  assert.equal(misVotantes.length, 2, "getMisVotantes (alias) debe seguir devolviendo solo directos");
-  assert.equal(total.length, 5, "getTodosVotantesCoord debe sumar directos + los de ambos subs (2+2+1=5)");
+  assert.equal(directos.length, 3, "getVotantesDirectosCoord debe incluir los 3 directos (2 con coordinador_ci + 1 sin ella)");
+  assert.equal(misVotantes.length, 3, "getMisVotantes (alias) debe seguir devolviendo lo mismo que getVotantesDirectosCoord");
+  assert.equal(total.length, 6, "getTodosVotantesCoord debe sumar los 3 directos + los 3 de los subs, sin duplicados");
 
   const cis = total.map((v) => v.ci);
   assert.equal(new Set(cis).size, cis.length, "getTodosVotantesCoord no debe tener CIs duplicados");
   assert.ok(!cis.includes("3000006"), "un votante inactivo no debe contarse en el total");
   assert.ok(!cis.includes("3000007"), "un votante de otro coordinador no debe contarse");
+  assert.ok(cis.includes("3000008"), "un directo sin coordinador_ci debe contarse en el total");
 
-  console.log("OK: caso 1 (total del coordinador = directos + de todos sus subs, sin duplicados)");
+  const { personaCoincideConsulta } = await import("../src/utils/busquedaHelpers.js");
+  const sinCoordCI = total.find((v) => v.ci === "3000008");
+  assert.ok(personaCoincideConsulta(sinCoordCI, "SinCoordCI Directo"), "debe encontrarse por nombre y apellido");
+  assert.ok(personaCoincideConsulta(sinCoordCI, "3000008"), "debe encontrarse por CI");
+  assert.ok(personaCoincideConsulta(sinCoordCI, "0981000008"), "debe encontrarse por teléfono");
+
+  console.log("OK: caso 1 (total del coordinador = directos + de todos sus subs, sin duplicados, incluidos directos sin coordinador_ci)");
 }
 
 // ======================= CASO 2: CI CON CUALQUIER FORMATO =======================
