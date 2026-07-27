@@ -239,6 +239,19 @@ RETURNS boolean AS $$
     AND p != '-Infinity'::double precision;
 $$ LANGUAGE sql IMMUTABLE;
 
+-- Lanza excepción si p_precision_gps es negativa o no-finita (NaN/Infinity). NULL
+-- (dispositivo no reporta precisión) es válido y no lanza nada. Compartida por las
+-- 3 funciones RPC que reciben precision_gps (crear/actualizar hogar y confirmar
+-- visita) para no duplicar el chequeo en cada una.
+CREATE OR REPLACE FUNCTION mapeo_validar_precision_gps(p double precision)
+RETURNS void AS $$
+BEGIN
+  IF p IS NOT NULL AND (p < 0 OR NOT mapeo_es_finito(p)) THEN
+    RAISE EXCEPTION 'Precisión GPS inválida: %', p;
+  END IF;
+END;
+$$ LANGUAGE plpgsql IMMUTABLE;
+
 -- Distancia Haversine en metros entre dos puntos (lat/lng en grados decimales).
 CREATE OR REPLACE FUNCTION mapeo_distancia_metros(
   lat1 double precision, lng1 double precision,
@@ -569,6 +582,7 @@ BEGIN
   IF p_longitud IS NOT NULL AND (p_longitud < -180 OR p_longitud > 180) THEN
     RAISE EXCEPTION 'Longitud inválida: %', p_longitud;
   END IF;
+  PERFORM mapeo_validar_precision_gps(p_precision_gps);
 
   INSERT INTO hogares (
     nombre_familia, direccion, referencia, latitud, longitud, precision_gps,
@@ -616,6 +630,7 @@ BEGIN
   IF p_longitud IS NOT NULL AND (p_longitud < -180 OR p_longitud > 180) THEN
     RAISE EXCEPTION 'Longitud inválida: %', p_longitud;
   END IF;
+  PERFORM mapeo_validar_precision_gps(p_precision_gps);
 
   SELECT (latitud IS DISTINCT FROM p_latitud OR longitud IS DISTINCT FROM p_longitud)
     INTO v_cambia_ubicacion
@@ -784,6 +799,15 @@ BEGIN
   SELECT * INTO v_hogar FROM hogares WHERE id = p_hogar_id;
   SELECT * INTO v_config FROM configuracion_mapeo WHERE id = 1;
 
+  -- Una precisión GPS negativa o no-finita (NaN o +/-Infinity) es un dato malformado,
+  -- no una simple imprecisión — nunca debería llegar por la UI, pero un request
+  -- directo al RPC podría enviarla; se rechaza de plano en vez de dejarla pasar como
+  -- si fuera una visita "confirmada"/"error_gps" con auditoría corrupta. Este chequeo
+  -- va ANTES de la rama sin coordenadas (abajo): esa rama también inserta
+  -- precision_gps directo, así que validar después de ella dejaría pasar un valor
+  -- malformado en el intento fallido.
+  PERFORM mapeo_validar_precision_gps(p_precision_gps);
+
   IF p_latitud IS NULL OR p_longitud IS NULL THEN
     -- Registrar igual el intento fallido (nunca se descarta en silencio).
     INSERT INTO visitas_hogar (
@@ -800,17 +824,6 @@ BEGIN
 
   IF p_latitud < -90 OR p_latitud > 90 OR p_longitud < -180 OR p_longitud > 180 THEN
     RAISE EXCEPTION 'Coordenadas inválidas: (%, %)', p_latitud, p_longitud;
-  END IF;
-
-  -- Una precisión GPS negativa o no-finita (NaN o +/-Infinity) es un dato malformado,
-  -- no una simple imprecisión — nunca debería llegar por la UI, pero un request
-  -- directo al RPC podría enviarla; se rechaza de plano en vez de dejarla pasar como
-  -- si fuera una visita "confirmada"/"error_gps" con auditoría corrupta. Se usa
-  -- mapeo_es_finito() en vez de "!= " o comparaciones de rango: PostgreSQL define
-  -- NaN = NaN como verdadero y NaN > cualquier valor (incluido Infinity), así que esas
-  -- comparaciones NUNCA detectan un NaN.
-  IF p_precision_gps IS NOT NULL AND (p_precision_gps < 0 OR NOT mapeo_es_finito(p_precision_gps)) THEN
-    RAISE EXCEPTION 'Precisión GPS inválida: %', p_precision_gps;
   END IF;
 
   -- Precisión GPS inaceptable o el hogar aún no tiene coordenadas de referencia:
@@ -910,5 +923,5 @@ GRANT EXECUTE ON FUNCTION mapeo_listar_visitas(text, text, uuid) TO anon, authen
 
 -- Las funciones auxiliares internas (mapeo_identidad, mapeo_resolver_actor,
 -- mapeo_votante_en_alcance, mapeo_hogar_en_alcance, mapeo_distancia_metros,
--- mapeo_es_finito) NO se
+-- mapeo_es_finito, mapeo_validar_precision_gps) NO se
 -- otorgan a anon/authenticated: solo las usan las funciones RPC de arriba.

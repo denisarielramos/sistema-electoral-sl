@@ -76,6 +76,14 @@ const haversine = (lat1, lng1, lat2, lng2) => {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 };
 
+// Espejo de mapeo_validar_precision_gps: negativa o no-finita (NaN/Infinity) es un
+// dato malformado. NULL (dispositivo no reporta precisión) es válido.
+const validarPrecisionGps = (p) => {
+  if (p !== null && p !== undefined && (p < 0 || !Number.isFinite(p))) {
+    throw new Error(`Precisión GPS inválida: ${p}`);
+  }
+};
+
 function createMockBackend(dataset) {
   const { dirigentes, coordinadores, subcoordinadores, votantes } = dataset;
   let hogares = [];
@@ -174,6 +182,7 @@ function createMockBackend(dataset) {
     },
     mapeo_crear_hogar: (body) => {
       const actor = resolverActor(body);
+      validarPrecisionGps(body.p_precision_gps);
       const hogar = {
         id: `hogar-${idCounter++}`, nombre_familia: body.p_nombre_familia, direccion: body.p_direccion,
         referencia: body.p_referencia, latitud: body.p_latitud, longitud: body.p_longitud, precision_gps: body.p_precision_gps,
@@ -185,6 +194,7 @@ function createMockBackend(dataset) {
     },
     mapeo_actualizar_hogar: (body) => {
       const actor = resolverActor(body);
+      validarPrecisionGps(body.p_precision_gps);
       const h = hogares.find((x) => x.id === body.p_hogar_id);
       const cambiaUbicacion = h.latitud !== body.p_latitud || h.longitud !== body.p_longitud;
       Object.assign(h, {
@@ -228,16 +238,7 @@ function createMockBackend(dataset) {
     mapeo_confirmar_visita: (body) => {
       const actor = resolverActor(body);
       if (!hogarEnAlcance(body.p_hogar_id, actor.ci, actor.rol)) throw new Error("El hogar no está dentro de su alcance.");
-      // Espejo del rechazo agregado al RPC: precisión negativa o no-finita (NaN o
-      // +/-Infinity) es un dato malformado, no una simple imprecisión — se rechaza en
-      // vez de registrarse. (A diferencia de PostgreSQL, JS sí trata NaN/Infinity
-      // como "no finitos" de forma directa con Number.isFinite — no hace falta el
-      // truco de comparar contra literales que usa mapeo_es_finito() en SQL.)
-      if (body.p_precision_gps !== null && body.p_precision_gps !== undefined) {
-        if (body.p_precision_gps < 0 || !Number.isFinite(body.p_precision_gps)) {
-          throw new Error(`Precisión GPS inválida: ${body.p_precision_gps}`);
-        }
-      }
+      validarPrecisionGps(body.p_precision_gps);
       const h = hogares.find((x) => x.id === body.p_hogar_id);
       const distancia = haversine(body.p_latitud, body.p_longitud, h.latitud, h.longitud);
       let resultado;
