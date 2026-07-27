@@ -228,10 +228,13 @@ function createMockBackend(dataset) {
     mapeo_confirmar_visita: (body) => {
       const actor = resolverActor(body);
       if (!hogarEnAlcance(body.p_hogar_id, actor.ci, actor.rol)) throw new Error("El hogar no está dentro de su alcance.");
-      // Espejo del rechazo agregado al RPC: precisión negativa o NaN es un dato
-      // malformado, no una simple imprecisión — se rechaza en vez de registrarse.
+      // Espejo del rechazo agregado al RPC: precisión negativa o no-finita (NaN o
+      // +/-Infinity) es un dato malformado, no una simple imprecisión — se rechaza en
+      // vez de registrarse. (A diferencia de PostgreSQL, JS sí trata NaN/Infinity
+      // como "no finitos" de forma directa con Number.isFinite — no hace falta el
+      // truco de comparar contra literales que usa mapeo_es_finito() en SQL.)
       if (body.p_precision_gps !== null && body.p_precision_gps !== undefined) {
-        if (body.p_precision_gps < 0 || Number.isNaN(body.p_precision_gps)) {
+        if (body.p_precision_gps < 0 || !Number.isFinite(body.p_precision_gps)) {
           throw new Error(`Precisión GPS inválida: ${body.p_precision_gps}`);
         }
       }

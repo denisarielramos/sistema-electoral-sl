@@ -226,6 +226,19 @@ REVOKE ALL ON configuracion_mapeo FROM anon, authenticated;
 -- 3) FUNCIONES AUXILIARES (uso interno de las funciones RPC)
 -- ============================================================================
 
+-- ¿p es un número finito (ni NULL, ni NaN, ni +/-Infinity)? PostgreSQL, a diferencia
+-- de IEEE 754 en la mayoría de los lenguajes, define NaN = NaN como verdadero (para
+-- poder ordenar/indexar valores NaN de forma consistente) y NaN > cualquier otro valor
+-- incluido Infinity — por eso "p != p" o "p > límite" NUNCA detectan NaN acá, y hay que
+-- comparar contra los literales 'NaN'/'Infinity' explícitamente.
+CREATE OR REPLACE FUNCTION mapeo_es_finito(p double precision)
+RETURNS boolean AS $$
+  SELECT p IS NOT NULL
+    AND p != 'NaN'::double precision
+    AND p != 'Infinity'::double precision
+    AND p != '-Infinity'::double precision;
+$$ LANGUAGE sql IMMUTABLE;
+
 -- Distancia Haversine en metros entre dos puntos (lat/lng en grados decimales).
 CREATE OR REPLACE FUNCTION mapeo_distancia_metros(
   lat1 double precision, lng1 double precision,
@@ -438,10 +451,16 @@ BEGIN
   IF v_rol <> 'superadmin' THEN
     RAISE EXCEPTION 'Solo superadmin puede modificar la configuración de mapeo.';
   END IF;
-  IF p_radio_permitido_metros IS NULL OR p_radio_permitido_metros <= 0 THEN
+  -- NOT mapeo_es_finito(...) en vez de solo "<= 0": un NaN o +Infinity pasarían la
+  -- comparación "<= 0" (PostgreSQL trata NaN como mayor que cualquier valor, incluido
+  -- Infinity) y también el CHECK (> 0) de la tabla, dejando una configuración global
+  -- corrupta que invalida silenciosamente todas las clasificaciones de visita
+  -- posteriores (radio "infinito" siempre confirma; precisión máxima no-finita nunca
+  -- bloquea nada).
+  IF p_radio_permitido_metros IS NULL OR p_radio_permitido_metros <= 0 OR NOT mapeo_es_finito(p_radio_permitido_metros) THEN
     RAISE EXCEPTION 'radio_permitido_metros debe ser mayor a 0.';
   END IF;
-  IF p_precision_gps_maxima_metros IS NULL OR p_precision_gps_maxima_metros <= 0 THEN
+  IF p_precision_gps_maxima_metros IS NULL OR p_precision_gps_maxima_metros <= 0 OR NOT mapeo_es_finito(p_precision_gps_maxima_metros) THEN
     RAISE EXCEPTION 'precision_gps_maxima_metros debe ser mayor a 0.';
   END IF;
 
@@ -783,12 +802,14 @@ BEGIN
     RAISE EXCEPTION 'Coordenadas inválidas: (%, %)', p_latitud, p_longitud;
   END IF;
 
-  -- Una precisión GPS negativa o no-finita (NaN) es un dato malformado, no una simple
-  -- imprecisión — nunca debería llegar por la UI, pero un request directo al RPC
-  -- podría enviarla; se rechaza de plano en vez de dejarla pasar como si fuera una
-  -- visita "confirmada" con auditoría corrupta. (p_precision_gps != p_precision_gps
-  -- detecta NaN: es la única condición SQL en la que un valor no es igual a sí mismo.)
-  IF p_precision_gps IS NOT NULL AND (p_precision_gps < 0 OR p_precision_gps != p_precision_gps) THEN
+  -- Una precisión GPS negativa o no-finita (NaN o +/-Infinity) es un dato malformado,
+  -- no una simple imprecisión — nunca debería llegar por la UI, pero un request
+  -- directo al RPC podría enviarla; se rechaza de plano en vez de dejarla pasar como
+  -- si fuera una visita "confirmada"/"error_gps" con auditoría corrupta. Se usa
+  -- mapeo_es_finito() en vez de "!= " o comparaciones de rango: PostgreSQL define
+  -- NaN = NaN como verdadero y NaN > cualquier valor (incluido Infinity), así que esas
+  -- comparaciones NUNCA detectan un NaN.
+  IF p_precision_gps IS NOT NULL AND (p_precision_gps < 0 OR NOT mapeo_es_finito(p_precision_gps)) THEN
     RAISE EXCEPTION 'Precisión GPS inválida: %', p_precision_gps;
   END IF;
 
@@ -888,5 +909,6 @@ GRANT EXECUTE ON FUNCTION mapeo_confirmar_visita(text, text, uuid, double precis
 GRANT EXECUTE ON FUNCTION mapeo_listar_visitas(text, text, uuid) TO anon, authenticated;
 
 -- Las funciones auxiliares internas (mapeo_identidad, mapeo_resolver_actor,
--- mapeo_votante_en_alcance, mapeo_hogar_en_alcance, mapeo_distancia_metros) NO se
+-- mapeo_votante_en_alcance, mapeo_hogar_en_alcance, mapeo_distancia_metros,
+-- mapeo_es_finito) NO se
 -- otorgan a anon/authenticated: solo las usan las funciones RPC de arriba.
