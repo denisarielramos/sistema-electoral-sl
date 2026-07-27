@@ -289,7 +289,11 @@ BEGIN
     RETURN;
   END IF;
 
-  SELECT actor_ci, actor_rol INTO v_ci, v_rol FROM mapeo_identidad(p_login_code);
+  -- Alias + columnas calificadas (m.actor_ci / m.actor_rol): sin esto, "actor_ci" y
+  -- "actor_rol" son ambiguos entre las columnas de mapeo_identidad() y los parámetros
+  -- de salida homónimos de RETURNS TABLE de ESTA función — PL/pgSQL lo rechaza con un
+  -- error de columna ambigua en cada llamada no-superadmin.
+  SELECT m.actor_ci, m.actor_rol INTO v_ci, v_rol FROM mapeo_identidad(p_login_code) AS m;
   IF v_ci IS NULL THEN
     RAISE EXCEPTION 'Identidad inválida: código de acceso no reconocido.';
   END IF;
@@ -304,15 +308,18 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 --   coordinador: directos (coordinador_ci) + los de sus subcoordinadores.
 --   subcoordinador: solo los que él mismo asignó (asignado_por = su ci, rol
 --              'subcoordinador' o vacío/legacy).
+-- v.activo IS DISTINCT FROM false: misma convención que esActivo() en
+-- estructuraHelpers.js — un votante sin la columna activo poblada (legacy) cuenta
+-- como activo; solo activo=false lo excluye explícitamente.
 CREATE OR REPLACE FUNCTION mapeo_votante_en_alcance(p_votante_ci text, p_actor_ci text, p_actor_rol text)
 RETURNS boolean AS $$
 BEGIN
   IF p_actor_rol = 'superadmin' THEN
-    RETURN EXISTS (SELECT 1 FROM votantes v WHERE v.ci = p_votante_ci);
+    RETURN EXISTS (SELECT 1 FROM votantes v WHERE v.ci = p_votante_ci AND v.activo IS DISTINCT FROM false);
   ELSIF p_actor_rol = 'dirigente' THEN
     RETURN EXISTS (
       SELECT 1 FROM votantes v
-      WHERE v.ci = p_votante_ci AND (
+      WHERE v.ci = p_votante_ci AND v.activo IS DISTINCT FROM false AND (
         v.dirigente_ci = p_actor_ci
         OR v.coordinador_ci IN (SELECT c.ci FROM coordinadores c WHERE c.dirigente_ci = p_actor_ci)
         OR (
@@ -327,7 +334,7 @@ BEGIN
   ELSIF p_actor_rol = 'coordinador' THEN
     RETURN EXISTS (
       SELECT 1 FROM votantes v
-      WHERE v.ci = p_votante_ci AND (
+      WHERE v.ci = p_votante_ci AND v.activo IS DISTINCT FROM false AND (
         v.coordinador_ci = p_actor_ci
         OR (
           v.asignado_por_rol = 'subcoordinador'
@@ -339,6 +346,7 @@ BEGIN
     RETURN EXISTS (
       SELECT 1 FROM votantes v
       WHERE v.ci = p_votante_ci
+        AND v.activo IS DISTINCT FROM false
         AND v.asignado_por = p_actor_ci
         AND (v.asignado_por_rol = 'subcoordinador' OR v.asignado_por_rol IS NULL OR v.asignado_por_rol = '')
     );
@@ -349,22 +357,30 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
 -- ¿El hogar p_hogar_id está dentro del alcance de (p_actor_ci, p_actor_rol)? Un
 -- hogar está en el alcance de un actor no-superadmin si:
---   a) él mismo lo creó (creado_por_ci) — así un hogar recién creado sin ningún
---      votante asociado todavía sigue siendo visible/gestionable por quien lo
---      acaba de cargar, en vez de desaparecer hasta que se le asocie alguien; o
+--   a) todavía NO tiene ningún votante asociado activo Y él mismo lo creó
+--      (creado_por_ci) — así un hogar recién creado sigue siendo visible/
+--      gestionable por quien lo acaba de cargar, en vez de desaparecer hasta que
+--      se le asocie alguien. Este acceso es solo transitorio: en cuanto el hogar
+--      tiene al menos un votante asociado, el alcance pasa a depender
+--      exclusivamente de esos votantes (b) — un creador cuyos votantes se
+--      reasignaron después fuera de su rama NO conserva acceso indefinido; o
 --   b) al menos uno de sus votantes asociados activos está en su alcance.
 CREATE OR REPLACE FUNCTION mapeo_hogar_en_alcance(p_hogar_id uuid, p_actor_ci text, p_actor_rol text)
 RETURNS boolean AS $$
 DECLARE
   v_creado_por_ci text;
+  v_tiene_votantes boolean;
 BEGIN
   IF p_actor_rol = 'superadmin' THEN
     RETURN EXISTS (SELECT 1 FROM hogares h WHERE h.id = p_hogar_id);
   END IF;
 
-  SELECT creado_por_ci INTO v_creado_por_ci FROM hogares WHERE id = p_hogar_id;
-  IF v_creado_por_ci IS NOT NULL AND v_creado_por_ci = p_actor_ci THEN
-    RETURN true;
+  SELECT EXISTS (SELECT 1 FROM hogar_votantes hv WHERE hv.hogar_id = p_hogar_id AND hv.activo = true)
+    INTO v_tiene_votantes;
+
+  IF NOT v_tiene_votantes THEN
+    SELECT creado_por_ci INTO v_creado_por_ci FROM hogares WHERE id = p_hogar_id;
+    RETURN v_creado_por_ci IS NOT NULL AND v_creado_por_ci = p_actor_ci;
   END IF;
 
   RETURN EXISTS (
