@@ -110,21 +110,33 @@ const ActionBtn = ({ onClick, title, variant = "default", ariaLabel, children })
 // ======================= INVITACIÓN POR WHATSAPP =======================
 // Reutiliza buildWhatsAppUrl (utils/phoneValidation.js) — no reimplementa
 // validación ni normalización de teléfonos.
+// Dirigente/coordinador/subcoordinador: invitación con código de acceso (requiere login_code).
 const buildInviteMessage = (persona, loginCode) => {
   const nombre = `${persona?.nombre || ""} ${persona?.apellido || ""}`.trim() || "colaborador/a";
   return `Hola ${nombre}, te comparto tu acceso al Sistema Electoral de José "Chechito" López.\nTu código de acceso es: ${loginCode}\nIngresá aquí: ${window.location.origin}`;
 };
 
-const WhatsAppInviteButton = ({ persona, loginCode, iconOnly = false }) => {
+// Votante: mensaje de contacto/invitación SIN código (los votantes no tienen acceso al sistema).
+const buildContactMessage = (persona) => {
+  const nombre = `${persona?.nombre || ""} ${persona?.apellido || ""}`.trim() || "vecino/a";
+  return `Hola ${nombre}, te escribimos del equipo de José "Chechito" López para coordinar tu participación electoral. Cualquier consulta, contanos.`;
+};
+
+// Botón único: si es votante usa el mensaje de contacto (sin código); para el resto
+// preserva el comportamiento actual — sin login_code no se muestra el botón.
+const PersonWhatsAppButton = ({ persona, tipo, loginCode, iconOnly = false }) => {
   const code = loginCode ?? persona?.login_code;
-  if (!code) return null;
-  const waUrl = buildWhatsAppUrl(persona?.telefono, buildInviteMessage(persona, code));
+  const esVotante = tipo === "votante";
+  if (!esVotante && !code) return null;
+  const mensaje = esVotante ? buildContactMessage(persona) : buildInviteMessage(persona, code);
+  const waUrl = buildWhatsAppUrl(persona?.telefono, mensaje);
   if (!waUrl) return null;
 
   const baseIcon =
     "inline-flex items-center justify-center w-9 h-9 rounded-lg transition-colors shrink-0 border border-emerald-200 text-emerald-700 hover:bg-emerald-50";
   const baseInline =
     "inline-flex items-center gap-1 px-2 py-0.5 rounded-md border border-emerald-200 text-emerald-700 text-xs hover:bg-emerald-50 transition-colors bg-transparent shadow-none";
+  const label = esVotante ? "Contactar por WhatsApp" : "Invitar por WhatsApp";
 
   return (
     <a
@@ -132,14 +144,22 @@ const WhatsAppInviteButton = ({ persona, loginCode, iconOnly = false }) => {
       target="_blank"
       rel="noopener noreferrer"
       onClick={(e) => e.stopPropagation()}
-      title="Invitar por WhatsApp"
-      aria-label="Invitar por WhatsApp"
+      title={label}
+      aria-label={label}
       className={iconOnly ? baseIcon : baseInline}
     >
       <MessageCircle className="w-3.5 h-3.5" />
       {!iconOnly && <span>WhatsApp</span>}
     </a>
   );
+};
+
+// ======================= ABRIR UBICACIÓN (mapa) =======================
+const abrirUbicacion = (direccion) => {
+  const url = /^https?:\/\//i.test(direccion)
+    ? direccion
+    : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(direccion)}`;
+  window.open(url, "_blank", "noopener,noreferrer");
 };
 
 // ======================= BOTÓN DESCARGAR EXCEL (tarjetas individuales) =======================
@@ -325,115 +345,137 @@ const VoteCounter = ({ confirmed, total }) => {
   );
 };
 
-// ======================= PERSONA DATA =======================
-const DatosPersona = ({
-  persona, rol, loginCode, onCopy, copiedCode, counter,
-  tablaAcceso, onGenerarAcceso, generandoAcceso, esSuperadmin,
-  onDescargarExcel, excelKey, excelBusyKey,
+// ======================= TARJETA UNIFICADA DE PERSONA =======================
+// Una sola tarjeta para dirigente / coordinador / subcoordinador / votante. Mismos
+// datos (con "Sin dato"/"Sin teléfono"/"Sin dirección" en vez de ocultar el campo) y
+// mismo orden de acciones para las 4: Teléfono → Dirección/ubicación → WhatsApp →
+// Copiar código (si existe) → Confirmación → Excel (si corresponde) → Expandir.
+// El contenido expandido (hijos en el árbol) lo decide quien la usa vía `children`;
+// esta tarjeta solo se encarga de mostrar los datos propios y sus acciones — nunca
+// cambia qué hijos corresponden a cada rol (eso sigue viniendo de estructuraHelpers).
+// `wrapped=true` cuando la tarjeta es la responsable de su propia caja (hoy: votante,
+// que no tiene un contenedor "clickeable para expandir" por encima). `wrapped=false`
+// (dirigente/coordinador/subcoordinador) cuando el nivel del árbol que la usa ya
+// provee su propio contenedor + fila clickeable para expandir/colapsar — la tarjeta
+// solo aporta el contenido y las acciones (incluido el chevron cuando `expandible`).
+const PersonCard = ({
+  persona,
+  tipo, // "dirigente" | "coordinador" | "subcoordinador" | "votante"
+  rolLabel,
+  counter,
+  onTelefono,
+  onDireccion,
+  onCopy,
+  copiedCode,
+  tablaAcceso,
+  onGenerarAcceso,
+  generandoAcceso,
+  esSuperadmin,
+  onDescargarExcel,
+  excelKey,
+  excelBusyKey,
+  canConfirmar,
+  canAnular,
+  onConfirmar,
+  onAnular,
+  expandible = false,
+  isExpanded = false,
+  wrapped = false,
 }) => {
   const direccionMostrar = persona.direccion_override || persona.direccion;
   const hasName = Boolean(persona.nombre);
   const displayName = hasName
     ? `${persona.nombre} ${persona.apellido || ""}`.trim()
     : "Cargando...";
+  const loginCode = persona.login_code;
   const tieneCode = loginCode && String(loginCode).trim() !== "";
-  return (
-    <div className="space-y-0.5 text-xs sm:text-sm">
-      <p className={`font-semibold flex items-center gap-1 flex-wrap ${hasName ? "text-slate-800" : "text-slate-400 italic"}`}>
-        <span>{displayName}</span>
-        {counter}
-      </p>
-      <p className="text-slate-500 truncate">
-        CI: <span className="text-slate-700 font-medium">{persona.ci}</span>
-        {rol && <span className="ml-2 text-slate-400">• {rol}</span>}
-      </p>
-      {/* Fila de código de acceso — el valor NUNCA se muestra como texto, solo copiable */}
-      {tieneCode ? (
-        <div className="mt-1 flex items-center gap-1.5 flex-wrap">
-          <button
-            onClick={(e) => { e.stopPropagation(); onCopy?.(loginCode); }}
-            title="Copiar código de acceso"
-            aria-label="Copiar código de acceso"
-            className="inline-flex items-center justify-center w-7 h-7 rounded-md border border-brand-200 text-brand-600 hover:bg-brand-50 transition-colors bg-transparent shadow-none"
-          >
-            {copiedCode === loginCode ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
-          </button>
-          <WhatsAppInviteButton persona={persona} loginCode={loginCode} />
+  const esVotante = tipo === "votante";
+  const confirmado = esVotante && persona.voto_confirmado === true;
+
+  const row = (
+    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 flex-1 min-w-0">
+      <div className="flex-1 min-w-0 space-y-0.5 text-xs sm:text-sm">
+        <p className={`font-semibold flex items-center gap-1.5 flex-wrap ${hasName ? "text-slate-800" : "text-slate-400 italic"}`}>
+          <span>{displayName}</span>
+          {rolLabel && <Badge variant="purple">{rolLabel}</Badge>}
+          {persona.es_externo && <Badge variant="amber">Externo</Badge>}
+          {counter}
+        </p>
+        <p className="text-slate-500 truncate">
+          CI: <span className="text-slate-700 font-medium">{persona.ci}</span>
+        </p>
+        <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-slate-500">
+          <span className="truncate">Tel: {persona.telefono || "Sin teléfono"}</span>
+          <span className="truncate">Dir: {direccionMostrar || "Sin dirección"}</span>
+          <span>Seccional: {persona.seccional || "Sin dato"}</span>
+          <span className="truncate">Local: {persona.local_votacion || "Sin dato"}</span>
+          <span>Mesa: {persona.mesa || "Sin dato"}</span>
+          <span>Orden: {persona.orden || "Sin dato"}</span>
         </div>
-      ) : tablaAcceso ? (
-        <div className="mt-1 flex items-center gap-1.5 flex-wrap">
-          <span className="text-xs text-slate-400 italic">Sin código de acceso</span>
-          {esSuperadmin && onGenerarAcceso && (
-            <button
-              disabled={generandoAcceso === persona.ci}
-              onClick={(e) => { e.stopPropagation(); onGenerarAcceso(tablaAcceso, persona.ci); }}
-              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border border-amber-300 text-amber-700 text-xs hover:bg-amber-50 transition-colors bg-transparent shadow-none disabled:opacity-50"
-            >
-              {generandoAcceso === persona.ci ? "Generando..." : "Generar acceso"}
-            </button>
+        <div className="flex flex-wrap gap-1.5 pt-0.5">
+          {esVotante && confirmado && (
+            <Badge variant="green">
+              <Check className="w-3 h-3 mr-1" />
+              Confirmado
+            </Badge>
           )}
+          {!esVotante && <Badge variant="blue">Confirmado por rol</Badge>}
+          {persona.tercera_edad === true && <TerceraEdadBadge />}
         </div>
-      ) : null}
-      {esSuperadmin && onDescargarExcel && (
-        <div className="mt-1 flex items-center gap-1.5 flex-wrap">
-          <ExcelDownloadButton excelKey={excelKey} busyKey={excelBusyKey} onDownload={onDescargarExcel} />
-        </div>
-      )}
-      <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-slate-500 mt-0.5">
-        {persona.seccional && <span>Seccional: {persona.seccional}</span>}
-        {persona.local_votacion && <span className="truncate">Local: {persona.local_votacion}</span>}
-        {persona.mesa && <span>Mesa: {persona.mesa}</span>}
-        {persona.orden && <span>Orden: {persona.orden}</span>}
-        {direccionMostrar && <span className="truncate">Dir: {direccionMostrar}</span>}
-        {persona.telefono && <span className="truncate">Tel: {persona.telefono}</span>}
+      </div>
+
+      <div className="flex gap-1.5 shrink-0 flex-wrap items-center" onClick={(e) => e.stopPropagation()}>
+        <ActionBtn onClick={() => onTelefono(tipo, persona)} title="Editar teléfono" variant="green">
+          <Phone className="w-3.5 h-3.5" />
+        </ActionBtn>
+        <ActionBtn onClick={() => onDireccion(tipo, persona)} title="Editar dirección" variant="blue">
+          <MapPin className="w-3.5 h-3.5" />
+        </ActionBtn>
+        {direccionMostrar && (
+          <ActionBtn onClick={() => abrirUbicacion(direccionMostrar)} title="Abrir ubicación">
+            <ExternalLink className="w-3.5 h-3.5" />
+          </ActionBtn>
+        )}
+        <PersonWhatsAppButton persona={persona} tipo={tipo} loginCode={loginCode} iconOnly />
+        {tieneCode ? (
+          <ActionBtn onClick={() => onCopy?.(loginCode)} title="Copiar código de acceso">
+            {copiedCode === loginCode ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+          </ActionBtn>
+        ) : tablaAcceso && esSuperadmin && onGenerarAcceso ? (
+          <button
+            disabled={generandoAcceso === persona.ci}
+            onClick={() => onGenerarAcceso(tablaAcceso, persona.ci)}
+            className="text-xs px-2 py-1 rounded-md border border-amber-300 text-amber-700 hover:bg-amber-50 transition-colors bg-transparent shadow-none disabled:opacity-50 shrink-0"
+          >
+            {generandoAcceso === persona.ci ? "Generando..." : "Generar acceso"}
+          </button>
+        ) : null}
+        {esVotante && !confirmado && canConfirmar?.(persona) && (
+          <ActionBtn onClick={() => onConfirmar(persona)} title="Confirmar voto" variant="success-solid">
+            <Check className="w-3.5 h-3.5" />
+          </ActionBtn>
+        )}
+        {esVotante && confirmado && canAnular?.(persona) && (
+          <ActionBtn onClick={() => onAnular(persona)} title="Anular confirmación" variant="danger">
+            <X className="w-3.5 h-3.5" />
+          </ActionBtn>
+        )}
+        {esSuperadmin && onDescargarExcel && (
+          <ExcelDownloadButton excelKey={excelKey} busyKey={excelBusyKey} onDownload={onDescargarExcel} iconOnly />
+        )}
+        {expandible && (isExpanded ? <ChevronDown className="w-4 h-4 text-slate-400" /> : <ChevronRight className="w-4 h-4 text-slate-400" />)}
       </div>
     </div>
   );
-};
 
-// ======================= VOTANTE ROW =======================
-const VotanteRow = ({
-  v,
-  onTelefono,
-  onDireccion,
-  onConfirmar,
-  onAnular,
-  canConfirmar,
-  canAnular,
-}) => (
-  <div className="bg-white border border-slate-200 rounded-lg p-3 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 hover:border-slate-300 transition-colors">
-    <div className="flex-1 min-w-0">
-      <DatosPersona persona={v} rol={null} />
-      <div className="mt-1.5 flex flex-wrap gap-1.5">
-        {v.voto_confirmado && (
-          <Badge variant="green">
-            <Check className="w-3 h-3 mr-1" />
-            Confirmado
-          </Badge>
-        )}
-        {v.tercera_edad === true && <TerceraEdadBadge />}
-      </div>
+  if (!wrapped) return row;
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl p-3 shadow-card hover:border-slate-300 transition-colors">
+      {row}
     </div>
-    <div className="flex gap-1.5 shrink-0 flex-wrap">
-      <ActionBtn onClick={(e) => { e.stopPropagation(); onTelefono("votante", v); }} title="Editar telefono" variant="green">
-        <Phone className="w-3.5 h-3.5" />
-      </ActionBtn>
-      <ActionBtn onClick={(e) => { e.stopPropagation(); onDireccion("votante", v); }} title="Editar direccion" variant="blue">
-        <MapPin className="w-3.5 h-3.5" />
-      </ActionBtn>
-      {!v.voto_confirmado && canConfirmar(v) && (
-        <ActionBtn onClick={(e) => { e.stopPropagation(); onConfirmar(v); }} title="Confirmar voto" variant="success-solid">
-          <Check className="w-3.5 h-3.5" />
-        </ActionBtn>
-      )}
-      {v.voto_confirmado && canAnular(v) && (
-        <ActionBtn onClick={(e) => { e.stopPropagation(); onAnular(v); }} title="Anular confirmacion" variant="danger">
-          <X className="w-3.5 h-3.5" />
-        </ActionBtn>
-      )}
-    </div>
-  </div>
-);
+  );
+};
 
 // ======================= MODAL AGREGAR DIRIGENTE =======================
 const ModalAgregarDirigente = ({
@@ -1623,102 +1665,25 @@ const Dashboard = ({ currentUser, onLogout }) => {
                   className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-slate-50 transition-colors"
                   onClick={() => toggleDir(dirCI)}
                 >
-                  <div className="flex items-center gap-3 min-w-0 flex-1">
-                    <div className="p-2 bg-brand-100 rounded-lg shrink-0">
-                      <Shield className="w-4 h-4 text-brand-600" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <p className="font-semibold text-slate-800 text-sm">
-                          {dir.nombre} {dir.apellido || ""}
-                        </p>
-                        <Badge variant="purple">Dirigente</Badge>
-                        {dir.es_externo && <span className="text-xs font-medium text-amber-600 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5">Externo</span>}
-                        <VoteCounter confirmed={coordsDir.length} total={totalDir} />
-                      </div>
-                      <p className="text-xs text-slate-500 mt-0.5">CI: {dir.ci}</p>
-                      {/* Datos electorales — solo si no es externo */}
-                      {!dir.es_externo && (dir.seccional || dir.local_votacion || dir.mesa || dir.orden) && (
-                        <p className="text-xs text-slate-400 mt-0.5">
-                          {[
-                            dir.seccional && `Secc: ${dir.seccional}`,
-                            dir.local_votacion && `Local: ${dir.local_votacion}`,
-                            dir.mesa && `Mesa: ${dir.mesa}`,
-                            dir.orden && `Orden: ${dir.orden}`,
-                          ].filter(Boolean).join(" · ")}
-                        </p>
-                      )}
-                      {/* Teléfono y ubicación */}
-                      {(dir.telefono || dir.direccion_override) && (
-                        <p className="text-xs text-slate-400 mt-0.5">
-                          {[
-                            dir.telefono && `Tel: ${dir.telefono}`,
-                            dir.direccion_override && `Ubic: ${dir.direccion_override.length > 30 ? dir.direccion_override.slice(0, 30) + "…" : dir.direccion_override}`,
-                          ].filter(Boolean).join(" · ")}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    {/* Botones de edición de contacto */}
-                    <ActionBtn
-                      onClick={(e) => { e.stopPropagation(); handleOpenTelefono("dirigente", dir); }}
-                      title="Editar telefono"
-                      variant="green"
-                    >
-                      <Phone className="w-3.5 h-3.5" />
-                    </ActionBtn>
-                    <ActionBtn
-                      onClick={(e) => { e.stopPropagation(); handleOpenDireccion("dirigente", dir); }}
-                      title="Editar ubicacion"
-                      variant="blue"
-                    >
-                      <MapPin className="w-3.5 h-3.5" />
-                    </ActionBtn>
-                    {/* Botón abrir ubicación si existe */}
-                    {dir.direccion_override && (
-                      <ActionBtn
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          const url = /^https?:\/\//i.test(dir.direccion_override)
-                            ? dir.direccion_override
-                            : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(dir.direccion_override)}`;
-                          window.open(url, "_blank", "noopener,noreferrer");
-                        }}
-                        title="Abrir ubicacion"
-                        variant="default"
-                      >
-                        <ExternalLink className="w-3.5 h-3.5" />
-                      </ActionBtn>
-                    )}
-                    {/* Código de acceso — nunca se muestra el valor, solo el botón para copiarlo */}
-                    {dir.login_code ? (
-                      <>
-                        <ActionBtn
-                          onClick={(e) => { e.stopPropagation(); handleCopy(dir.login_code); }}
-                          title="Copiar código de acceso"
-                        >
-                          {copiedCode === dir.login_code ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
-                        </ActionBtn>
-                        <WhatsAppInviteButton persona={dir} iconOnly />
-                        <ExcelDownloadButton
-                          excelKey={`dirigente:${dirCI}`}
-                          busyKey={excelBusy}
-                          onDownload={() => handleDescargarExcel(`dirigente:${dirCI}`, buildDirigenteExcelPayload(dir))}
-                          iconOnly
-                        />
-                      </>
-                    ) : (
-                      <button
-                        disabled={generandoAcceso === dir.ci}
-                        onClick={(e) => { e.stopPropagation(); handleGenerarAcceso("dirigentes", dir.ci); }}
-                        className="text-xs px-2 py-1 rounded-md border border-amber-300 text-amber-700 hover:bg-amber-50 transition-colors bg-transparent shadow-none disabled:opacity-50"
-                      >
-                        {generandoAcceso === dir.ci ? "Generando..." : "Generar acceso"}
-                      </button>
-                    )}
-                    {isExpandedDir ? <ChevronDown className="w-4 h-4 text-slate-400" /> : <ChevronRight className="w-4 h-4 text-slate-400" />}
-                  </div>
+                  <PersonCard
+                    persona={dir}
+                    tipo="dirigente"
+                    rolLabel="Dirigente"
+                    onTelefono={handleOpenTelefono}
+                    onDireccion={handleOpenDireccion}
+                    onCopy={handleCopy}
+                    copiedCode={copiedCode}
+                    tablaAcceso="dirigentes"
+                    onGenerarAcceso={handleGenerarAcceso}
+                    generandoAcceso={generandoAcceso}
+                    esSuperadmin={currentUser.role === "superadmin"}
+                    counter={<VoteCounter confirmed={coordsDir.length} total={totalDir} />}
+                    onDescargarExcel={() => handleDescargarExcel(`dirigente:${dirCI}`, buildDirigenteExcelPayload(dir))}
+                    excelKey={`dirigente:${dirCI}`}
+                    excelBusyKey={excelBusy}
+                    expandible
+                    isExpanded={isExpandedDir}
+                  />
                 </div>
 
                 {/* Contenido expandido del dirigente */}
@@ -1745,26 +1710,25 @@ const Dashboard = ({ currentUser, onLogout }) => {
                                 className="flex items-center justify-between px-3 py-2.5 cursor-pointer hover:bg-slate-50"
                                 onClick={() => toggleCoord(coordCI)}
                               >
-                                <div className="flex items-center gap-2 min-w-0">
-                                  <DatosPersona
-                                    persona={coord}
-                                    rol="Coordinador"
-                                    loginCode={coord.login_code}
-                                    onCopy={handleCopy}
-                                    copiedCode={copiedCode}
-                                    tablaAcceso="coordinadores"
-                                    onGenerarAcceso={handleGenerarAcceso}
-                                    generandoAcceso={generandoAcceso}
-                                    esSuperadmin={currentUser.role === "superadmin"}
-                                    counter={<VoteCounter confirmed={misVots.filter((v) => v.voto_confirmado).length} total={misVots.length} />}
-                                    onDescargarExcel={() => handleDescargarExcel(`coordinador:${coordCI}`, buildCoordExcelPayload(coord))}
-                                    excelKey={`coordinador:${coordCI}`}
-                                    excelBusyKey={excelBusy}
-                                  />
-                                </div>
-                                <div className="shrink-0 ml-2">
-                                  {isExpandedCoord ? <ChevronDown className="w-4 h-4 text-slate-400" /> : <ChevronRight className="w-4 h-4 text-slate-400" />}
-                                </div>
+                                <PersonCard
+                                  persona={coord}
+                                  tipo="coordinador"
+                                  rolLabel="Coordinador"
+                                  onTelefono={handleOpenTelefono}
+                                  onDireccion={handleOpenDireccion}
+                                  onCopy={handleCopy}
+                                  copiedCode={copiedCode}
+                                  tablaAcceso="coordinadores"
+                                  onGenerarAcceso={handleGenerarAcceso}
+                                  generandoAcceso={generandoAcceso}
+                                  esSuperadmin={currentUser.role === "superadmin"}
+                                  counter={<VoteCounter confirmed={misVots.filter((v) => v.voto_confirmado).length} total={misVots.length} />}
+                                  onDescargarExcel={() => handleDescargarExcel(`coordinador:${coordCI}`, buildCoordExcelPayload(coord))}
+                                  excelKey={`coordinador:${coordCI}`}
+                                  excelBusyKey={excelBusy}
+                                  expandible
+                                  isExpanded={isExpandedCoord}
+                                />
                               </div>
                               {isExpandedCoord && (
                                 <div className="border-t border-slate-100 bg-slate-50 px-3 py-2 space-y-2">
@@ -1782,10 +1746,12 @@ const Dashboard = ({ currentUser, onLogout }) => {
                                           className="flex items-center justify-between px-3 py-2 cursor-pointer hover:bg-slate-50"
                                           onClick={() => toggleSub(subCI)}
                                         >
-                                          <DatosPersona
+                                          <PersonCard
                                             persona={sub}
-                                            rol="Subcoord"
-                                            loginCode={sub.login_code}
+                                            tipo="subcoordinador"
+                                            rolLabel="Subcoord"
+                                            onTelefono={handleOpenTelefono}
+                                            onDireccion={handleOpenDireccion}
                                             onCopy={handleCopy}
                                             copiedCode={copiedCode}
                                             tablaAcceso="subcoordinadores"
@@ -1796,23 +1762,24 @@ const Dashboard = ({ currentUser, onLogout }) => {
                                             onDescargarExcel={() => handleDescargarExcel(`subcoordinador:${subCI}`, buildSubExcelPayload(sub))}
                                             excelKey={`subcoordinador:${subCI}`}
                                             excelBusyKey={excelBusy}
+                                            expandible
+                                            isExpanded={isExpandedSub}
                                           />
-                                          <div className="shrink-0 ml-2">
-                                            {isExpandedSub ? <ChevronDown className="w-4 h-4 text-slate-400" /> : <ChevronRight className="w-4 h-4 text-slate-400" />}
-                                          </div>
                                         </div>
                                         {isExpandedSub && votsDeEste.length > 0 && (
                                           <div className="border-t border-slate-100 bg-slate-50 px-3 py-2 space-y-1.5">
                                             {filtrarPorBusqueda(votsDeEste).map((v) => (
-                                              <VotanteRow
+                                              <PersonCard
                                                 key={v.ci}
-                                                v={v}
+                                                persona={v}
+                                                tipo="votante"
                                                 onTelefono={handleOpenTelefono}
                                                 onDireccion={handleOpenDireccion}
                                                 onConfirmar={handleConfirmar}
                                                 onAnular={handleAnular}
                                                 canConfirmar={canConfirmar}
                                                 canAnular={canAnular}
+                                                wrapped
                                               />
                                             ))}
                                           </div>
@@ -1822,15 +1789,17 @@ const Dashboard = ({ currentUser, onLogout }) => {
                                   })}
                                   {/* Votantes directos del coord */}
                                   {filtrarPorBusqueda(getVotantesDirectosCoord(estructura, coordCI)).map((v) => (
-                                    <VotanteRow
+                                    <PersonCard
                                       key={v.ci}
-                                      v={v}
+                                      persona={v}
+                                      tipo="votante"
                                       onTelefono={handleOpenTelefono}
                                       onDireccion={handleOpenDireccion}
                                       onConfirmar={handleConfirmar}
                                       onAnular={handleAnular}
                                       canConfirmar={canConfirmar}
                                       canAnular={canAnular}
+                                      wrapped
                                     />
                                   ))}
                                   {misSubs.length === 0 && misVots.length === 0 && (
@@ -1849,15 +1818,17 @@ const Dashboard = ({ currentUser, onLogout }) => {
                       <div className="space-y-1.5">
                         <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Votantes directos</p>
                         {filtrarPorBusqueda(votsDirectosDir).map((v) => (
-                          <VotanteRow
+                          <PersonCard
                             key={v.ci}
-                            v={v}
+                            persona={v}
+                            tipo="votante"
                             onTelefono={handleOpenTelefono}
                             onDireccion={handleOpenDireccion}
                             onConfirmar={handleConfirmar}
                             onAnular={handleAnular}
                             canConfirmar={canConfirmar}
                             canAnular={canAnular}
+                            wrapped
                           />
                         ))}
                       </div>
@@ -1894,26 +1865,25 @@ const Dashboard = ({ currentUser, onLogout }) => {
                         className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-slate-50"
                         onClick={() => toggleCoord(coordCI)}
                       >
-                        <div className="flex items-center gap-3 min-w-0">
-                          <DatosPersona
-                            persona={coord}
-                            rol="Coordinador"
-                            loginCode={coord.login_code}
-                            onCopy={handleCopy}
-                            copiedCode={copiedCode}
-                            tablaAcceso="coordinadores"
-                            onGenerarAcceso={handleGenerarAcceso}
-                            generandoAcceso={generandoAcceso}
-                            esSuperadmin={currentUser.role === "superadmin"}
-                            counter={<VoteCounter confirmed={misVots.filter((v) => v.voto_confirmado).length} total={misVots.length} />}
-                            onDescargarExcel={() => handleDescargarExcel(`coordinador:${coordCI}`, buildCoordExcelPayload(coord))}
-                            excelKey={`coordinador:${coordCI}`}
-                            excelBusyKey={excelBusy}
-                          />
-                        </div>
-                        <div className="shrink-0 ml-2">
-                          {isExpandedCoord ? <ChevronDown className="w-4 h-4 text-slate-400" /> : <ChevronRight className="w-4 h-4 text-slate-400" />}
-                        </div>
+                        <PersonCard
+                          persona={coord}
+                          tipo="coordinador"
+                          rolLabel="Coordinador"
+                          onTelefono={handleOpenTelefono}
+                          onDireccion={handleOpenDireccion}
+                          onCopy={handleCopy}
+                          copiedCode={copiedCode}
+                          tablaAcceso="coordinadores"
+                          onGenerarAcceso={handleGenerarAcceso}
+                          generandoAcceso={generandoAcceso}
+                          esSuperadmin={currentUser.role === "superadmin"}
+                          counter={<VoteCounter confirmed={misVots.filter((v) => v.voto_confirmado).length} total={misVots.length} />}
+                          onDescargarExcel={() => handleDescargarExcel(`coordinador:${coordCI}`, buildCoordExcelPayload(coord))}
+                          excelKey={`coordinador:${coordCI}`}
+                          excelBusyKey={excelBusy}
+                          expandible
+                          isExpanded={isExpandedCoord}
+                        />
                       </div>
                       {isExpandedCoord && (
                         <div className="border-t border-slate-100 bg-slate-50 px-4 py-3 space-y-2">
@@ -1930,10 +1900,12 @@ const Dashboard = ({ currentUser, onLogout }) => {
                                   className="flex items-center justify-between px-3 py-2 cursor-pointer hover:bg-slate-50"
                                   onClick={() => toggleSub(subCI)}
                                 >
-                                  <DatosPersona
+                                  <PersonCard
                                     persona={sub}
-                                    rol="Subcoord"
-                                    loginCode={sub.login_code}
+                                    tipo="subcoordinador"
+                                    rolLabel="Subcoord"
+                                    onTelefono={handleOpenTelefono}
+                                    onDireccion={handleOpenDireccion}
                                     onCopy={handleCopy}
                                     copiedCode={copiedCode}
                                     tablaAcceso="subcoordinadores"
@@ -1944,23 +1916,24 @@ const Dashboard = ({ currentUser, onLogout }) => {
                                     onDescargarExcel={() => handleDescargarExcel(`subcoordinador:${subCI}`, buildSubExcelPayload(sub))}
                                     excelKey={`subcoordinador:${subCI}`}
                                     excelBusyKey={excelBusy}
+                                    expandible
+                                    isExpanded={isExpandedSub}
                                   />
-                                  <div className="shrink-0 ml-2">
-                                    {isExpandedSub ? <ChevronDown className="w-4 h-4 text-slate-400" /> : <ChevronRight className="w-4 h-4 text-slate-400" />}
-                                  </div>
                                 </div>
                                 {isExpandedSub && votsDeEste.length > 0 && (
                                   <div className="border-t border-slate-100 bg-slate-50 px-3 py-2 space-y-1.5">
                                     {filtrarPorBusqueda(votsDeEste).map((v) => (
-                                      <VotanteRow
+                                      <PersonCard
                                         key={v.ci}
-                                        v={v}
+                                        persona={v}
+                                        tipo="votante"
                                         onTelefono={handleOpenTelefono}
                                         onDireccion={handleOpenDireccion}
                                         onConfirmar={handleConfirmar}
                                         onAnular={handleAnular}
                                         canConfirmar={canConfirmar}
                                         canAnular={canAnular}
+                                        wrapped
                                       />
                                     ))}
                                   </div>
@@ -1969,15 +1942,17 @@ const Dashboard = ({ currentUser, onLogout }) => {
                             );
                           })}
                           {filtrarPorBusqueda(misVots).map((v) => (
-                            <VotanteRow
+                            <PersonCard
                               key={v.ci}
-                              v={v}
+                              persona={v}
+                              tipo="votante"
                               onTelefono={handleOpenTelefono}
                               onDireccion={handleOpenDireccion}
                               onConfirmar={handleConfirmar}
                               onAnular={handleAnular}
                               canConfirmar={canConfirmar}
                               canAnular={canAnular}
+                              wrapped
                             />
                           ))}
                           {misSubs.length === 0 && misVots.length === 0 && (
@@ -2071,23 +2046,22 @@ const Dashboard = ({ currentUser, onLogout }) => {
                   className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-slate-50"
                   onClick={() => toggleCoord(coordCI)}
                 >
-                  <div className="flex items-center gap-3 min-w-0 flex-1">
-                    <DatosPersona
-                      persona={coord}
-                      rol="Coordinador"
-                      loginCode={coord.login_code}
-                      onCopy={handleCopy}
-                      copiedCode={copiedCode}
-                      tablaAcceso="coordinadores"
-                      onGenerarAcceso={handleGenerarAcceso}
-                      generandoAcceso={generandoAcceso}
-                      esSuperadmin={currentUser.role === "superadmin"}
-                      counter={<VoteCounter confirmed={misVots.filter((v) => v.voto_confirmado).length} total={misVots.length} />}
-                    />
-                  </div>
-                  <div className="shrink-0 ml-2">
-                    {isExpandedCoord ? <ChevronDown className="w-4 h-4 text-slate-400" /> : <ChevronRight className="w-4 h-4 text-slate-400" />}
-                  </div>
+                  <PersonCard
+                    persona={coord}
+                    tipo="coordinador"
+                    rolLabel="Coordinador"
+                    onTelefono={handleOpenTelefono}
+                    onDireccion={handleOpenDireccion}
+                    onCopy={handleCopy}
+                    copiedCode={copiedCode}
+                    tablaAcceso="coordinadores"
+                    onGenerarAcceso={handleGenerarAcceso}
+                    generandoAcceso={generandoAcceso}
+                    esSuperadmin={currentUser.role === "superadmin"}
+                    counter={<VoteCounter confirmed={misVots.filter((v) => v.voto_confirmado).length} total={misVots.length} />}
+                    expandible
+                    isExpanded={isExpandedCoord}
+                  />
                 </div>
                 {isExpandedCoord && (
                   <div className="border-t border-slate-100 bg-slate-50 px-4 py-3 space-y-2">
@@ -2104,10 +2078,12 @@ const Dashboard = ({ currentUser, onLogout }) => {
                             className="flex items-center justify-between px-3 py-2 cursor-pointer hover:bg-slate-50"
                             onClick={() => toggleSub(subCI)}
                           >
-                            <DatosPersona
+                            <PersonCard
                               persona={sub}
-                              rol="Subcoord"
-                              loginCode={sub.login_code}
+                              tipo="subcoordinador"
+                              rolLabel="Subcoord"
+                              onTelefono={handleOpenTelefono}
+                              onDireccion={handleOpenDireccion}
                               onCopy={handleCopy}
                               copiedCode={copiedCode}
                               tablaAcceso="subcoordinadores"
@@ -2115,23 +2091,24 @@ const Dashboard = ({ currentUser, onLogout }) => {
                               generandoAcceso={generandoAcceso}
                               esSuperadmin={currentUser.role === "superadmin"}
                               counter={<VoteCounter confirmed={votsDeEste.filter((v) => v.voto_confirmado).length} total={votsDeEste.length} />}
+                              expandible
+                              isExpanded={isExpandedSub}
                             />
-                            <div className="shrink-0 ml-2">
-                              {isExpandedSub ? <ChevronDown className="w-4 h-4 text-slate-400" /> : <ChevronRight className="w-4 h-4 text-slate-400" />}
-                            </div>
                           </div>
                           {isExpandedSub && votsDeEste.length > 0 && (
                             <div className="border-t border-slate-100 bg-slate-50 px-3 py-2 space-y-1.5">
                               {filtrarPorBusqueda(votsDeEste).map((v) => (
-                                <VotanteRow
+                                <PersonCard
                                   key={v.ci}
-                                  v={v}
+                                  persona={v}
+                                  tipo="votante"
                                   onTelefono={handleOpenTelefono}
                                   onDireccion={handleOpenDireccion}
                                   onConfirmar={handleConfirmar}
                                   onAnular={handleAnular}
                                   canConfirmar={canConfirmar}
                                   canAnular={canAnular}
+                                  wrapped
                                 />
                               ))}
                             </div>
@@ -2140,15 +2117,17 @@ const Dashboard = ({ currentUser, onLogout }) => {
                       );
                     })}
                     {filtrarPorBusqueda(misVots).map((v) => (
-                      <VotanteRow
+                      <PersonCard
                         key={v.ci}
-                        v={v}
+                        persona={v}
+                        tipo="votante"
                         onTelefono={handleOpenTelefono}
                         onDireccion={handleOpenDireccion}
                         onConfirmar={handleConfirmar}
                         onAnular={handleAnular}
                         canConfirmar={canConfirmar}
                         canAnular={canAnular}
+                        wrapped
                       />
                     ))}
                     {misSubs.length === 0 && misVots.length === 0 && (
@@ -2166,15 +2145,17 @@ const Dashboard = ({ currentUser, onLogout }) => {
           <div className="space-y-2">
             <p className="text-sm font-semibold text-slate-700">Mis Votantes Directos ({votsDirectosMios.length})</p>
             {filtrarPorBusqueda(votsDirectosMios).map((v) => (
-              <VotanteRow
+              <PersonCard
                 key={v.ci}
-                v={v}
+                persona={v}
+                tipo="votante"
                 onTelefono={handleOpenTelefono}
                 onDireccion={handleOpenDireccion}
                 onConfirmar={handleConfirmar}
                 onAnular={handleAnular}
                 canConfirmar={canConfirmar}
                 canAnular={canAnular}
+                wrapped
               />
             ))}
           </div>
@@ -2267,23 +2248,22 @@ const Dashboard = ({ currentUser, onLogout }) => {
                   className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-slate-50"
                   onClick={() => toggleSub(subCI)}
                 >
-                  <div className="flex-1 min-w-0">
-                    <DatosPersona
-                      persona={sub}
-                      rol="Subcoordinador"
-                      loginCode={sub.login_code}
-                      onCopy={handleCopy}
-                      copiedCode={copiedCode}
-                      tablaAcceso="subcoordinadores"
-                      onGenerarAcceso={handleGenerarAcceso}
-                      generandoAcceso={generandoAcceso}
-                      esSuperadmin={currentUser.role === "superadmin"}
-                      counter={<VoteCounter confirmed={votsDeEste.filter((v) => v.voto_confirmado).length} total={votsDeEste.length} />}
-                    />
-                  </div>
-                  <div className="shrink-0 ml-2">
-                    {isExpandedSub ? <ChevronDown className="w-4 h-4 text-slate-400" /> : <ChevronRight className="w-4 h-4 text-slate-400" />}
-                  </div>
+                  <PersonCard
+                    persona={sub}
+                    tipo="subcoordinador"
+                    rolLabel="Subcoordinador"
+                    onTelefono={handleOpenTelefono}
+                    onDireccion={handleOpenDireccion}
+                    onCopy={handleCopy}
+                    copiedCode={copiedCode}
+                    tablaAcceso="subcoordinadores"
+                    onGenerarAcceso={handleGenerarAcceso}
+                    generandoAcceso={generandoAcceso}
+                    esSuperadmin={currentUser.role === "superadmin"}
+                    counter={<VoteCounter confirmed={votsDeEste.filter((v) => v.voto_confirmado).length} total={votsDeEste.length} />}
+                    expandible
+                    isExpanded={isExpandedSub}
+                  />
                 </div>
                 {isExpandedSub && (() => {
                   const votsVisibles = filtrarPorBusqueda(votsDeEste);
@@ -2295,15 +2275,17 @@ const Dashboard = ({ currentUser, onLogout }) => {
                         </p>
                       ) : (
                         votsVisibles.map((v) => (
-                          <VotanteRow
+                          <PersonCard
                             key={v.ci}
-                            v={v}
+                            persona={v}
+                            tipo="votante"
                             onTelefono={handleOpenTelefono}
                             onDireccion={handleOpenDireccion}
                             onConfirmar={handleConfirmar}
                             onAnular={handleAnular}
                             canConfirmar={canConfirmar}
                             canAnular={canAnular}
+                            wrapped
                           />
                         ))
                       )}
@@ -2326,15 +2308,17 @@ const Dashboard = ({ currentUser, onLogout }) => {
             </p>
           ) : (
             filtrarPorBusqueda(misVotantesDirectos).map((v) => (
-              <VotanteRow
+              <PersonCard
                 key={v.ci}
-                v={v}
+                persona={v}
+                tipo="votante"
                 onTelefono={handleOpenTelefono}
                 onDireccion={handleOpenDireccion}
                 onConfirmar={handleConfirmar}
                 onAnular={handleAnular}
                 canConfirmar={canConfirmar}
                 canAnular={canAnular}
+                wrapped
               />
             ))
           )}
@@ -2406,15 +2390,17 @@ const Dashboard = ({ currentUser, onLogout }) => {
             </p>
           ) : (
             filtrarPorBusqueda(misVotantes).map((v) => (
-              <VotanteRow
+              <PersonCard
                 key={v.ci}
-                v={v}
+                persona={v}
+                tipo="votante"
                 onTelefono={handleOpenTelefono}
                 onDireccion={handleOpenDireccion}
                 onConfirmar={handleConfirmar}
                 onAnular={handleAnular}
                 canConfirmar={canConfirmar}
                 canAnular={canAnular}
+                wrapped
               />
             ))
           )}
