@@ -80,7 +80,7 @@ const LeafletSeleccionarUbicacion = ({ latitud, longitud, onChange }) => {
       : null;
 
   return (
-    <div className="rounded-xl overflow-hidden border border-slate-200 h-64 relative">
+    <div className="rounded-xl overflow-hidden border border-slate-200 h-64 relative isolate z-0">
       <MapContainer center={centro} zoom={posicionMarcador ? 16 : 12} scrollWheelZoom style={{ height: "100%", width: "100%" }}>
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'

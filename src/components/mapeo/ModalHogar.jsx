@@ -139,7 +139,7 @@ const ModalHogar = ({
 
   return (
     <div
-      className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-start sm:items-center justify-center z-50 p-4 overflow-y-auto"
+      className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-start sm:items-center justify-center z-[2000] p-4 overflow-y-auto"
       onClick={(e) => { if (e.target === e.currentTarget && !saving) onClose(); }}
     >
       <div className="bg-white rounded-2xl w-full max-w-lg shadow-modal overflow-hidden animate-fade-in my-6">

@@ -26,7 +26,7 @@ const HogarDetallePanel = ({
 
   return (
     <div
-      className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-0 sm:p-4"
+      className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-end sm:items-center justify-center z-[2000] p-0 sm:p-4"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
       <div className="bg-white w-full sm:max-w-md sm:rounded-2xl rounded-t-2xl shadow-modal overflow-hidden animate-fade-in max-h-[85vh] flex flex-col">

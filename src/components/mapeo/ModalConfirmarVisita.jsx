@@ -37,7 +37,7 @@ const ModalConfirmarVisita = ({ show, onClose, hogar, config, configError, onRei
   if (!config) {
     return (
       <div
-        className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+        className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[2000] p-4"
         onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
       >
         <div className="bg-white rounded-2xl w-full max-w-sm shadow-modal overflow-hidden animate-fade-in p-5 space-y-3">

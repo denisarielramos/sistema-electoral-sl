@@ -58,7 +58,7 @@ const LeafletMapaHogares = ({ hogares, hogarSeleccionadoId, onSelectHogar }) => 
   );
 
   return (
-    <div className="rounded-xl overflow-hidden border border-slate-200 h-[420px] sm:h-[520px] relative">
+    <div className="rounded-xl overflow-hidden border border-slate-200 h-[420px] sm:h-[520px] relative isolate z-0">
       <MapContainer center={CENTRO_DEFECTO} zoom={12} scrollWheelZoom style={{ height: "100%", width: "100%" }}>
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
