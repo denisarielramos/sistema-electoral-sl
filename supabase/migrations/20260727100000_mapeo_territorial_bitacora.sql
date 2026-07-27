@@ -90,6 +90,11 @@ CREATE TABLE IF NOT EXISTS hogares (
   activo              boolean NOT NULL DEFAULT true,
   created_at          timestamptz NOT NULL DEFAULT now(),
   updated_at          timestamptz NOT NULL DEFAULT now(),
+  -- Se actualiza SOLO cuando cambian latitud/longitud (no en cualquier UPDATE, a
+  -- diferencia de updated_at) — permite descartar como "última visita" cualquier
+  -- fila de visitas_hogar anterior a la revisión de ubicación vigente, para que un
+  -- hogar reubicado no siga mostrando el estado de una visita hecha al punto viejo.
+  ubicacion_actualizada_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT hogares_lat_valida CHECK (latitud IS NULL OR (latitud BETWEEN -90 AND 90)),
   CONSTRAINT hogares_lng_valida CHECK (longitud IS NULL OR (longitud BETWEEN -180 AND 180)),
   CONSTRAINT hogares_precision_valida CHECK (precision_gps IS NULL OR precision_gps >= 0)
@@ -97,6 +102,10 @@ CREATE TABLE IF NOT EXISTS hogares (
 
 COMMENT ON TABLE hogares IS 'Domicilio real de una familia (mapeo territorial). Agrupa uno o más votantes vía hogar_votantes — evita un marcador por votante.';
 COMMENT ON COLUMN hogares.estado IS 'pendiente: recién cargado/corregido, esperando verificación. verificado: confirmado por dirigente/superadmin. rechazado: ubicación descartada.';
+
+-- Defensivo (además de la columna en el CREATE TABLE de arriba): si esta migración
+-- ya se aplicó una vez sin esta columna, la agrega ahora sin romper idempotencia.
+ALTER TABLE hogares ADD COLUMN IF NOT EXISTS ubicacion_actualizada_at timestamptz NOT NULL DEFAULT now();
 
 CREATE INDEX IF NOT EXISTS ix_hogares_estado ON hogares(estado);
 CREATE INDEX IF NOT EXISTS ix_hogares_creado_por ON hogares(creado_por_ci);
@@ -440,6 +449,22 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
+-- PostgreSQL otorga EXECUTE a PUBLIC por defecto en todo CREATE FUNCTION nuevo — sin
+-- este REVOKE explícito, estas funciones auxiliares quedarían accesibles vía
+-- supabase.rpc(...) por anon/authenticated (PUBLIC las incluye a ambos) pese a ser
+-- "internas". Varias (mapeo_votante_en_alcance, mapeo_hogar_en_alcance) reciben
+-- actor_ci/actor_rol como parámetros SIN verificar identidad — son SECURITY DEFINER
+-- y confían en que solo las llamen las funciones RPC de la sección 4, que sí
+-- resuelven la identidad primero. Sin este REVOKE, cualquier anónimo podría llamarlas
+-- directo con un actor_ci/actor_rol inventado para sondear membresía de votantes/ramas.
+REVOKE ALL ON FUNCTION mapeo_es_finito(double precision) FROM PUBLIC;
+REVOKE ALL ON FUNCTION mapeo_validar_precision_gps(double precision) FROM PUBLIC;
+REVOKE ALL ON FUNCTION mapeo_distancia_metros(double precision, double precision, double precision, double precision) FROM PUBLIC;
+REVOKE ALL ON FUNCTION mapeo_identidad(text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION mapeo_resolver_actor(text, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION mapeo_votante_en_alcance(text, text, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION mapeo_hogar_en_alcance(uuid, text, text) FROM PUBLIC;
+
 -- ============================================================================
 -- 4) FUNCIONES RPC — únicas llamadas por el frontend (supabase.rpc(...))
 -- ============================================================================
@@ -549,6 +574,12 @@ BEGIN
       )
       FROM visitas_hogar vh
       WHERE vh.hogar_id = h.id
+        -- Si el hogar se reubicó después de esta visita, ya no describe la ubicación
+        -- vigente — no debe contarse como "última visita" para el estado visual del
+        -- mapa (evita mostrar "visitado"/"fuera de radio" para un punto nuevo que
+        -- nadie visitó todavía). Las visitas viejas siguen intactas en la bitácora
+        -- completa (mapeo_listar_visitas), solo se excluyen de este resumen.
+        AND vh.fecha_hora >= h.ubicacion_actualizada_at
       ORDER BY vh.fecha_hora DESC
       LIMIT 1
     ) AS ultima_visita
@@ -646,7 +677,8 @@ BEGIN
     estado = CASE WHEN v_cambia_ubicacion THEN 'pendiente' ELSE estado END,
     verificado_por_ci = CASE WHEN v_cambia_ubicacion THEN NULL ELSE verificado_por_ci END,
     verificado_por_rol = CASE WHEN v_cambia_ubicacion THEN NULL ELSE verificado_por_rol END,
-    fecha_verificacion = CASE WHEN v_cambia_ubicacion THEN NULL ELSE fecha_verificacion END
+    fecha_verificacion = CASE WHEN v_cambia_ubicacion THEN NULL ELSE fecha_verificacion END,
+    ubicacion_actualizada_at = CASE WHEN v_cambia_ubicacion THEN now() ELSE ubicacion_actualizada_at END
   WHERE id = p_hogar_id
   RETURNING * INTO v_hogar;
 
@@ -931,5 +963,7 @@ GRANT EXECUTE ON FUNCTION mapeo_listar_visitas(text, text, uuid) TO anon, authen
 
 -- Las funciones auxiliares internas (mapeo_identidad, mapeo_resolver_actor,
 -- mapeo_votante_en_alcance, mapeo_hogar_en_alcance, mapeo_distancia_metros,
--- mapeo_es_finito, mapeo_validar_precision_gps) NO se
--- otorgan a anon/authenticated: solo las usan las funciones RPC de arriba.
+-- mapeo_es_finito, mapeo_validar_precision_gps) NO se otorgan a anon/authenticated
+-- (y además se les revocó EXECUTE de PUBLIC explícitamente en la sección 3, ya que
+-- PostgreSQL lo otorga por defecto en todo CREATE FUNCTION) — solo las usan las
+-- funciones RPC de arriba.

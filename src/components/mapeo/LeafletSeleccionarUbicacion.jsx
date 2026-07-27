@@ -2,8 +2,8 @@
 // Un solo marcador arrastrable + click-en-el-mapa para mover el punto. Usado dentro
 // del modal de crear/editar hogar como corrección manual de la posición capturada
 // por GPS (o para ubicar el hogar cuando no hay GPS disponible).
-import React, { useMemo, useRef } from "react";
-import { MapContainer, TileLayer, Marker, useMapEvents } from "react-leaflet";
+import React, { useEffect, useMemo, useRef } from "react";
+import { MapContainer, TileLayer, Marker, useMap, useMapEvents } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
@@ -26,6 +26,31 @@ const ClicksDelMapa = ({ onPick }) => {
       onPick(e.latlng.lat, e.latlng.lng);
     },
   });
+  return null;
+};
+
+// react-leaflet solo usa center/zoom de MapContainer como valores INICIALES — cambios
+// posteriores en esas props no mueven el mapa ya montado. Esto recentra una única vez
+// cuando llegan las primeras coordenadas válidas (p. ej. el hogar en edición tarda un
+// tick en cargar su ubicación guardada, o un fix GPS llega después de montar el mapa
+// con el punto todavía sin marcar). Un ref (no state) evita reintentos: solo la
+// PRIMERA aparición de coordenadas válidas recentra; después el usuario puede mover
+// el marcador libremente sin que el mapa le pelee la vista.
+const RecentrarAlPrimerPunto = ({ latitud, longitud }) => {
+  const map = useMap();
+  const yaCentrado = useRef(false);
+  useEffect(() => {
+    if (latitud === null || latitud === undefined || longitud === null || longitud === undefined) return;
+    if (yaCentrado.current) return;
+    yaCentrado.current = true;
+    // requestAnimationFrame: si el Marker se está montando en este mismo ciclo (la
+    // posición pasó de null a válida en el mismo render), Leaflet todavía no terminó
+    // de inicializar el DOM/posición interna del ícono (_leaflet_pos) — llamar
+    // setView() en el mismo tick puede intentar reposicionarlo antes de que exista y
+    // lanzar un error. Diferir un frame le da tiempo a Leaflet de terminar de montarlo.
+    const frame = requestAnimationFrame(() => map.setView([latitud, longitud], 16));
+    return () => cancelAnimationFrame(frame);
+  }, [latitud, longitud, map]);
   return null;
 };
 
@@ -54,6 +79,7 @@ const LeafletSeleccionarUbicacion = ({ latitud, longitud, onChange }) => {
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
         <ClicksDelMapa onPick={onChange} />
+        <RecentrarAlPrimerPunto latitud={latitud} longitud={longitud} />
         {posicionMarcador && (
           <Marker
             position={posicionMarcador}

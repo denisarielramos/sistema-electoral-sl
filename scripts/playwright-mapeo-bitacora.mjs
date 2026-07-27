@@ -169,7 +169,13 @@ function createMockBackend(dataset) {
       .filter((v) => !actor || actor.rol === "superadmin" || votanteEnAlcance(v.ci, actor.ci, actor.rol))
       .map((v) => ({ ci: v.ci, nombre: v.nombre, apellido: v.apellido, telefono: v.telefono, dirigente_ci: v.dirigente_ci, coordinador_ci: v.coordinador_ci, asignado_por: v.asignado_por, asignado_por_rol: v.asignado_por_rol })),
     ultima_visita: (() => {
-      const vs = visitasHogar.filter((x) => x.hogar_id === h.id).sort((a, b) => new Date(b.fecha_hora) - new Date(a.fecha_hora));
+      // Espejo del filtro agregado en mapeo_listar_hogares: una visita anterior a la
+      // última reubicación del hogar ya no describe la ubicación vigente — no cuenta
+      // como "última visita" para el estado visual del mapa.
+      const umbral = new Date(h.ubicacion_actualizada_at || h.created_at).getTime();
+      const vs = visitasHogar
+        .filter((x) => x.hogar_id === h.id && new Date(x.fecha_hora).getTime() >= umbral)
+        .sort((a, b) => new Date(b.fecha_hora) - new Date(a.fecha_hora));
       return vs[0] ? { id: vs[0].id, resultado: vs[0].resultado, fecha_hora: vs[0].fecha_hora, visitante_ci: vs[0].visitante_ci, visitante_rol: vs[0].visitante_rol, distancia_metros: vs[0].distancia_metros } : null;
     })(),
   });
@@ -188,6 +194,7 @@ function createMockBackend(dataset) {
         referencia: body.p_referencia, latitud: body.p_latitud, longitud: body.p_longitud, precision_gps: body.p_precision_gps,
         estado: "pendiente", creado_por_ci: actor.ci, creado_por_rol: actor.rol, verificado_por_ci: null, verificado_por_rol: null,
         fecha_verificacion: null, activo: true, created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+        ubicacion_actualizada_at: new Date().toISOString(),
       };
       hogares.push(hogar);
       return embedHogar(hogar, actor);
@@ -201,7 +208,10 @@ function createMockBackend(dataset) {
         nombre_familia: body.p_nombre_familia, direccion: body.p_direccion, referencia: body.p_referencia,
         latitud: body.p_latitud, longitud: body.p_longitud, precision_gps: body.p_precision_gps,
       });
-      if (cambiaUbicacion) { h.estado = "pendiente"; h.verificado_por_ci = null; h.verificado_por_rol = null; h.fecha_verificacion = null; }
+      if (cambiaUbicacion) {
+        h.estado = "pendiente"; h.verificado_por_ci = null; h.verificado_por_rol = null; h.fecha_verificacion = null;
+        h.ubicacion_actualizada_at = new Date().toISOString();
+      }
       return embedHogar(h, actor);
     },
     mapeo_verificar_hogar: (body) => {
