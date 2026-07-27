@@ -272,6 +272,7 @@ const MapeoTerritorial = ({ currentUser, estructura, onVolver }) => {
               await asociarVotante(hogarId, votanteCi);
             } catch (err) {
               setAccionError(err.message);
+              throw err; // re-lanzar: ModalHogar debe mostrar el error dentro del modal, no detrás
             }
           }}
           onDesasociarVotante={async (hogarId, votanteCi) => {
@@ -280,6 +281,7 @@ const MapeoTerritorial = ({ currentUser, estructura, onVolver }) => {
               await desasociarVotante(hogarId, votanteCi);
             } catch (err) {
               setAccionError(err.message);
+              throw err;
             }
           }}
           onConfirmarVisita={(hogar) => { setModalVisitaHogar(hogar); setModalHogar(null); }}

@@ -265,7 +265,14 @@ const ModalHogar = ({
                     <span className="text-sm text-slate-700 truncate">{v.nombre} {v.apellido} <span className="text-slate-400">— CI: {v.ci}</span></span>
                     <button
                       type="button"
-                      onClick={() => onDesasociarVotante(hogarExistente.id, normalizeCI(v.ci))}
+                      onClick={async () => {
+                        setError(null);
+                        try {
+                          await onDesasociarVotante(hogarExistente.id, normalizeCI(v.ci));
+                        } catch (err) {
+                          setError(err.message || "Error al quitar el votante del hogar.");
+                        }
+                      }}
                       disabled={saving}
                       title="Quitar del hogar (no borra al votante)"
                       className="p-1 text-slate-400 hover:text-red-600 bg-transparent border-0 shadow-none disabled:opacity-50"
@@ -300,8 +307,13 @@ const ModalHogar = ({
                         key={v.ci}
                         type="button"
                         onClick={async () => {
-                          await onAsociarVotante(hogarExistente.id, normalizeCI(v.ci));
-                          setBusquedaVotante("");
+                          setError(null);
+                          try {
+                            await onAsociarVotante(hogarExistente.id, normalizeCI(v.ci));
+                            setBusquedaVotante("");
+                          } catch (err) {
+                            setError(err.message || "Error al asociar el votante al hogar.");
+                          }
                         }}
                         className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50 border-0 bg-transparent shadow-none flex items-center justify-between"
                       >

@@ -103,7 +103,7 @@ function createMockBackend(dataset) {
 
   const votanteEnAlcance = (votanteCi, actorCi, actorRol) => {
     const v = votantes.find((x) => x.ci === votanteCi);
-    if (!v) return false;
+    if (!v || v.activo === false) return false;
     if (actorRol === "superadmin") return true;
     if (actorRol === "dirigente") {
       if (v.dirigente_ci === actorCi) return true;
@@ -125,10 +125,15 @@ function createMockBackend(dataset) {
 
   const hogarEnAlcance = (hogarId, actorCi, actorRol) => {
     if (actorRol === "superadmin") return true;
-    // El creador siempre ve/gestiona su propio hogar, incluso sin votantes
-    // asociados todavía (espejo de mapeo_hogar_en_alcance en el SQL real).
-    const hogar = hogares.find((h) => h.id === hogarId);
-    if (hogar && hogar.creado_por_ci === actorCi) return true;
+    // Espejo de mapeo_hogar_en_alcance en el SQL real: el creador solo tiene acceso
+    // transitorio mientras el hogar no tenga NINGÚN votante asociado activo todavía
+    // — en cuanto tiene uno, el alcance pasa a depender exclusivamente de los
+    // votantes (nunca queda un acceso permanente para quien lo creó).
+    const tieneVotantes = hogarVotantes.some((hv) => hv.hogar_id === hogarId && hv.activo);
+    if (!tieneVotantes) {
+      const hogar = hogares.find((h) => h.id === hogarId);
+      return !!hogar && hogar.creado_por_ci === actorCi;
+    }
     return hogarVotantes.some((hv) => hv.hogar_id === hogarId && hv.activo && votanteEnAlcance(hv.votante_ci, actorCi, actorRol));
   };
 
