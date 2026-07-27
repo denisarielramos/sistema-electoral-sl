@@ -673,9 +673,14 @@ BEGIN
   END IF;
   PERFORM mapeo_validar_precision_gps(p_precision_gps);
 
+  -- FOR UPDATE desde esta primera lectura (no solo en el UPDATE de abajo): sin el
+  -- lock acá, una edición concurrente sobre el mismo hogar (otra llamada a este RPC,
+  -- o mapeo_confirmar_visita) podría cambiar latitud/longitud entre esta comparación
+  -- y el UPDATE, dejando v_cambia_ubicacion calculado contra un valor que ya no es
+  -- el vigente al momento de escribir.
   SELECT (latitud IS DISTINCT FROM p_latitud OR longitud IS DISTINCT FROM p_longitud)
     INTO v_cambia_ubicacion
-  FROM hogares WHERE id = p_hogar_id;
+  FROM hogares WHERE id = p_hogar_id FOR UPDATE;
 
   UPDATE hogares SET
     nombre_familia = p_nombre_familia,
@@ -688,7 +693,16 @@ BEGIN
     verificado_por_ci = CASE WHEN v_cambia_ubicacion THEN NULL ELSE verificado_por_ci END,
     verificado_por_rol = CASE WHEN v_cambia_ubicacion THEN NULL ELSE verificado_por_rol END,
     fecha_verificacion = CASE WHEN v_cambia_ubicacion THEN NULL ELSE fecha_verificacion END,
-    ubicacion_actualizada_at = CASE WHEN v_cambia_ubicacion THEN now() ELSE ubicacion_actualizada_at END
+    -- clock_timestamp(), no now(): now() queda fijo al INICIO de esta transacción,
+    -- no al momento en que este UPDATE realmente se ejecuta — que puede ser más
+    -- tarde si esta transacción esperó el lock de fila de arriba. Si se usara
+    -- now(), una reubicación que arrancó antes pero consiguió el lock después de
+    -- que mapeo_confirmar_visita ya confirmó (y comprometió) una visita al punto
+    -- viejo podría terminar con ubicacion_actualizada_at más vieja que esa visita,
+    -- dejándola pasar el filtro de mapeo_listar_hogares como "vigente" pese a
+    -- describir la ubicación anterior. clock_timestamp() refleja el momento real de
+    -- ejecución, coherente con el orden real de serialización que da el lock.
+    ubicacion_actualizada_at = CASE WHEN v_cambia_ubicacion THEN clock_timestamp() ELSE ubicacion_actualizada_at END
   WHERE id = p_hogar_id
   RETURNING * INTO v_hogar;
 
