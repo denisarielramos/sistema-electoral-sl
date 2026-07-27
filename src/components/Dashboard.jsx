@@ -179,6 +179,36 @@ const TerceraEdadBadge = () => (
   </span>
 );
 
+// ======================= BUSCADOR INTERNO (debajo de stats y botones de acciones) =======================
+// Mismo componente y apariencia en las 4 vistas por rol. Solo presenta el input — el
+// matching en si (matchCI, personaCoincideConsulta) vive fuera, sin cambios.
+const BuscadorInterno = ({ searchQuery, onChange, onClear }) => (
+  <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-card">
+    <label htmlFor="busquedaInterna" className="block text-sm font-semibold text-slate-700 mb-2">
+      Buscar en mi estructura
+    </label>
+    <div className="relative">
+      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+      <input
+        id="busquedaInterna"
+        type="text"
+        value={searchQuery}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="Nombre, apellido, CI o teléfono..."
+        className="w-full pl-9 pr-9 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent bg-slate-50"
+      />
+      {searchQuery && (
+        <button
+          onClick={onClear}
+          className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0 bg-transparent border-0 shadow-none"
+        >
+          <X className="w-4 h-4" />
+        </button>
+      )}
+    </div>
+  </div>
+);
+
 // ======================= AVISO DE BÚSQUEDA (dentro del árbol, sin reemplazarlo) =======================
 const BusquedaAviso = ({ matchCI, query }) => {
   if (!matchCI) return null;
@@ -729,7 +759,6 @@ const Dashboard = ({ currentUser, onLogout }) => {
 
   // Search
   const [searchQuery, setSearchQuery] = useState("");
-  const [searchActive, setSearchActive] = useState(false);
 
   // Copy feedback
   const [copiedCode, setCopiedCode] = useState(null);
@@ -1558,6 +1587,12 @@ const Dashboard = ({ currentUser, onLogout }) => {
           </button>
         </div>
 
+        <BuscadorInterno
+          searchQuery={searchQuery}
+          onChange={setSearchQuery}
+          onClear={() => setSearchQuery("")}
+        />
+
         <BusquedaAviso matchCI={matchCI} query={searchQuery} />
 
         {/* Árbol de dirigentes */}
@@ -2004,6 +2039,12 @@ const Dashboard = ({ currentUser, onLogout }) => {
           </button>
         </div>
 
+        <BuscadorInterno
+          searchQuery={searchQuery}
+          onChange={setSearchQuery}
+          onClear={() => setSearchQuery("")}
+        />
+
         <BusquedaAviso matchCI={matchCI} query={searchQuery} />
 
         {/* Coordinadores */}
@@ -2197,6 +2238,12 @@ const Dashboard = ({ currentUser, onLogout }) => {
           </button>
         </div>
 
+        <BuscadorInterno
+          searchQuery={searchQuery}
+          onChange={setSearchQuery}
+          onClear={() => setSearchQuery("")}
+        />
+
         <BusquedaAviso matchCI={matchCI} query={searchQuery} />
 
         {/* Subcoordinadores */}
@@ -2341,6 +2388,12 @@ const Dashboard = ({ currentUser, onLogout }) => {
           </button>
         </div>
 
+        <BuscadorInterno
+          searchQuery={searchQuery}
+          onChange={setSearchQuery}
+          onClear={() => setSearchQuery("")}
+        />
+
         <BusquedaAviso matchCI={matchCI} query={searchQuery} />
 
         {/* Votantes */}
@@ -2398,30 +2451,6 @@ const Dashboard = ({ currentUser, onLogout }) => {
                 {currentUser.nombre} {currentUser.apellido || ""}
               </p>
               <p className="text-xs text-slate-500">{rolLabel}</p>
-            </div>
-          </div>
-
-          {/* Search */}
-          <div className={`flex-1 max-w-xs transition-all ${searchActive ? "max-w-sm" : ""}`}>
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
-              <input
-                type="text"
-                value={searchQuery}
-                placeholder="Buscar por nombre, CI o teléfono..."
-                onFocus={() => setSearchActive(true)}
-                onBlur={() => { if (!searchQuery) setSearchActive(false); }}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-8 pr-8 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-slate-50"
-              />
-              {searchQuery && (
-                <button
-                  onClick={() => { setSearchQuery(""); setSearchActive(false); }}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 p-0 bg-transparent border-0 shadow-none text-slate-400 hover:text-slate-600"
-                >
-                  <X className="w-3 h-3" />
-                </button>
-              )}
             </div>
           </div>
 
