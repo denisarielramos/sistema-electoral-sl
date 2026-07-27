@@ -105,6 +105,31 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
   console.log("OK: caso 1b (coordinador con un único directo sin coordinador_ci: total=1, directos=1, indirectos=0)");
 }
 
+// ======================= CASO 1C: DIRIGENTE — VOTANTE DIRECTO DE UN COORDINADOR SIN dirigente_ci =======================
+// Mismo hallazgo P1, un nivel más arriba: getTodosVotantesDirigente solo miraba
+// dirigente_ci, así que un votante directo "estricto" de un coordinador de la rama
+// (visible en la sección de ese coordinador dentro del PDF del dirigente) no se contaba
+// en el resumen ("Total Red"/"Votantes") del dirigente ni en su Excel.
+{
+  const { getTodosVotantesDirigente } = await import("../src/utils/estructuraHelpers.js");
+
+  const estructura = {
+    dirigentes: [{ ci: "1111111" }],
+    coordinadores: [{ ci: "2222221", dirigente_ci: "1111111" }],
+    subcoordinadores: [],
+    votantes: [
+      // Directo "estricto" del coordinador, con coordinador_ci pero SIN dirigente_ci.
+      { ci: "3000009", nombre: "SinDirigenteCI", apellido: "Directo", coordinador_ci: "2222221", asignado_por: "2222221", asignado_por_rol: "coordinador", activo: true },
+    ],
+  };
+
+  const total = getTodosVotantesDirigente(estructura, "1111111");
+  assert.equal(total.length, 1, "getTodosVotantesDirigente debe incluir al directo del coordinador aunque no tenga dirigente_ci");
+  assert.ok(total.some((v) => v.ci === "3000009"), "la persona debe estar en el conjunto completo del dirigente");
+
+  console.log("OK: caso 1c (dirigente cuenta a los directos de sus coordinadores aunque no tengan dirigente_ci)");
+}
+
 // ======================= CASO 2: CI CON CUALQUIER FORMATO =======================
 {
   const { personaCoincideConsulta } = await import("../src/utils/busquedaHelpers.js");
