@@ -131,6 +131,31 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
   console.log("OK: caso 1b2 (coordinador cuenta a los votantes de sus subs aunque no tengan coordinador_ci)");
 }
 
+// ======================= CASO 1B3: FILAS DUPLICADAS CON LA MISMA CI =======================
+// La primera versión del fix deduplicaba por lote (Set poblado ANTES de filtrar cada
+// lote), así que dos filas con la misma CI dentro del MISMO lote de candidatos legacy
+// sobrevivían ambas. Ahora se dedupe elemento a elemento con un Map.
+{
+  const { getTodosVotantesCoord } = await import("../src/utils/estructuraHelpers.js");
+
+  const estructura = {
+    dirigentes: [],
+    coordinadores: [{ ci: "2222221" }],
+    subcoordinadores: [],
+    votantes: [
+      // Misma CI repetida dos veces, ambas sin coordinador_ci, dentro del mismo lote
+      // (directos "estrictos" del coordinador).
+      { ci: "3000008", nombre: "Duplicado", apellido: "Uno", asignado_por: "2222221", asignado_por_rol: "coordinador", activo: true },
+      { ci: "3000008", nombre: "Duplicado", apellido: "Uno", asignado_por: "2222221", asignado_por_rol: "coordinador", activo: true },
+    ],
+  };
+
+  const total = getTodosVotantesCoord(estructura, "2222221");
+  assert.equal(total.length, 1, "dos filas con la misma CI en el mismo lote deben colapsar a una sola");
+
+  console.log("OK: caso 1b3 (filas duplicadas con la misma CI dentro del mismo lote no se cuentan dos veces)");
+}
+
 // ======================= CASO 1C: DIRIGENTE — VOTANTE DIRECTO DE UN COORDINADOR SIN dirigente_ci =======================
 // Mismo hallazgo P1, un nivel más arriba: getTodosVotantesDirigente solo miraba
 // dirigente_ci, así que un votante directo "estricto" de un coordinador de la rama
