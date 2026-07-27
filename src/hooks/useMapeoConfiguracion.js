@@ -4,8 +4,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { fetchConfiguracionMapeo } from "../services/mapeoService";
 
-const DEFAULT_CONFIG = { radio_permitido_metros: 100, precision_gps_maxima_metros: 50 };
-
 export const useMapeoConfiguracion = () => {
   const [config, setConfig] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -16,10 +14,16 @@ export const useMapeoConfiguracion = () => {
     setError(null);
     try {
       const data = await fetchConfiguracionMapeo();
-      setConfig(data || DEFAULT_CONFIG);
+      setConfig(data);
     } catch (err) {
+      // No reemplazar la configuración por valores hardcodeados (100/50) ni
+      // borrarla: si ya había una configuración real cargada, se mantiene tal
+      // cual en vez de pisarla con un default que puede no coincidir con la del
+      // servidor (radio/precisión configurados por superadmin). Los consumidores
+      // deben tratar config === null como "todavía no disponible" y bloquear la
+      // confirmación de visitas hasta que recargar() tenga éxito, en vez de
+      // asumir silenciosamente un límite que el servidor podría no compartir.
       setError(err.message || "Error al cargar la configuración de mapeo.");
-      setConfig(DEFAULT_CONFIG);
     } finally {
       setLoading(false);
     }
@@ -29,5 +33,5 @@ export const useMapeoConfiguracion = () => {
     recargar();
   }, [recargar]);
 
-  return { config: config || DEFAULT_CONFIG, loading, error, recargar };
+  return { config, loading, error, recargar };
 };

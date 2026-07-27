@@ -18,7 +18,7 @@ import {
   formatearPrecisionGps,
 } from "../../utils/geoHelpers";
 
-const ModalConfirmarVisita = ({ show, onClose, hogar, config, onConfirmar }) => {
+const ModalConfirmarVisita = ({ show, onClose, hogar, config, configError, onReintentarConfig, onConfirmar }) => {
   const { loading, error: errorGps, posicion, solicitarUbicacion, reset } = useGeolocation();
   const [observacion, setObservacion] = useState("");
   const [enviando, setEnviando] = useState(false);
@@ -26,6 +26,44 @@ const ModalConfirmarVisita = ({ show, onClose, hogar, config, onConfirmar }) => 
   const [errorEnvio, setErrorEnvio] = useState(null);
 
   if (!show || !hogar) return null;
+
+  // Sin config real (radio permitido / precisión GPS máxima) no hay forma de
+  // mostrarle al usuario una vista previa confiable de si su ubicación va a
+  // quedar dentro de radio o si su precisión GPS alcanza — un default hardcodeado
+  // acá podría no coincidir con el valor real del servidor (que sí valida con la
+  // configuración real en mapeo_confirmar_visita), mostrando una vista previa
+  // engañosa. Se bloquea la confirmación y se ofrece reintentar la carga en vez
+  // de asumir silenciosamente 100 m / 50 m.
+  if (!config) {
+    return (
+      <div
+        className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+        onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      >
+        <div className="bg-white rounded-2xl w-full max-w-sm shadow-modal overflow-hidden animate-fade-in p-5 space-y-3">
+          <p className="text-sm font-semibold text-slate-800">No se pudo cargar la configuración del mapeo</p>
+          <p className="text-xs text-slate-500">
+            No se puede confirmar una visita sin conocer el radio permitido y la precisión GPS máxima configurados.
+          </p>
+          {configError && <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{configError}</p>}
+          <div className="flex gap-2 pt-1">
+            <button
+              onClick={onClose}
+              className="flex-1 h-10 px-4 rounded-xl border border-slate-200 text-sm text-slate-600 hover:bg-slate-50 transition-colors bg-white"
+            >
+              Cerrar
+            </button>
+            <button
+              onClick={onReintentarConfig}
+              className="flex-1 h-10 px-4 rounded-xl bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium transition-colors border-0 shadow-sm flex items-center justify-center gap-2"
+            >
+              <RefreshCw className="w-3.5 h-3.5" /> Reintentar
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const precisionAceptable = posicion
     ? esPrecisionGpsAceptable(posicion.precisionGps, config?.precision_gps_maxima_metros)

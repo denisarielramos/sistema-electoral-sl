@@ -425,28 +425,32 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
 -- ¿El hogar p_hogar_id está dentro del alcance de (p_actor_ci, p_actor_rol)? Un
 -- hogar está en el alcance de un actor no-superadmin si:
---   a) todavía NO tiene ningún votante asociado activo Y él mismo lo creó
---      (creado_por_ci) — así un hogar recién creado sigue siendo visible/
---      gestionable por quien lo acaba de cargar, en vez de desaparecer hasta que
---      se le asocie alguien. Este acceso es solo transitorio: en cuanto el hogar
---      tiene al menos un votante asociado, el alcance pasa a depender
---      exclusivamente de esos votantes (b) — un creador cuyos votantes se
---      reasignaron después fuera de su rama NO conserva acceso indefinido; o
+--   a) NUNCA tuvo ningún votante asociado (ni siquiera uno ya desasociado) Y él
+--      mismo lo creó (creado_por_ci) — así un hogar recién creado sigue siendo
+--      visible/gestionable por quien lo acaba de cargar, en vez de desaparecer
+--      hasta que se le asocie alguien. Este acceso es solo transitorio y
+--      PERMANENTE una vez perdido: en cuanto el hogar tuvo su primer votante
+--      asociado, el alcance pasa a depender EXCLUSIVAMENTE de la membresía de
+--      votantes (b) para siempre — nunca vuelve a caer en este fallback aunque
+--      luego se desasocien todos los votantes activos. Comprobar "activo = true"
+--      acá (en vez de "alguna vez existió una fila") reabriría el fallback cada
+--      vez que el último votante activo se desasocia, dejando que el creador
+--      original recupere acceso a un hogar que ya no está en su rama; o
 --   b) al menos uno de sus votantes asociados activos está en su alcance.
 CREATE OR REPLACE FUNCTION mapeo_hogar_en_alcance(p_hogar_id uuid, p_actor_ci text, p_actor_rol text)
 RETURNS boolean AS $$
 DECLARE
   v_creado_por_ci text;
-  v_tiene_votantes boolean;
+  v_tuvo_votantes_alguna_vez boolean;
 BEGIN
   IF p_actor_rol = 'superadmin' THEN
     RETURN EXISTS (SELECT 1 FROM hogares h WHERE h.id = p_hogar_id);
   END IF;
 
-  SELECT EXISTS (SELECT 1 FROM hogar_votantes hv WHERE hv.hogar_id = p_hogar_id AND hv.activo = true)
-    INTO v_tiene_votantes;
+  SELECT EXISTS (SELECT 1 FROM hogar_votantes hv WHERE hv.hogar_id = p_hogar_id)
+    INTO v_tuvo_votantes_alguna_vez;
 
-  IF NOT v_tiene_votantes THEN
+  IF NOT v_tuvo_votantes_alguna_vez THEN
     SELECT creado_por_ci INTO v_creado_por_ci FROM hogares WHERE id = p_hogar_id;
     RETURN v_creado_por_ci IS NOT NULL AND v_creado_por_ci = p_actor_ci;
   END IF;

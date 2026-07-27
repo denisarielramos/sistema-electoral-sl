@@ -21,7 +21,7 @@ const AccesoRapidoHogar = ({ currentUser, votante, votantesDisponibles, onClose 
   // que la lista mostrada no quede congelada en el snapshot inicial (hogarExistente solo
   // se resuelve una vez, al abrir el flujo).
   const [votantesLive, setVotantesLive] = useState(null);
-  const { config } = useMapeoConfiguracion();
+  const { config, error: configError, recargar: recargarConfig } = useMapeoConfiguracion();
 
   const refrescarVotantes = async (hogarId) => {
     try {
@@ -129,6 +129,8 @@ const AccesoRapidoHogar = ({ currentUser, votante, votantesDisponibles, onClose 
         show={!!modalVisitaHogar}
         hogar={modalVisitaHogar}
         config={config}
+        configError={configError}
+        onReintentarConfig={recargarConfig}
         onClose={() => setModalVisitaHogar(null)}
         onConfirmar={(payload) => confirmarVisita(currentUser, modalVisitaHogar.id, payload)}
       />

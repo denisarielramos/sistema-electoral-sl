@@ -21,7 +21,7 @@ import EstadoMapaBadge from "./EstadoMapaBadge";
 
 const MapeoTerritorial = ({ currentUser, estructura, onVolver }) => {
   const { hogares, loading, error, recargar, crear, actualizar, verificar, asociarVotante, desasociarVotante } = useHogares(currentUser);
-  const { config } = useMapeoConfiguracion();
+  const { config, error: configError, recargar: recargarConfig } = useMapeoConfiguracion();
 
   const [query, setQuery] = useState("");
   const [filtroDirigente, setFiltroDirigente] = useState("");
@@ -117,7 +117,11 @@ const MapeoTerritorial = ({ currentUser, estructura, onVolver }) => {
           <div className="p-2 bg-brand-100 rounded-lg"><Home className="w-4 h-4 text-brand-600" /></div>
           <div>
             <h2 className="text-lg font-bold text-slate-800">Mapeo territorial</h2>
-            <p className="text-xs text-slate-500">Radio permitido: {config.radio_permitido_metros} m — Precisión GPS máx.: {config.precision_gps_maxima_metros} m</p>
+            <p className="text-xs text-slate-500">
+              {config
+                ? `Radio permitido: ${config.radio_permitido_metros} m — Precisión GPS máx.: ${config.precision_gps_maxima_metros} m`
+                : "Cargando configuración de mapeo..."}
+            </p>
           </div>
         </div>
         <div className="flex gap-2">
@@ -302,6 +306,8 @@ const MapeoTerritorial = ({ currentUser, estructura, onVolver }) => {
         show={!!modalVisitaHogar}
         hogar={modalVisitaHogar}
         config={config}
+        configError={configError}
+        onReintentarConfig={recargarConfig}
         onClose={() => setModalVisitaHogar(null)}
         onConfirmar={async (payload) => {
           const visita = await confirmarVisitaService(currentUser, modalVisitaHogar.id, payload);

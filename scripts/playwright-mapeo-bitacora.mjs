@@ -143,11 +143,14 @@ function createMockBackend(dataset) {
   const hogarEnAlcance = (hogarId, actorCi, actorRol) => {
     if (actorRol === "superadmin") return true;
     // Espejo de mapeo_hogar_en_alcance en el SQL real: el creador solo tiene acceso
-    // transitorio mientras el hogar no tenga NINGÚN votante asociado activo todavía
-    // — en cuanto tiene uno, el alcance pasa a depender exclusivamente de los
-    // votantes (nunca queda un acceso permanente para quien lo creó).
-    const tieneVotantes = hogarVotantes.some((hv) => hv.hogar_id === hogarId && hv.activo);
-    if (!tieneVotantes) {
+    // transitorio mientras el hogar NUNCA tuvo ningún votante asociado (ni siquiera
+    // uno ya desasociado) — en cuanto tuvo el primero, el alcance pasa a depender
+    // EXCLUSIVAMENTE de los votantes actualmente activos, para siempre. Comprobar
+    // solo los activos acá (en vez de "alguna vez existió una fila") reabriría este
+    // fallback cada vez que se desasocia el último votante activo, dejando que el
+    // creador original recupere acceso a un hogar que ya no está en su rama.
+    const tuvoVotantesAlgunaVez = hogarVotantes.some((hv) => hv.hogar_id === hogarId);
+    if (!tuvoVotantesAlgunaVez) {
       const hogar = hogares.find((h) => h.id === hogarId);
       return !!hogar && hogar.creado_por_ci === actorCi;
     }
