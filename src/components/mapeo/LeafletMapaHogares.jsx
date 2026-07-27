@@ -34,10 +34,18 @@ const AjustarLimites = ({ hogares }) => {
       .filter((h) => h.latitud !== null && h.latitud !== undefined && h.longitud !== null && h.longitud !== undefined)
       .map((h) => [h.latitud, h.longitud]);
     if (puntos.length === 0) return;
+    // animate: false — sin esto, un cambio de zoom (p. ej. de 12 a 15 al aparecer
+    // el primer hogar) dispara la animación de zoom de Leaflet, que agenda su
+    // propio callback de finalización (_onZoomTransitionEnd) para cuando termine
+    // la transición CSS. Si el componente vuelve a re-renderizar (la lista de
+    // hogares cambia de nuevo, p. ej. tras crear/editar un hogar) antes de que esa
+    // transición termine, el callback puede ejecutarse contra un mapPane que ya no
+    // tiene su posición inicializada y lanzar sobre _leaflet_pos. Desactivar la
+    // animación hace que el cambio de vista sea síncrono, sin ese callback diferido.
     if (puntos.length === 1) {
-      map.setView(puntos[0], 15);
+      map.setView(puntos[0], 15, { animate: false });
     } else {
-      map.fitBounds(puntos, { padding: [40, 40], maxZoom: 16 });
+      map.fitBounds(puntos, { padding: [40, 40], maxZoom: 16, animate: false });
     }
   }, [hogares, map]);
   return null;

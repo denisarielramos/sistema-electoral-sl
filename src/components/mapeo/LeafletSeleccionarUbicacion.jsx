@@ -48,7 +48,15 @@ const RecentrarAlPrimerPunto = ({ latitud, longitud }) => {
     // de inicializar el DOM/posición interna del ícono (_leaflet_pos) — llamar
     // setView() en el mismo tick puede intentar reposicionarlo antes de que exista y
     // lanzar un error. Diferir un frame le da tiempo a Leaflet de terminar de montarlo.
-    const frame = requestAnimationFrame(() => map.setView([latitud, longitud], 16));
+    // animate: false — sin esto, el cambio de zoom (12 -> 16) dispara la animación
+    // de zoom de Leaflet, que agenda su propio callback de finalización
+    // (_onZoomTransitionEnd) para cuando termine la transición CSS. Este mapa vive
+    // dentro de un modal que puede cerrarse (desmontando el MapContainer) antes de
+    // que esa transición termine — el callback diferido entonces se ejecuta contra
+    // un mapPane ya destruido y lanza sobre _leaflet_pos. Desactivar la animación
+    // hace que el cambio de vista sea síncrono, sin callback diferido que pueda
+    // sobrevivir al desmontaje.
+    const frame = requestAnimationFrame(() => map.setView([latitud, longitud], 16, { animate: false }));
     return () => cancelAnimationFrame(frame);
   }, [latitud, longitud, map]);
   return null;

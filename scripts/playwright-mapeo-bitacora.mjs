@@ -218,6 +218,12 @@ function createMockBackend(dataset) {
       const actor = resolverActor(body);
       if (!["superadmin", "dirigente"].includes(actor.rol)) throw new Error("Solo superadmin o dirigente pueden verificar/rechazar.");
       const h = hogares.find((x) => x.id === body.p_hogar_id);
+      // Espejo de la comprobación optimista agregada en mapeo_verificar_hogar: si el
+      // hogar se reubicó después de que el cliente lo cargó para revisión, rechazar
+      // en vez de aprobar/rechazar un punto que el revisor nunca llegó a ver.
+      if (h.ubicacion_actualizada_at !== body.p_ubicacion_actualizada_at) {
+        throw new Error("La ubicación de este hogar cambió después de cargarse para revisión. Vuelva a abrirlo y revise el punto actual antes de verificar.");
+      }
       h.estado = body.p_aprobar ? "verificado" : "rechazado";
       h.verificado_por_ci = actor.ci;
       h.verificado_por_rol = actor.rol;
@@ -510,7 +516,8 @@ await (async () => {
   await test("Verificar y luego rechazar una ubicación pendiente", async () => {
     const dataset = buildDataset();
     const backend = createMockBackend(dataset);
-    backend.seedHogar({ id: "h1", nombre_familia: "Hogar Pendiente", direccion: "Dir 1", referencia: "", latitud: PUNTO.lat, longitud: PUNTO.lng, precision_gps: 10, estado: "pendiente", creado_por_ci: "1200001", creado_por_rol: "coordinador", activo: true, created_at: new Date().toISOString(), updated_at: new Date().toISOString() });
+    const ubicacionAt = new Date().toISOString();
+    backend.seedHogar({ id: "h1", nombre_familia: "Hogar Pendiente", direccion: "Dir 1", referencia: "", latitud: PUNTO.lat, longitud: PUNTO.lng, precision_gps: 10, estado: "pendiente", creado_por_ci: "1200001", creado_por_rol: "coordinador", activo: true, created_at: ubicacionAt, updated_at: ubicacionAt, ubicacion_actualizada_at: ubicacionAt });
     backend.seedHogarVotante({ hogar_id: "h1", votante_ci: "1400001", activo: true });
 
     await withPage({ ci: "1100001", nombre: "Dirigente", apellido: "Uno", role: "dirigente", loginCode: "DIR0001" }, backend, {}, async (page) => {
@@ -527,10 +534,24 @@ await (async () => {
       await page.waitForTimeout(300);
     });
 
+    // Si la ubicación revisada por el cliente (p_ubicacion_actualizada_at) ya no
+    // coincide con la vigente — p. ej. alguien más reubicó el hogar mientras tanto —
+    // el RPC debe rechazar la verificación en vez de aprobar/rechazar un punto que el
+    // revisor nunca llegó a ver.
+    let staleError = null;
+    try {
+      backend.handlers.mapeo_verificar_hogar({ p_login_code: "DIR0001", p_superadmin_ci: null, p_hogar_id: "h1", p_aprobar: false, p_ubicacion_actualizada_at: "2000-01-01T00:00:00.000Z", p_observacion: "Intento con versión vieja" });
+    } catch (err) {
+      staleError = err.message;
+    }
+    assert.ok(staleError && staleError.includes("cambió"), `Debe rechazar la verificación con una versión de ubicación desactualizada, recibido: ${staleError}`);
+    assert.equal(backend._state().hogares[0].estado, "verificado", "El estado no debe cambiar cuando la versión de ubicación no coincide");
+
     // El botón de verificar ya no debería estar visible por default una vez
     // verificado (solo aparece para estado "pendiente"); se valida directo contra el
-    // RPC simulado para forzar el camino de rechazo.
-    backend.handlers.mapeo_verificar_hogar({ p_login_code: "DIR0001", p_superadmin_ci: null, p_hogar_id: "h1", p_aprobar: false, p_observacion: "Dirección incorrecta" });
+    // RPC simulado para forzar el camino de rechazo, con la versión de ubicación
+    // correcta (verificar/rechazar no la modifica, solo una reubicación lo hace).
+    backend.handlers.mapeo_verificar_hogar({ p_login_code: "DIR0001", p_superadmin_ci: null, p_hogar_id: "h1", p_aprobar: false, p_ubicacion_actualizada_at: ubicacionAt, p_observacion: "Dirección incorrecta" });
     assert.equal(backend._state().hogares[0].estado, "rechazado", "El estado debe poder pasar a rechazado");
 
     // Una ubicación rechazada no debe poder "confirmar" una visita — el RPC lo

@@ -545,6 +545,11 @@ RETURNS TABLE(
   fecha_verificacion timestamptz,
   created_at timestamptz,
   updated_at timestamptz,
+  -- Expuesta para que el frontend pueda enviarla de vuelta a mapeo_verificar_hogar
+  -- como la "versión de ubicación" que efectivamente revisó (ver esa función) — sin
+  -- este valor, el cliente no tiene forma de detectar que el punto cambió entre que
+  -- lo cargó para revisión y que confirmó la verificación.
+  ubicacion_actualizada_at timestamptz,
   votantes jsonb,
   ultima_visita jsonb
 ) AS $$
@@ -559,7 +564,7 @@ BEGIN
     h.id, h.nombre_familia, h.direccion, h.referencia, h.latitud, h.longitud,
     h.precision_gps, h.estado, h.creado_por_ci, h.creado_por_rol,
     h.verificado_por_ci, h.verificado_por_rol, h.fecha_verificacion,
-    h.created_at, h.updated_at,
+    h.created_at, h.updated_at, h.ubicacion_actualizada_at,
     COALESCE((
       SELECT jsonb_agg(jsonb_build_object(
         'ci', v.ci, 'nombre', v.nombre, 'apellido', v.apellido,
@@ -718,6 +723,7 @@ CREATE OR REPLACE FUNCTION mapeo_verificar_hogar(
   p_superadmin_ci text,
   p_hogar_id uuid,
   p_aprobar boolean,
+  p_ubicacion_actualizada_at timestamptz,
   p_observacion text DEFAULT NULL
 ) RETURNS hogares AS $$
 DECLARE
@@ -734,13 +740,23 @@ BEGIN
     RAISE EXCEPTION 'El hogar % no está dentro de su alcance.', p_hogar_id;
   END IF;
 
+  -- p_ubicacion_actualizada_at es la versión de ubicación que el cliente cargó y
+  -- efectivamente revisó (viene de mapeo_listar_hogares). Si alguien más reubicó el
+  -- hogar mientras tanto (o mientras esta llamada esperaba el lock detrás de una
+  -- reubicación concurrente), ubicacion_actualizada_at en la fila actual ya no
+  -- coincide — el WHERE no matchea ninguna fila y la verificación se rechaza en vez
+  -- de aprobar/rechazar un punto que el revisor nunca llegó a ver.
   UPDATE hogares SET
     estado = CASE WHEN p_aprobar THEN 'verificado' ELSE 'rechazado' END,
     verificado_por_ci = v_ci,
     verificado_por_rol = v_rol,
     fecha_verificacion = now()
-  WHERE id = p_hogar_id
+  WHERE id = p_hogar_id AND ubicacion_actualizada_at = p_ubicacion_actualizada_at
   RETURNING * INTO v_hogar;
+
+  IF v_hogar IS NULL THEN
+    RAISE EXCEPTION 'La ubicación de este hogar cambió después de cargarse para revisión. Vuelva a abrirlo y revise el punto actual antes de verificar.';
+  END IF;
 
   IF p_observacion IS NOT NULL THEN
     UPDATE hogares SET referencia = COALESCE(referencia || E'\n', '') || '[Verificación] ' || p_observacion
@@ -883,14 +899,21 @@ BEGIN
 
   IF p_latitud IS NULL OR p_longitud IS NULL THEN
     -- Registrar igual el intento fallido (nunca se descarta en silencio).
+    -- fecha_hora = clock_timestamp() explícito, no el DEFAULT now() de la tabla:
+    -- now() queda fijo al inicio de esta transacción, no al momento posterior a
+    -- adquirir el lock de arriba. Si esta transacción esperó detrás de una
+    -- reubicación concurrente (que ahora también usa clock_timestamp() para
+    -- ubicacion_actualizada_at), un fecha_hora basado en now() podría terminar
+    -- más viejo que la reubicación aunque la visita se registró después,
+    -- excluyéndola incorrectamente del filtro >= ubicacion_actualizada_at.
     INSERT INTO visitas_hogar (
       hogar_id, visitante_ci, visitante_rol, latitud, longitud, precision_gps,
       distancia_metros, radio_permitido_usado, resultado, observacion,
-      creado_por_ci, creado_por_rol
+      fecha_hora, creado_por_ci, creado_por_rol
     ) VALUES (
       p_hogar_id, v_ci, v_rol, COALESCE(p_latitud, 0), COALESCE(p_longitud, 0), p_precision_gps,
       NULL, v_config.radio_permitido_metros, 'error_gps',
-      COALESCE(p_observacion, 'Sin coordenadas del dispositivo.'), v_ci, v_rol
+      COALESCE(p_observacion, 'Sin coordenadas del dispositivo.'), clock_timestamp(), v_ci, v_rol
     ) RETURNING * INTO v_visita;
     RETURN v_visita;
   END IF;
@@ -913,14 +936,18 @@ BEGIN
                         THEN 'confirmada' ELSE 'fuera_de_radio' END;
   END IF;
 
+  -- fecha_hora = clock_timestamp() explícito (ver comentario en el INSERT de la
+  -- rama sin coordenadas de arriba): consistente con el orden real de
+  -- serialización que da el lock FOR UPDATE de la línea 880, no con el inicio de
+  -- esta transacción.
   INSERT INTO visitas_hogar (
     hogar_id, visitante_ci, visitante_rol, latitud, longitud, precision_gps,
     distancia_metros, radio_permitido_usado, resultado, observacion,
-    creado_por_ci, creado_por_rol
+    fecha_hora, creado_por_ci, creado_por_rol
   ) VALUES (
     p_hogar_id, v_ci, v_rol, p_latitud, p_longitud, p_precision_gps,
     v_distancia, v_config.radio_permitido_metros, v_resultado, p_observacion,
-    v_ci, v_rol
+    clock_timestamp(), v_ci, v_rol
   ) RETURNING * INTO v_visita;
 
   RETURN v_visita;
@@ -988,7 +1015,7 @@ GRANT EXECUTE ON FUNCTION mapeo_actualizar_configuracion(text, text, double prec
 GRANT EXECUTE ON FUNCTION mapeo_listar_hogares(text, text) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION mapeo_crear_hogar(text, text, text, text, text, double precision, double precision, double precision) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION mapeo_actualizar_hogar(text, text, uuid, text, text, text, double precision, double precision, double precision) TO anon, authenticated;
-GRANT EXECUTE ON FUNCTION mapeo_verificar_hogar(text, text, uuid, boolean, text) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION mapeo_verificar_hogar(text, text, uuid, boolean, timestamptz, text) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION mapeo_asociar_votante(text, text, uuid, text) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION mapeo_desasociar_votante(text, text, uuid, text) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION mapeo_confirmar_visita(text, text, uuid, double precision, double precision, double precision, text) TO anon, authenticated;

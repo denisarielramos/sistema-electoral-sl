@@ -258,7 +258,7 @@ const MapeoTerritorial = ({ currentUser, estructura, onVolver }) => {
         onVerificar={async (hogar, aprobar) => {
           setAccionError(null);
           try {
-            await verificar(hogar.id, aprobar);
+            await verificar(hogar.id, aprobar, hogar.ubicacion_actualizada_at);
             setHogarSeleccionado(null);
           } catch (err) {
             setAccionError(err.message);

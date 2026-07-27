@@ -54,8 +54,8 @@ export const useHogares = (currentUser) => {
   );
 
   const verificar = useCallback(
-    async (hogarId, aprobar, observacion) => {
-      const hogar = await verificarHogar(currentUser, hogarId, aprobar, observacion);
+    async (hogarId, aprobar, ubicacionActualizadaAt, observacion) => {
+      const hogar = await verificarHogar(currentUser, hogarId, aprobar, ubicacionActualizadaAt, observacion);
       await recargar();
       return hogar;
     },

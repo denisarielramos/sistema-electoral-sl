@@ -96,12 +96,13 @@ export const actualizarHogar = async (
   return unwrap(res, "Error al actualizar el hogar");
 };
 
-export const verificarHogar = async (currentUser, hogarId, aprobar, observacion = null) => {
+export const verificarHogar = async (currentUser, hogarId, aprobar, ubicacionActualizadaAt, observacion = null) => {
   const actor = getActorParams(currentUser);
   const res = await supabase.rpc("mapeo_verificar_hogar", {
     ...actor,
     p_hogar_id: hogarId,
     p_aprobar: aprobar,
+    p_ubicacion_actualizada_at: ubicacionActualizadaAt,
     p_observacion: observacion,
   });
   return unwrap(res, "Error al verificar el hogar");
