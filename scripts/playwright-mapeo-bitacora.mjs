@@ -111,7 +111,8 @@ function createMockBackend(dataset) {
       if (v.dirigente_ci === actorCi) return true;
       // Compatibilidad legacy: fila sin dirigente_ci poblado pero con asignado_por +
       // asignado_por_rol === "dirigente" (espejo del fallback agregado en el SQL real).
-      if (v.asignado_por === actorCi && v.asignado_por_rol === "dirigente") return true;
+      // No debe imponerse si dirigente_ci ya apunta a OTRO dirigente (reasignado).
+      if (!v.dirigente_ci && v.asignado_por === actorCi && v.asignado_por_rol === "dirigente") return true;
       const coordCIs = coordinadores.filter((c) => c.dirigente_ci === actorCi).map((c) => c.ci);
       if (coordCIs.includes(v.coordinador_ci)) return true;
       const subCIs = subcoordinadores.filter((s) => coordCIs.includes(s.coordinador_ci)).map((s) => s.ci);
@@ -120,7 +121,8 @@ function createMockBackend(dataset) {
     if (actorRol === "coordinador") {
       if (v.coordinador_ci === actorCi) return true;
       // Compatibilidad legacy: mismo fallback "estricto" que getVotantesDirectosCoord.
-      if (v.asignado_por === actorCi && v.asignado_por_rol === "coordinador") return true;
+      // No debe imponerse si coordinador_ci ya apunta a OTRO coordinador (reasignado).
+      if (!v.coordinador_ci && v.asignado_por === actorCi && v.asignado_por_rol === "coordinador") return true;
       const subCIs = subcoordinadores.filter((s) => s.coordinador_ci === actorCi).map((s) => s.ci);
       return v.asignado_por_rol === "subcoordinador" && subCIs.includes(v.asignado_por);
     }
@@ -226,6 +228,13 @@ function createMockBackend(dataset) {
     mapeo_confirmar_visita: (body) => {
       const actor = resolverActor(body);
       if (!hogarEnAlcance(body.p_hogar_id, actor.ci, actor.rol)) throw new Error("El hogar no está dentro de su alcance.");
+      // Espejo del rechazo agregado al RPC: precisión negativa o NaN es un dato
+      // malformado, no una simple imprecisión — se rechaza en vez de registrarse.
+      if (body.p_precision_gps !== null && body.p_precision_gps !== undefined) {
+        if (body.p_precision_gps < 0 || Number.isNaN(body.p_precision_gps)) {
+          throw new Error(`Precisión GPS inválida: ${body.p_precision_gps}`);
+        }
+      }
       const h = hogares.find((x) => x.id === body.p_hogar_id);
       const distancia = haversine(body.p_latitud, body.p_longitud, h.latitud, h.longitud);
       let resultado;

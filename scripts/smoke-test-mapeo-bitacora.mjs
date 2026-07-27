@@ -231,6 +231,46 @@ import {
   assert.deepEqual(filtrarHogares(hogares, { coordinadorCI: "2000001" }, estructura).map((h) => h.id), ["h1"]);
   // Sin filtros -> todos.
   assert.equal(filtrarHogares(hogares, {}, estructura).length, 2);
+
+  // Hogar compartido entre ramas (dos votantes de coordinadores distintos): el
+  // filtro por jerarquía debe evaluar CADA votante, no solo el primero embebido —
+  // si el coordinador buscado corresponde al SEGUNDO votante, el hogar igual debe
+  // aparecer (regresión: antes se resolvía una única tupla con el primer votante
+  // que tuviera cada dato, y este hogar desaparecía de ambos filtros).
+  const estructuraDosCoords = {
+    dirigentes: [],
+    coordinadores: [
+      { ci: "2000001", nombre: "Bea", apellido: "Coord" },
+      { ci: "2000002", nombre: "Cato", apellido: "Coord" },
+    ],
+    subcoordinadores: [],
+  };
+  const hogarCompartido = {
+    id: "h3",
+    nombre_familia: "Familia Compartida",
+    direccion: "Calle 3",
+    referencia: "",
+    estado: "verificado",
+    votantes: [
+      { ci: "4000010", nombre: "A", apellido: "Uno", coordinador_ci: "2000001" },
+      { ci: "4000011", nombre: "B", apellido: "Dos", coordinador_ci: "2000002" },
+    ],
+  };
+  assert.deepEqual(
+    filtrarHogares([hogarCompartido], { coordinadorCI: "2000001" }, estructuraDosCoords).map((h) => h.id),
+    ["h3"],
+    "Debe coincidir por el PRIMER votante embebido"
+  );
+  assert.deepEqual(
+    filtrarHogares([hogarCompartido], { coordinadorCI: "2000002" }, estructuraDosCoords).map((h) => h.id),
+    ["h3"],
+    "Debe coincidir también por el SEGUNDO votante embebido, no solo el primero"
+  );
+  assert.deepEqual(
+    filtrarHogares([hogarCompartido], { coordinadorCI: "9999999" }, estructuraDosCoords).map((h) => h.id),
+    [],
+    "Un coordinador ajeno a ambos votantes no debe coincidir"
+  );
 }
 
 console.log("OK: smoke-test-mapeo-bitacora — todos los casos pasaron.");

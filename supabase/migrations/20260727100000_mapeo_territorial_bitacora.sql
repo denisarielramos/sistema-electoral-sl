@@ -330,7 +330,13 @@ BEGIN
       SELECT 1 FROM votantes v
       WHERE v.ci = p_votante_ci AND v.activo IS DISTINCT FROM false AND (
         v.dirigente_ci = p_actor_ci
-        OR (v.asignado_por = p_actor_ci AND v.asignado_por_rol = 'dirigente')
+        -- Compatibilidad legacy (fila sin dirigente_ci poblado, solo asignado_por +
+        -- asignado_por_rol='dirigente'). No debe imponerse sobre un dirigente_ci
+        -- ACTUAL distinto (p. ej. el votante fue reasignado después) — igual que
+        -- getVotantesDirectosDirigente exige que dirigente_ci coincida.
+        OR (
+          v.dirigente_ci IS NULL AND v.asignado_por = p_actor_ci AND v.asignado_por_rol = 'dirigente'
+        )
         OR v.coordinador_ci IN (SELECT c.ci FROM coordinadores c WHERE c.dirigente_ci = p_actor_ci)
         OR (
           v.asignado_por_rol = 'subcoordinador'
@@ -349,7 +355,10 @@ BEGIN
         -- Compatibilidad legacy: filas anteriores a la convención actual (que siempre
         -- puebla coordinador_ci) solo tienen asignado_por + asignado_por_rol='coordinador'
         -- — mismo fallback "estricto" que getVotantesDirectosCoord en estructuraHelpers.js.
-        OR (v.asignado_por = p_actor_ci AND v.asignado_por_rol = 'coordinador')
+        -- No debe imponerse sobre un coordinador_ci ACTUAL distinto (votante reasignado).
+        OR (
+          v.coordinador_ci IS NULL AND v.asignado_por = p_actor_ci AND v.asignado_por_rol = 'coordinador'
+        )
         OR (
           v.asignado_por_rol = 'subcoordinador'
           AND v.asignado_por IN (SELECT s.ci FROM subcoordinadores s WHERE s.coordinador_ci = p_actor_ci)
@@ -772,6 +781,15 @@ BEGIN
 
   IF p_latitud < -90 OR p_latitud > 90 OR p_longitud < -180 OR p_longitud > 180 THEN
     RAISE EXCEPTION 'Coordenadas inválidas: (%, %)', p_latitud, p_longitud;
+  END IF;
+
+  -- Una precisión GPS negativa o no-finita (NaN) es un dato malformado, no una simple
+  -- imprecisión — nunca debería llegar por la UI, pero un request directo al RPC
+  -- podría enviarla; se rechaza de plano en vez de dejarla pasar como si fuera una
+  -- visita "confirmada" con auditoría corrupta. (p_precision_gps != p_precision_gps
+  -- detecta NaN: es la única condición SQL en la que un valor no es igual a sí mismo.)
+  IF p_precision_gps IS NOT NULL AND (p_precision_gps < 0 OR p_precision_gps != p_precision_gps) THEN
+    RAISE EXCEPTION 'Precisión GPS inválida: %', p_precision_gps;
   END IF;
 
   -- Precisión GPS inaceptable o el hogar aún no tiene coordenadas de referencia:

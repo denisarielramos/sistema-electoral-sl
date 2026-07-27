@@ -8,7 +8,7 @@ import { useVisitas } from "../../hooks/useVisitas";
 import { normalizeCI } from "../../utils/estructuraHelpers";
 import { normalizeTexto, personaCoincideConsulta } from "../../utils/busquedaHelpers";
 import { formatearDistancia, formatearPrecisionGps } from "../../utils/geoHelpers";
-import { resolverNombreActor, getJerarquiaVisita } from "../../utils/mapeoHelpers";
+import { resolverNombreActor, getJerarquiaVisita, visitaTieneJerarquia } from "../../utils/mapeoHelpers";
 
 const RESULTADO_LABEL = {
   confirmada: "Confirmada",
@@ -50,9 +50,7 @@ const BitacoraVisitas = ({ currentUser, estructura, onVolver }) => {
       if (filtroRol && v.visitante_rol !== filtroRol) return false;
       if (filtroResultado && v.resultado !== filtroResultado) return false;
       if (filtroDirigente || filtroCoordinador) {
-        const jerarquia = getJerarquiaVisita(v, estructura);
-        if (filtroDirigente && normalizeCI(jerarquia.dirigente?.ci) !== normalizeCI(filtroDirigente)) return false;
-        if (filtroCoordinador && normalizeCI(jerarquia.coordinador?.ci) !== normalizeCI(filtroCoordinador)) return false;
+        if (!visitaTieneJerarquia(v, { dirigenteCI: filtroDirigente, coordinadorCI: filtroCoordinador }, estructura)) return false;
       }
       return true;
     });

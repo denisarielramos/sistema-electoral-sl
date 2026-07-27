@@ -42,28 +42,54 @@ export const construirVotantesEnHogarActivo = (hogares, excluirHogarId = null) =
   return set;
 };
 
-// Resuelve dirigente/coordinador/subcoordinador responsables de un hogar a partir de
-// sus votantes asociados (toma el primero con cada dato — en la práctica todos los
-// integrantes de un mismo hogar comparten rama). `estructura` es la misma prop que ya
-// usa Dashboard.jsx (dirigentes/coordinadores/subcoordinadores), para no reconsultar.
+// Resuelve dirigente/coordinador/subcoordinador de UN votante a partir de sus propios
+// campos (dirigente_ci, coordinador_ci, asignado_por + asignado_por_rol).
+const getJerarquiaVotante = (v, estructura) => {
+  const dirigenteCI = normalizeCI(v?.dirigente_ci);
+  const coordinadorCI = normalizeCI(v?.coordinador_ci);
+  const subcoordinadorCI = v?.asignado_por_rol === "subcoordinador" ? normalizeCI(v?.asignado_por) : "";
+
+  return {
+    dirigente: dirigenteCI ? (estructura?.dirigentes || []).find((d) => normalizeCI(d.ci) === dirigenteCI) : null,
+    coordinador: coordinadorCI ? (estructura?.coordinadores || []).find((c) => normalizeCI(c.ci) === coordinadorCI) : null,
+    subcoordinador: subcoordinadorCI ? (estructura?.subcoordinadores || []).find((s) => normalizeCI(s.ci) === subcoordinadorCI) : null,
+  };
+};
+
+// Resuelve dirigente/coordinador/subcoordinador "representativos" de un hogar, para
+// MOSTRAR en la tarjeta/detalle (toma el primer votante con cada dato — en la
+// práctica todos los integrantes de un mismo hogar suelen compartir rama). Para
+// FILTRAR por jerarquía use hogarTieneJerarquia(), que evalúa cada votante por
+// separado en vez de reducir el hogar a una sola tupla — un hogar compartido entre
+// ramas no debe desaparecer de los filtros solo porque el primer votante embebido no
+// es el que coincide.
 export const getJerarquiaHogar = (hogar, estructura) => {
   const votantes = hogar?.votantes || [];
-  const dirigenteCI = normalizeCI(votantes.find((v) => v.dirigente_ci)?.dirigente_ci);
-  const coordinadorCI = normalizeCI(votantes.find((v) => v.coordinador_ci)?.coordinador_ci);
-  const subVotante = votantes.find((v) => v.asignado_por_rol === "subcoordinador");
-  const subcoordinadorCI = normalizeCI(subVotante?.asignado_por);
+  const conDirigente = votantes.find((v) => v.dirigente_ci);
+  const conCoordinador = votantes.find((v) => v.coordinador_ci);
+  const conSubcoordinador = votantes.find((v) => v.asignado_por_rol === "subcoordinador");
 
-  const dirigente = dirigenteCI
-    ? (estructura?.dirigentes || []).find((d) => normalizeCI(d.ci) === dirigenteCI)
-    : null;
-  const coordinador = coordinadorCI
-    ? (estructura?.coordinadores || []).find((c) => normalizeCI(c.ci) === coordinadorCI)
-    : null;
-  const subcoordinador = subcoordinadorCI
-    ? (estructura?.subcoordinadores || []).find((s) => normalizeCI(s.ci) === subcoordinadorCI)
-    : null;
+  return {
+    dirigente: conDirigente ? getJerarquiaVotante(conDirigente, estructura).dirigente : null,
+    coordinador: conCoordinador ? getJerarquiaVotante(conCoordinador, estructura).coordinador : null,
+    subcoordinador: conSubcoordinador ? getJerarquiaVotante(conSubcoordinador, estructura).subcoordinador : null,
+  };
+};
 
-  return { dirigente, coordinador, subcoordinador };
+// ¿Algún votante del hogar coincide con los filtros de jerarquía dados? A diferencia
+// de getJerarquiaHogar (que resume el hogar a una tupla para mostrar), esto evalúa
+// cada votante por separado — necesario para que filtrarHogares no excluya un hogar
+// compartido entre ramas cuando el votante que coincide no es el primero embebido.
+export const hogarTieneJerarquia = (hogar, { dirigenteCI = "", coordinadorCI = "", subcoordinadorCI = "" }, estructura) => {
+  const votantes = hogar?.votantes || [];
+  if (votantes.length === 0) return false;
+  return votantes.some((v) => {
+    const j = getJerarquiaVotante(v, estructura);
+    if (dirigenteCI && normalizeCI(j.dirigente?.ci) !== normalizeCI(dirigenteCI)) return false;
+    if (coordinadorCI && normalizeCI(j.coordinador?.ci) !== normalizeCI(coordinadorCI)) return false;
+    if (subcoordinadorCI && normalizeCI(j.subcoordinador?.ci) !== normalizeCI(subcoordinadorCI)) return false;
+    return true;
+  });
 };
 
 const nombreCompleto = (p) => `${p?.nombre || ""} ${p?.apellido || ""}`.trim();
@@ -96,10 +122,7 @@ export const filtrarHogares = (hogares, filtros, estructura) => {
     if (!hogarCoincideConsulta(hogar, query)) return false;
 
     if (dirigenteCI || coordinadorCI || subcoordinadorCI) {
-      const jerarquia = getJerarquiaHogar(hogar, estructura);
-      if (dirigenteCI && normalizeCI(jerarquia.dirigente?.ci) !== normalizeCI(dirigenteCI)) return false;
-      if (coordinadorCI && normalizeCI(jerarquia.coordinador?.ci) !== normalizeCI(coordinadorCI)) return false;
-      if (subcoordinadorCI && normalizeCI(jerarquia.subcoordinador?.ci) !== normalizeCI(subcoordinadorCI)) return false;
+      if (!hogarTieneJerarquia(hogar, { dirigenteCI, coordinadorCI, subcoordinadorCI }, estructura)) return false;
     }
 
     if (estadoMapeo && hogar.estado !== estadoMapeo) return false;
@@ -129,6 +152,10 @@ export const resolverNombreActor = (ci, rol, estructura) => {
 // (mapeo_listar_visitas también los incluye) — para la bitácora, que no siempre tiene
 // el hogar completo a mano.
 export const getJerarquiaVisita = (visita, estructura) => getJerarquiaHogar({ votantes: visita?.votantes }, estructura);
+
+// Igual que hogarTieneJerarquia, pero para filtrar la bitácora de visitas.
+export const visitaTieneJerarquia = (visita, filtros, estructura) =>
+  hogarTieneJerarquia({ votantes: visita?.votantes }, filtros, estructura);
 
 // Tarjetas estadísticas del módulo — a partir de la misma lista ya scopeada.
 export const calcularEstadisticasMapeo = (hogares) => {
