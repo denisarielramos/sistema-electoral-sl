@@ -18,12 +18,15 @@
 import { execFileSync } from "node:child_process";
 import { writeFileSync, unlinkSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { randomBytes } from "node:crypto";
 import path from "node:path";
 import os from "node:os";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const MIGRACION = path.join(__dirname, "..", "supabase", "migrations", "20260727100000_mapeo_territorial_bitacora.sql");
-const DB = "mapeo_bigint_ci_test";
+// Sufijo aleatorio: evita colisionar con una base de datos real que alguien más
+// haya creado con este mismo nombre (aunque el servidor sea local).
+const DB = `mapeo_bigint_ci_test_${process.pid}_${randomBytes(4).toString("hex")}`;
 
 const PG_ENV = { ...process.env };
 
@@ -36,6 +39,26 @@ const puedeConectar = () => {
   try {
     execFileSync("psql", ["-X", "-q", "-c", "SELECT 1;"], { env: PG_ENV, stdio: "ignore" });
     return true;
+  } catch {
+    return false;
+  }
+};
+
+// No basta con confiar en que PGHOST/PGSERVICE "parecen" locales: cualquiera de
+// los dos puede apuntar a un cluster remoto o compartido sin que se note a
+// simple vista, y este script hace DROP/CREATE DATABASE. Se le pregunta
+// directamente al servidor con el que efectivamente se conectó: si
+// inet_server_addr() es NULL, la conexión es por socket Unix (siempre local);
+// si no, solo se acepta loopback (127.0.0.1/::1).
+const esServidorLocal = () => {
+  try {
+    const salida = execFileSync(
+      "psql",
+      ["-X", "-q", "-t", "-A", "-c", "SELECT COALESCE(host(inet_server_addr()), '');"],
+      { env: PG_ENV, encoding: "utf8" },
+    );
+    const host = salida.trim();
+    return host === "" || host === "127.0.0.1" || host === "::1";
   } catch {
     return false;
   }
@@ -179,6 +202,11 @@ const escribirTmp = (nombre, contenido) => {
 async function main() {
   if (!puedeConectar()) {
     console.log("SKIP: no hay un servidor PostgreSQL local alcanzable (psql). Esta prueba requiere un Postgres local descartable — ver comentario al inicio del archivo.");
+    return;
+  }
+
+  if (!esServidorLocal()) {
+    console.log("SKIP: el servidor PostgreSQL alcanzable no es local (ni socket Unix ni loopback 127.0.0.1/::1). Por seguridad, esta prueba se niega a crear/eliminar bases de datos contra un host remoto o compartido — ajuste PGHOST/PGSERVICE a un Postgres local descartable.");
     return;
   }
 

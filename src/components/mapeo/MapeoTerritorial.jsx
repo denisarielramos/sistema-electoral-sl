@@ -4,7 +4,7 @@
 // sus propios votantes, ver AccesoRapidoHogar). Nunca descarga el padrón completo:
 // consulta hogares vía mapeo_listar_hogares, que ya devuelve solo lo permitido por
 // el alcance jerárquico del actor (resuelto del lado del servidor).
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Home, Search, Plus, RefreshCw, ArrowLeft } from "lucide-react";
 import { useHogares } from "../../hooks/useHogares";
 import { useMapeoConfiguracion } from "../../hooks/useMapeoConfiguracion";
@@ -63,11 +63,28 @@ const MapeoTerritorial = ({ currentUser, estructura, onVolver }) => {
   // Miembros actuales del hogar en edición, recalculados desde el estado vivo de
   // `hogares` (no del snapshot congelado en modalHogar.hogarExistente) — así el modal
   // refleja de inmediato cada asociar/desasociar sin necesidad de cerrarlo y reabrirlo.
+  // Si el hogar ya no aparece en `hogares` tras una recarga completa, salió del
+  // alcance del actor (p. ej. se quitó su último votante activo): se trata como
+  // vacío en vez de volver al snapshot congelado de cuando se abrió el modal, que
+  // seguiría mostrando votantes ya desasociados — el efecto de abajo cierra el
+  // modal en ese caso.
   const votantesAsociadosEnVivo = useMemo(() => {
     const id = modalHogar?.hogarExistente?.id;
     if (!id) return undefined;
-    return hogares.find((h) => h.id === id)?.votantes ?? modalHogar.hogarExistente.votantes ?? [];
+    return hogares.find((h) => h.id === id)?.votantes ?? [];
   }, [hogares, modalHogar]);
+
+  // El hogar en edición dejó de estar en el alcance del actor: mantener el modal
+  // abierto ofrecería acciones (asociar/desasociar/confirmar visita) contra un
+  // hogar que el RPC ya rechazaría, fallando detrás de un modal que aparenta
+  // seguir siendo válido. Se cierra apenas se detecta, tras una recarga completa.
+  useEffect(() => {
+    const id = modalHogar?.hogarExistente?.id;
+    if (!id || loading) return;
+    if (!hogares.some((h) => h.id === id)) {
+      setModalHogar(null);
+    }
+  }, [hogares, loading, modalHogar]);
 
   const votantesDisponibles = useMemo(() => {
     const propios = votantesDelRolEnMapeo(estructura, currentUser);

@@ -112,7 +112,7 @@ Tablas nuevas (`supabase/migrations/20260727100000_mapeo_territorial_bitacora.sq
 | Columna | Tipo | Notas |
 |---|---|---|
 | `hogar_id` | `uuid` FK → `hogares(id)` | |
-| `votante_ci` | `text` FK → `votantes(ci)` | sí tiene FK: un hogar agrupa votantes reales |
+| `votante_ci` | `bigint` FK → `votantes(ci)` | `bigint` porque `votantes.ci` es `bigint` en el esquema real; sí tiene FK: un hogar agrupa votantes reales |
 | `activo` | `boolean` | desasociar = `activo=false`, nunca se borra la fila |
 
 Restricción clave: **un votante no puede pertenecer a más de un hogar activo a la
