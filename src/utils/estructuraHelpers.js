@@ -57,6 +57,34 @@ export const getVotantesDirectosCoord = (estructura, coordCI) => {
 // Alias semántico: votantes directos del coordinador.
 export const getMisVotantes = (estructura, coordCI) => getVotantesDirectosCoord(estructura, coordCI);
 
+// ======================= TODOS LOS VOTANTES DE UN COORDINADOR =======================
+// Directos + los de todos sus subcoordinadores. Usa coordinador_ci (poblado en toda
+// alta de votante, sea directa del coordinador o vía uno de sus subs) para que el
+// total coincida exactamente con "Total Red" del PDF del coordinador (pdfService.js).
+// Además une, por dato legacy sin coordinador_ci poblado:
+// - los directos "estrictos" (getVotantesDirectosCoord: asignado_por + asignado_por_rol
+//   === "coordinador"), y
+// - los de cada subcoordinador (getVotantesDeSubcoord: asignado_por + asignado_por_rol
+//   === "subcoordinador") — igual visibles en el árbol/PDF bajo ese sub, así que también
+//   deben contarse acá.
+// Dedup por CI elemento a elemento (Map), no por lote: dos filas con la misma CI dentro
+// del mismo candidato (p. ej. una fila de padrón duplicada) también deben colapsar a una.
+export const getTodosVotantesCoord = (estructura, coordCI) => {
+  if (!coordCI) return [];
+  const ci = resolveCI(coordCI);
+  const resultado = new Map();
+  const agregar = (candidatos) => {
+    for (const v of candidatos) {
+      const vci = normalizeCI(v.ci);
+      if (!resultado.has(vci)) resultado.set(vci, v);
+    }
+  };
+  agregar((estructura.votantes || []).filter((v) => esActivo(v) && normalizeCI(v.coordinador_ci) === ci));
+  agregar(getVotantesDirectosCoord(estructura, ci));
+  agregar(getMisSubcoordinadores(estructura, ci).flatMap((s) => getVotantesDeSubcoord(estructura, normalizeCI(s.ci))));
+  return [...resultado.values()];
+};
+
 // ======================= PERSONAS DISPONIBLES =======================
 export const getPersonasDisponibles = (padron, estructura) => {
   return padron.map((p) => {
@@ -123,11 +151,25 @@ export const getVotantesDirectosDirigente = (estructura, dirigenteCI) => {
   );
 };
 
-// Todos los votantes dentro de la rama de un dirigente (directos + de coords + de subs)
+// Todos los votantes dentro de la rama de un dirigente (directos + de coords + de subs).
+// Usa dirigente_ci, pero además une los conjuntos completos (getTodosVotantesCoord) de
+// cada uno de sus coordinadores: un votante directo "estricto" de un coordinador
+// (asignado_por + asignado_por_rol === "coordinador") puede, por dato legacy, no tener
+// dirigente_ci poblado — igual aparece en el PDF/Excel del coordinador y en la sección
+// de ese coordinador dentro del PDF del dirigente, así que también debe contarse acá.
+// Dedup por CI elemento a elemento (Map), no por lote — ver getTodosVotantesCoord.
 export const getTodosVotantesDirigente = (estructura, dirigenteCI) => {
-  return (estructura.votantes || []).filter(
-    (v) => normalizeCI(v.dirigente_ci) === normalizeCI(dirigenteCI)
-  );
+  const dirCI = normalizeCI(dirigenteCI);
+  const resultado = new Map();
+  const agregar = (candidatos) => {
+    for (const v of candidatos) {
+      const vci = normalizeCI(v.ci);
+      if (!resultado.has(vci)) resultado.set(vci, v);
+    }
+  };
+  agregar((estructura.votantes || []).filter((v) => normalizeCI(v.dirigente_ci) === dirCI));
+  agregar(getCoordsDeDigente(estructura, dirCI).flatMap((c) => getTodosVotantesCoord(estructura, normalizeCI(c.ci))));
+  return [...resultado.values()];
 };
 
 // ======================= ESTRUCTURA PROPIA =======================
