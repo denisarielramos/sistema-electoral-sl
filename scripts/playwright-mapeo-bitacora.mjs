@@ -3,8 +3,13 @@
 // Playwright directamente (sin @playwright/test) con node:assert, siguiendo la misma
 // filosofía que los scripts scripts/smoke-test-*.mjs (sin jest/vitest).
 //
+// Playwright NO es una dependencia del proyecto a propósito: su script de instalación
+// intenta descargar un navegador (~300 MB) en cada `npm install`, lo cual puede fallar
+// o simplemente sobra en un build de despliegue (Vercel) que nunca ejecuta este
+// script. Se instala manualmente, solo cuando alguien quiere correr estas pruebas.
+//
 // Requisitos para ejecutar:
-//   1) npx playwright install chromium   (una sola vez; no se instala automáticamente)
+//   1) npm install -D playwright && npx playwright install chromium   (una sola vez)
 //   2) npm run dev -- --port 5183        (en otra terminal, con VITE_SUPABASE_URL y
 //                                          VITE_SUPABASE_ANON_KEY definidos aunque sean
 //                                          valores ficticios — todo el tráfico a

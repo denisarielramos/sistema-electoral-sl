@@ -389,8 +389,11 @@ Con datos **sintéticos** (nunca reales) — ver los scripts en `scripts/`:
   que replica las mismas reglas del SQL real). Cubre superadmin/dirigente/coordinador/
   subcoordinador, alcance cruzado denegado, hogar multi-votante, crear/editar hogar,
   verificar/rechazar, visita dentro/fuera de radio, GPS impreciso, error de
-  geolocalización y vista móvil. Requiere:
-  1. `npx playwright install chromium` (una vez).
+  geolocalización y vista móvil. Playwright no es una dependencia del proyecto a
+  propósito (su instalación intenta descargar un navegador, algo que no debe ocurrir
+  en cada `npm install` de un build de despliegue) — se instala manualmente, una sola
+  vez, solo para correr estas pruebas. Requiere:
+  1. `npm install -D playwright && npx playwright install chromium` (una vez).
   2. Un `.env.local` con `VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY` (pueden ser
      valores ficticios — todo el tráfico se intercepta).
   3. `npm run dev -- --port 5183` en una terminal.
