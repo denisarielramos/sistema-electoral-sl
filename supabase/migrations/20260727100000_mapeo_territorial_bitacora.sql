@@ -105,7 +105,17 @@ COMMENT ON COLUMN hogares.estado IS 'pendiente: recién cargado/corregido, esper
 
 -- Defensivo (además de la columna en el CREATE TABLE de arriba): si esta migración
 -- ya se aplicó una vez sin esta columna, la agrega ahora sin romper idempotencia.
-ALTER TABLE hogares ADD COLUMN IF NOT EXISTS ubicacion_actualizada_at timestamptz NOT NULL DEFAULT now();
+-- Sin DEFAULT todavía: si se agrega con DEFAULT now() directamente, cada hogar
+-- YA EXISTENTE (con visitas históricas reales, nunca reubicado) queda con
+-- ubicacion_actualizada_at = ahora, más nuevo que cualquier visita pasada — todas
+-- desaparecerían de ultima_visita pese a que el hogar nunca se movió. Se rellena
+-- primero con created_at (línea base real de "sin reubicación todavía") y recién
+-- después se fija el default now() para las filas nuevas que inserte el resto de
+-- esta migración en adelante.
+ALTER TABLE hogares ADD COLUMN IF NOT EXISTS ubicacion_actualizada_at timestamptz;
+UPDATE hogares SET ubicacion_actualizada_at = created_at WHERE ubicacion_actualizada_at IS NULL;
+ALTER TABLE hogares ALTER COLUMN ubicacion_actualizada_at SET DEFAULT now();
+ALTER TABLE hogares ALTER COLUMN ubicacion_actualizada_at SET NOT NULL;
 
 CREATE INDEX IF NOT EXISTS ix_hogares_estado ON hogares(estado);
 CREATE INDEX IF NOT EXISTS ix_hogares_creado_por ON hogares(creado_por_ci);
@@ -828,7 +838,16 @@ BEGIN
     RAISE EXCEPTION 'El hogar % no está dentro de su alcance.', p_hogar_id;
   END IF;
 
-  SELECT * INTO v_hogar FROM hogares WHERE id = p_hogar_id;
+  -- FOR UPDATE: si mapeo_actualizar_hogar está reubicando este hogar en una
+  -- transacción concurrente, esta lectura bloquea hasta que esa transacción
+  -- confirme (o aborte). Sin el lock, esta SELECT podría leer coordenadas viejas
+  -- mientras la reubicación queda sin confirmar todavía, calculando la visita
+  -- contra el punto anterior pero con fecha_hora posterior al nuevo
+  -- ubicacion_actualizada_at — el filtro de mapeo_listar_hogares la retendría
+  -- como "visita a la ubicación vigente" pese a describir la ubicación vieja.
+  -- Con el lock, la visita queda estrictamente antes o después de la reubicación:
+  -- cualquiera de las dos transacciones que gane el lock ve datos consistentes.
+  SELECT * INTO v_hogar FROM hogares WHERE id = p_hogar_id FOR UPDATE;
   SELECT * INTO v_config FROM configuracion_mapeo WHERE id = 1;
 
   -- Una ubicación rechazada quedó marcada como descartada por quien la revisó — no
