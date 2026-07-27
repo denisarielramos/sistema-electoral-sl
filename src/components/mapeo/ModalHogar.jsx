@@ -84,16 +84,20 @@ const ModalHogar = ({
     }
     setLatitud(lat);
     setLongitud(lng);
-    if (precision !== undefined) setPrecisionGps(precision);
+    // precision === undefined significa que el punto vino de un click/arrastre manual
+    // en el mapa, no de una lectura GPS — la precisión anterior (de un fix GPS previo)
+    // ya no describe este punto y debe borrarse en vez de quedar mostrando un valor
+    // que corresponde a una ubicación distinta.
+    setPrecisionGps(precision !== undefined ? precision : null);
   };
 
   const confirmarReemplazo = () => {
     if (!pendienteConfirmarReemplazo) return;
     setLatitud(pendienteConfirmarReemplazo.lat);
     setLongitud(pendienteConfirmarReemplazo.lng);
-    if (pendienteConfirmarReemplazo.precision !== undefined) {
-      setPrecisionGps(pendienteConfirmarReemplazo.precision);
-    }
+    setPrecisionGps(
+      pendienteConfirmarReemplazo.precision !== undefined ? pendienteConfirmarReemplazo.precision : null
+    );
     setPendienteConfirmarReemplazo(null);
   };
 
