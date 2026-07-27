@@ -65,6 +65,7 @@ import {
   getTodosVotantesDirigente,
 } from "../utils/estructuraHelpers";
 import { personaCoincideConsulta } from "../utils/busquedaHelpers";
+import { getEstadoConfirmacionTarjeta } from "../utils/confirmacionHelpers";
 
 // ======================= SMALL REUSABLE COMPONENTS =======================
 
@@ -391,6 +392,10 @@ const PersonCard = ({
   const tieneCode = loginCode && String(loginCode).trim() !== "";
   const esVotante = tipo === "votante";
   const confirmado = esVotante && persona.voto_confirmado === true;
+  const estadoConfirmacion = getEstadoConfirmacionTarjeta(persona, tipo);
+  const confirmadoPorRolAutomatico = estadoConfirmacion === "confirmado_por_rol";
+  const subConfirmado = estadoConfirmacion === "sub_confirmado";
+  const subPendiente = estadoConfirmacion === "sub_pendiente";
 
   const row = (
     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 flex-1 min-w-0">
@@ -419,7 +424,14 @@ const PersonCard = ({
               Confirmado
             </Badge>
           )}
-          {!esVotante && <Badge variant="blue">Confirmado por rol</Badge>}
+          {confirmadoPorRolAutomatico && <Badge variant="blue">Confirmado por rol</Badge>}
+          {subConfirmado && (
+            <Badge variant="green">
+              <Check className="w-3 h-3 mr-1" />
+              Confirmado
+            </Badge>
+          )}
+          {subPendiente && <Badge variant="amber">Pendiente</Badge>}
           {persona.tercera_edad === true && <TerceraEdadBadge />}
         </div>
       </div>
