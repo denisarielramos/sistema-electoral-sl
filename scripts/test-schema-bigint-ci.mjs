@@ -77,11 +77,18 @@ CREATE TABLE subcoordinadores (
   ci bigint PRIMARY KEY, nombre text, apellido text, telefono text,
   login_code text UNIQUE, coordinador_ci bigint REFERENCES coordinadores(ci)
 );
+-- votantes NO tiene nombre/apellido en el esquema real — esos campos viven en
+-- padron (ver bug "column v.nombre does not exist" que motivó esta corrección).
+-- Se omiten deliberadamente acá para que este test hubiera detectado ese bug.
 CREATE TABLE votantes (
-  ci bigint PRIMARY KEY, nombre text, apellido text, telefono text,
+  ci bigint PRIMARY KEY, telefono text,
   dirigente_ci bigint REFERENCES dirigentes(ci), coordinador_ci bigint REFERENCES coordinadores(ci),
   asignado_por bigint, asignado_por_rol text,
   activo boolean NOT NULL DEFAULT true, voto_confirmado boolean NOT NULL DEFAULT false
+);
+CREATE TABLE padron (
+  ci bigint PRIMARY KEY, nombre text, apellido text,
+  seccional text, local_votacion text, mesa text, orden text, direccion text
 );
 DO $$
 BEGIN
@@ -92,10 +99,20 @@ END $$;
 INSERT INTO dirigentes (ci, nombre, apellido, login_code, activo) VALUES (1000001, 'Dir', 'Uno', 'DIR0001', true);
 INSERT INTO coordinadores (ci, nombre, apellido, login_code, dirigente_ci) VALUES (2000001, 'Coord', 'Uno', 'COO0001', 1000001);
 INSERT INTO subcoordinadores (ci, nombre, apellido, login_code, coordinador_ci) VALUES (3000001, 'Sub', 'Uno', 'SUB0001', 2000001);
-INSERT INTO votantes (ci, nombre, apellido, dirigente_ci, coordinador_ci, asignado_por, asignado_por_rol, activo) VALUES
-  (4000001, 'Votante', 'DelSub', NULL, NULL, 3000001, 'subcoordinador', true),
-  (4000002, 'Votante', 'DirectoDelDirigente', 1000001, NULL, 1000001, 'dirigente', true),
-  (4000003, 'Votante', 'Ajeno', NULL, NULL, 9999999, 'subcoordinador', true);
+-- Código deliberadamente duplicado entre dirigentes y coordinadores (login_code solo
+-- es UNIQUE dentro de cada tabla, no entre las 3) — usado para probar que
+-- mapeo_identidad rechaza la ambigüedad en vez de resolver un rol arbitrario.
+INSERT INTO dirigentes (ci, nombre, apellido, login_code, activo) VALUES (1000009, 'Dir', 'Ambiguo', 'DUP0001', true);
+INSERT INTO coordinadores (ci, nombre, apellido, login_code, dirigente_ci) VALUES (2000009, 'Coord', 'Ambiguo', 'DUP0001', 1000001);
+INSERT INTO votantes (ci, dirigente_ci, coordinador_ci, asignado_por, asignado_por_rol, activo) VALUES
+  (4000001, NULL, NULL, 3000001, 'subcoordinador', true),
+  (4000002, 1000001, NULL, 1000001, 'dirigente', true),
+  (4000003, NULL, NULL, 9999999, 'subcoordinador', true);
+-- padron: 4000002 sí tiene fila (caso normal, usado por mapeo_listar_hogares/
+-- listar_visitas más abajo). 4000001 deliberadamente NO tiene fila de padron, para
+-- probar que la ausencia no descarta al votante del listado (LEFT JOIN), solo deja
+-- nombre/apellido vacíos.
+INSERT INTO padron (ci, nombre, apellido) VALUES (4000002, 'Directo', 'DelDirigente');
 `;
 
 const ASSERTIONS_SQL = `
@@ -135,6 +152,24 @@ BEGIN
   END IF;
   IF (v_votantes -> 0 ->> 'ci') <> '4000002' THEN
     RAISE EXCEPTION 'FALLO: ci esperado "4000002", obtuvo %', (v_votantes -> 0 ->> 'ci');
+  END IF;
+  -- Regresión del bug "column v.nombre does not exist": votantes no tiene
+  -- nombre/apellido, deben venir de padron vía el LEFT JOIN de mapeo_listar_hogares.
+  IF (v_votantes -> 0 ->> 'nombre') <> 'Directo' OR (v_votantes -> 0 ->> 'apellido') <> 'DelDirigente' THEN
+    RAISE EXCEPTION 'FALLO: nombre/apellido esperados "Directo"/"DelDirigente" (desde padron), obtuvo %/%', (v_votantes -> 0 ->> 'nombre'), (v_votantes -> 0 ->> 'apellido');
+  END IF;
+END $$;
+
+DO $$
+DECLARE v_votantes jsonb;
+BEGIN
+  -- mapeo_confirmar_visita + mapeo_listar_visitas: misma regresión que arriba, pero
+  -- para la bitácora de visitas (mapeo_listar_visitas tiene su propio LEFT JOIN a
+  -- padron, independiente del de mapeo_listar_hogares).
+  PERFORM mapeo_confirmar_visita('DIR0001', NULL, (SELECT id FROM mapeo_listar_hogares('DIR0001', NULL) WHERE nombre_familia = 'Hogar Test'), -25.3, -57.6, 10);
+  SELECT votantes INTO v_votantes FROM mapeo_listar_visitas('DIR0001', NULL, NULL) LIMIT 1;
+  IF (v_votantes -> 0 ->> 'nombre') <> 'Directo' OR (v_votantes -> 0 ->> 'apellido') <> 'DelDirigente' THEN
+    RAISE EXCEPTION 'FALLO: mapeo_listar_visitas: nombre/apellido esperados "Directo"/"DelDirigente" (desde padron), obtuvo %/%', (v_votantes -> 0 ->> 'nombre'), (v_votantes -> 0 ->> 'apellido');
   END IF;
 END $$;
 
@@ -184,10 +219,47 @@ BEGIN
 END $$;
 
 DO $$
+DECLARE v_votantes jsonb;
+BEGIN
+  -- 4000001 no tiene fila en padron (a propósito, ver BASE_SCHEMA_SQL): el LEFT JOIN
+  -- de mapeo_listar_hogares no debe descartarlo del listado por eso, solo devolver
+  -- nombre/apellido vacíos en vez de NULL.
+  SELECT votantes INTO v_votantes FROM mapeo_listar_hogares('DIR0001', NULL) WHERE nombre_familia = 'Hogar Test 4';
+  IF v_votantes IS NULL OR jsonb_array_length(v_votantes) <> 1 THEN
+    RAISE EXCEPTION 'FALLO: el votante sin fila de padron no debería haber sido descartado del listado, votantes=%', v_votantes;
+  END IF;
+  IF (v_votantes -> 0 ->> 'ci') <> '4000001' THEN
+    RAISE EXCEPTION 'FALLO: ci esperado "4000001", obtuvo %', (v_votantes -> 0 ->> 'ci');
+  END IF;
+  IF (v_votantes -> 0 ->> 'nombre') <> '' OR (v_votantes -> 0 ->> 'apellido') <> '' THEN
+    RAISE EXCEPTION 'FALLO: se esperaba nombre/apellido vacíos (sin fila de padron), obtuvo %/%', (v_votantes -> 0 ->> 'nombre'), (v_votantes -> 0 ->> 'apellido');
+  END IF;
+END $$;
+
+DO $$
 DECLARE v_count int;
 BEGIN
   SELECT count(*) INTO v_count FROM mapeo_listar_hogares(NULL, '9999999');
   IF v_count < 3 THEN RAISE EXCEPTION 'FALLO: superadmin debería ver al menos 3 hogares, vio %', v_count; END IF;
+END $$;
+
+-- login_code solo es UNIQUE dentro de cada tabla (dirigentes/coordinadores/
+-- subcoordinadores), no entre las 3 — DUP0001 existe tanto en dirigentes como en
+-- coordinadores (ver BASE_SCHEMA_SQL). mapeo_identidad debe rechazar esta ambigüedad
+-- en vez de resolver un rol arbitrario (que podría no coincidir con el rol con el que
+-- src/App.jsx autenticó realmente a la sesión, ver comentario en la definición).
+DO $$
+DECLARE v_error text;
+BEGIN
+  BEGIN
+    PERFORM * FROM mapeo_identidad('DUP0001');
+    RAISE EXCEPTION 'FALLO: se esperaba que un login_code ambiguo (2 roles) lanzara excepción';
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS v_error = MESSAGE_TEXT;
+    IF v_error NOT ILIKE '%ambigu%' THEN
+      RAISE EXCEPTION 'FALLO: mensaje de error inesperado para login_code ambiguo: %', v_error;
+    END IF;
+  END;
 END $$;
 
 SELECT 'TODAS LAS PRUEBAS PASARON' AS resultado;

@@ -27,7 +27,15 @@ const AccesoRapidoHogar = ({ currentUser, votante, votantesDisponibles, onClose 
     try {
       const lista = await listarHogares(currentUser);
       const actualizado = lista.find((h) => h.id === hogarId);
-      setVotantesLive(actualizado?.votantes || []);
+      if (!actualizado) {
+        // El hogar dejó de estar en el alcance del actor (p. ej. se quitó su último
+        // votante activo) — mantener el flujo abierto seguiría ofreciendo acciones
+        // (asociar otro votante, editar, confirmar visita) contra un hogar que el RPC
+        // ya rechazaría; se cierra en vez de mostrarlo con una lista vacía.
+        onClose();
+        return;
+      }
+      setVotantesLive(actualizado.votantes || []);
     } catch {
       // Silencioso: si falla el refresco, el modal sigue mostrando la última lista
       // conocida en vez de romper el flujo por un error secundario de recarga.

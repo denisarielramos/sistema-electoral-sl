@@ -44,10 +44,14 @@ const buildDataset = () => ({
   subcoordinadores: [
     { ci: "1300001", coordinador_ci: "1200001", nombre: "Subcoord", apellido: "Uno", telefono: "+595971300001", login_code: "SUB0001" },
   ],
+  // votantes NO tiene nombre/apellido en el esquema real (ver bug "column v.nombre
+  // does not exist" que motivó esta corrección) — esos campos viven en padron, ver
+  // más abajo. Se omiten acá a propósito para que este mock modele fielmente el
+  // esquema real y una regresión futura de este tipo se note en el E2E.
   votantes: [
-    { ci: "1400001", coordinador_ci: "1200001", asignado_por: "1200001", asignado_por_rol: "coordinador", nombre: "Votante", apellido: "Uno", telefono: "+595971400001", activo: true },
-    { ci: "1400002", coordinador_ci: "1300001", asignado_por: "1300001", asignado_por_rol: "subcoordinador", nombre: "Votante", apellido: "Dos", telefono: "+595971400002", activo: true },
-    { ci: "1400003", coordinador_ci: "1200002", asignado_por: "1200002", asignado_por_rol: "coordinador", nombre: "Votante", apellido: "Tres", telefono: "+595971400003", activo: true },
+    { ci: "1400001", coordinador_ci: "1200001", asignado_por: "1200001", asignado_por_rol: "coordinador", telefono: "+595971400001", activo: true },
+    { ci: "1400002", coordinador_ci: "1300001", asignado_por: "1300001", asignado_por_rol: "subcoordinador", telefono: "+595971400002", activo: true },
+    { ci: "1400003", coordinador_ci: "1200002", asignado_por: "1200002", asignado_por_rol: "coordinador", telefono: "+595971400003", activo: true },
   ],
   padron: [
     { ci: "1100001", nombre: "Dirigente", apellido: "Uno", seccional: "1", local_votacion: "L1", mesa: "1", orden: "1", direccion: "" },
@@ -98,7 +102,8 @@ const ciABigint = (ci) => {
 };
 
 function createMockBackend(dataset) {
-  const { dirigentes, coordinadores, subcoordinadores, votantes } = dataset;
+  const { dirigentes, coordinadores, subcoordinadores, votantes, padron } = dataset;
+  const padronPorCi = new Map(padron.map((p) => [p.ci, p]));
   let hogares = [];
   let hogarVotantes = [];
   let visitasHogar = [];
@@ -108,11 +113,18 @@ function createMockBackend(dataset) {
   const resolverIdentidad = (loginCode) => {
     // Espejo de mapeo_identidad: dirigente/coordinador/subcoordinador desactivados
     // (activo === false) no resuelven identidad, igual que un login_code inválido.
+    // login_code no tiene unicidad garantizada entre las 3 tablas — si el mismo código
+    // coincidiera con más de un rol, se rechaza en vez de elegir uno arbitrariamente
+    // (falla cerrado, igual que el SQL real).
     const d = dirigentes.find((x) => x.login_code === loginCode && x.activo !== false);
-    if (d) return { ci: d.ci, rol: "dirigente" };
     const c = coordinadores.find((x) => x.login_code === loginCode && x.activo !== false);
-    if (c) return { ci: c.ci, rol: "coordinador" };
     const s = subcoordinadores.find((x) => x.login_code === loginCode && x.activo !== false);
+    const coincidencias = [d, c, s].filter(Boolean).length;
+    if (coincidencias > 1) {
+      throw new Error("Código de acceso ambiguo: coincide con más de un rol (dirigente/coordinador/subcoordinador).");
+    }
+    if (d) return { ci: d.ci, rol: "dirigente" };
+    if (c) return { ci: c.ci, rol: "coordinador" };
     if (s) return { ci: s.ci, rol: "subcoordinador" };
     return null;
   };
@@ -183,7 +195,13 @@ function createMockBackend(dataset) {
       .map((hv) => votantes.find((x) => x.ci === hv.votante_ci))
       .filter(Boolean)
       .filter((v) => !actor || actor.rol === "superadmin" || votanteEnAlcance(v.ci, actor.ci, actor.rol))
-      .map((v) => ({ ci: v.ci, nombre: v.nombre, apellido: v.apellido, telefono: v.telefono, dirigente_ci: v.dirigente_ci, coordinador_ci: v.coordinador_ci, asignado_por: v.asignado_por, asignado_por_rol: v.asignado_por_rol })),
+      // Espejo del LEFT JOIN a padron en mapeo_listar_hogares/listar_visitas: si el
+      // votante no tuviera fila en padron, no se descarta del listado — se devuelven
+      // nombre/apellido vacíos en vez de perderlo.
+      .map((v) => {
+        const p = padronPorCi.get(v.ci);
+        return { ci: v.ci, nombre: p?.nombre ?? "", apellido: p?.apellido ?? "", telefono: v.telefono, dirigente_ci: v.dirigente_ci, coordinador_ci: v.coordinador_ci, asignado_por: v.asignado_por, asignado_por_rol: v.asignado_por_rol };
+      }),
     ultima_visita: (() => {
       // Espejo del filtro agregado en mapeo_listar_hogares: una visita anterior a la
       // última reubicación del hogar ya no describe la ubicación vigente — no cuenta

@@ -54,6 +54,9 @@ BEGIN
   IF to_regclass('public.subcoordinadores') IS NULL THEN
     RAISE EXCEPTION 'Falta la tabla "subcoordinadores". Este archivo depende del esquema base ya provisionado (ver supabase/migrations/README.md).';
   END IF;
+  IF to_regclass('public.padron') IS NULL THEN
+    RAISE EXCEPTION 'Falta la tabla "padron". Este archivo depende del esquema base ya provisionado (ver supabase/migrations/README.md).';
+  END IF;
 END $$;
 
 -- 0.1) Verificación de tipos de las columnas CI del esquema base — un intento
@@ -381,34 +384,58 @@ $$ LANGUAGE plpgsql IMMUTABLE;
 -- Resuelve (ci, rol) a partir de un login_code, buscando en dirigentes/coordinadores/
 -- subcoordinadores (mismas tablas y mismo campo que usa hoy src/App.jsx para el login).
 -- Sin filas = código inválido.
+--
+-- IMPORTANTE: login_code no tiene una restricción de unicidad a nivel de base de
+-- datos entre estas 3 tablas (cada una solo garantiza unicidad dentro de sí misma vía
+-- su propio UNIQUE); src/App.jsx únicamente evita colisiones con un chequeo del lado
+-- del cliente al crear/editar códigos, que no es atómico ni cubre las 3 tablas a la
+-- vez. Si el mismo código existiera en más de una tabla, un orden de búsqueda fijo
+-- (como el que tenía antes esta función) resolvería silenciosamente el rol equivocado
+-- para ese código en cuanto App.jsx autentica con un orden distinto (coordinador,
+-- subcoordinador, dirigente) al de esta función — el actor terminaría operando con más
+-- alcance/permisos del que su sesión real le muestra. En vez de elegir una precedencia,
+-- se buscan las 3 tablas y se rechaza explícitamente (falla cerrado) si el código
+-- resuelve a más de un rol a la vez, para que la ambigüedad se corrija en los datos.
 CREATE OR REPLACE FUNCTION mapeo_identidad(p_login_code text)
 RETURNS TABLE(actor_ci text, actor_rol text) AS $$
 DECLARE
-  v_ci text;
+  -- dirigentes/coordinadores/subcoordinadores.ci son bigint (ver sección 0.1) — se
+  -- castean explícitamente a text para que actor_ci viaje como texto por el resto de
+  -- este archivo, igual que los parámetros p_login_code/p_superadmin_ci que manda
+  -- el frontend.
+  v_ci_dirigente text;
+  v_ci_coordinador text;
+  v_ci_subcoordinador text;
+  v_coincidencias int := 0;
 BEGIN
   IF p_login_code IS NULL OR btrim(p_login_code) = '' THEN
     RETURN;
   END IF;
 
-  -- dirigentes/coordinadores/subcoordinadores.ci son bigint (ver sección 0.1) — se
-  -- castea explícitamente a text para que actor_ci viaje como texto por el resto de
-  -- este archivo, igual que los parámetros p_login_code/p_superadmin_ci que manda
-  -- el frontend.
-  SELECT d.ci::text INTO v_ci FROM dirigentes d WHERE d.login_code = p_login_code AND d.activo = true;
-  IF v_ci IS NOT NULL THEN
-    RETURN QUERY SELECT v_ci, 'dirigente'::text;
+  SELECT d.ci::text INTO v_ci_dirigente FROM dirigentes d WHERE d.login_code = p_login_code AND d.activo = true;
+  SELECT c.ci::text INTO v_ci_coordinador FROM coordinadores c WHERE c.login_code = p_login_code AND c.activo IS DISTINCT FROM false;
+  SELECT s.ci::text INTO v_ci_subcoordinador FROM subcoordinadores s WHERE s.login_code = p_login_code AND s.activo IS DISTINCT FROM false;
+
+  IF v_ci_dirigente IS NOT NULL THEN v_coincidencias := v_coincidencias + 1; END IF;
+  IF v_ci_coordinador IS NOT NULL THEN v_coincidencias := v_coincidencias + 1; END IF;
+  IF v_ci_subcoordinador IS NOT NULL THEN v_coincidencias := v_coincidencias + 1; END IF;
+
+  IF v_coincidencias > 1 THEN
+    RAISE EXCEPTION 'Código de acceso ambiguo: coincide con más de un rol (dirigente/coordinador/subcoordinador). Corrija el login_code duplicado antes de reintentar.';
+  END IF;
+
+  IF v_ci_dirigente IS NOT NULL THEN
+    RETURN QUERY SELECT v_ci_dirigente, 'dirigente'::text;
     RETURN;
   END IF;
 
-  SELECT c.ci::text INTO v_ci FROM coordinadores c WHERE c.login_code = p_login_code AND c.activo IS DISTINCT FROM false;
-  IF v_ci IS NOT NULL THEN
-    RETURN QUERY SELECT v_ci, 'coordinador'::text;
+  IF v_ci_coordinador IS NOT NULL THEN
+    RETURN QUERY SELECT v_ci_coordinador, 'coordinador'::text;
     RETURN;
   END IF;
 
-  SELECT s.ci::text INTO v_ci FROM subcoordinadores s WHERE s.login_code = p_login_code AND s.activo IS DISTINCT FROM false;
-  IF v_ci IS NOT NULL THEN
-    RETURN QUERY SELECT v_ci, 'subcoordinador'::text;
+  IF v_ci_subcoordinador IS NOT NULL THEN
+    RETURN QUERY SELECT v_ci_subcoordinador, 'subcoordinador'::text;
     RETURN;
   END IF;
 
@@ -684,14 +711,21 @@ BEGIN
       -- como número JSON si no se castean — el frontend (normalizeCI) tolera ambos, pero
       -- castear acá deja un contrato de salida consistente y predecible (siempre texto)
       -- para cualquier CI que devuelva este RPC, sin depender de esa tolerancia.
+      -- votantes NO tiene nombre/apellido — esos campos viven en padron (mismo patrón
+      -- que ya usa src/App.jsx al autenticar coordinador/subcoordinador, que hace
+      -- select ... padron(*) sobre esa misma relación). LEFT JOIN (no JOIN) para no
+      -- descartar en silencio a un votante cuya fila de padron falte o no calce: en
+      -- ese caso se devuelve nombre/apellido vacíos en vez de perder al votante del
+      -- listado.
       SELECT jsonb_agg(jsonb_build_object(
-        'ci', v.ci::text, 'nombre', v.nombre, 'apellido', v.apellido,
+        'ci', v.ci::text, 'nombre', COALESCE(p.nombre, ''), 'apellido', COALESCE(p.apellido, ''),
         'telefono', v.telefono, 'dirigente_ci', v.dirigente_ci::text,
         'coordinador_ci', v.coordinador_ci::text, 'asignado_por', v.asignado_por::text,
         'asignado_por_rol', v.asignado_por_rol, 'voto_confirmado', v.voto_confirmado
       ))
       FROM hogar_votantes hv
       JOIN votantes v ON v.ci = hv.votante_ci
+      LEFT JOIN padron p ON p.ci = v.ci
       WHERE hv.hogar_id = h.id AND hv.activo = true
         -- Un hogar puede tener miembros de ramas distintas (p. ej. familia repartida
         -- entre dos subcoordinadores). Estar en alcance del HOGAR no implica estar en
@@ -1117,10 +1151,13 @@ BEGIN
     vh.resultado, vh.observacion, vh.fecha_hora,
     COALESCE((
       -- ::text explícito (ver mismo comentario en mapeo_listar_hogares): votantes.ci es
-      -- bigint, se castea para un contrato de salida consistente.
-      SELECT jsonb_agg(jsonb_build_object('ci', v.ci::text, 'nombre', v.nombre, 'apellido', v.apellido))
+      -- bigint, se castea para un contrato de salida consistente. nombre/apellido
+      -- vienen de padron (votantes no los tiene) vía LEFT JOIN — igual que en
+      -- mapeo_listar_hogares, para no descartar al votante si falta su fila de padron.
+      SELECT jsonb_agg(jsonb_build_object('ci', v.ci::text, 'nombre', COALESCE(p.nombre, ''), 'apellido', COALESCE(p.apellido, '')))
       FROM hogar_votantes hv
       JOIN votantes v ON v.ci = hv.votante_ci
+      LEFT JOIN padron p ON p.ci = v.ci
       WHERE hv.hogar_id = h.id AND hv.activo = true
         -- Mismo filtro por-votante que mapeo_listar_hogares: un hogar compartido entre
         -- ramas no debe exponer los miembros fuera del alcance del actor.
