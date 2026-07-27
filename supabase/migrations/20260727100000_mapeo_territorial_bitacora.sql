@@ -799,6 +799,14 @@ BEGIN
   SELECT * INTO v_hogar FROM hogares WHERE id = p_hogar_id;
   SELECT * INTO v_config FROM configuracion_mapeo WHERE id = 1;
 
+  -- Una ubicación rechazada quedó marcada como descartada por quien la revisó — no
+  -- debe poder "confirmarse" una visita contra un punto que ya se determinó inválido.
+  -- Bloquea el intento completo (no se registra ni siquiera como error_gps) hasta que
+  -- alguien corrija la ubicación y vuelva a quedar pendiente/verificada.
+  IF v_hogar.estado = 'rechazado' THEN
+    RAISE EXCEPTION 'La ubicación de este hogar fue rechazada. Corríjala y vuelva a verificarla antes de confirmar una visita.';
+  END IF;
+
   -- Una precisión GPS negativa o no-finita (NaN o +/-Infinity) es un dato malformado,
   -- no una simple imprecisión — nunca debería llegar por la UI, pero un request
   -- directo al RPC podría enviarla; se rechaza de plano en vez de dejarla pasar como

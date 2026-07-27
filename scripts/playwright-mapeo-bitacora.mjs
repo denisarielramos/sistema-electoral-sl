@@ -238,8 +238,13 @@ function createMockBackend(dataset) {
     mapeo_confirmar_visita: (body) => {
       const actor = resolverActor(body);
       if (!hogarEnAlcance(body.p_hogar_id, actor.ci, actor.rol)) throw new Error("El hogar no está dentro de su alcance.");
-      validarPrecisionGps(body.p_precision_gps);
       const h = hogares.find((x) => x.id === body.p_hogar_id);
+      // Espejo del rechazo agregado al RPC: no se puede "confirmar" una visita contra
+      // una ubicación ya marcada como rechazada.
+      if (h.estado === "rechazado") {
+        throw new Error("La ubicación de este hogar fue rechazada. Corríjala y vuelva a verificarla antes de confirmar una visita.");
+      }
+      validarPrecisionGps(body.p_precision_gps);
       const distancia = haversine(body.p_latitud, body.p_longitud, h.latitud, h.longitud);
       let resultado;
       if (body.p_precision_gps !== null && body.p_precision_gps > configuracion.precision_gps_maxima_metros) resultado = "error_gps";
@@ -517,6 +522,17 @@ await (async () => {
     // RPC simulado para forzar el camino de rechazo.
     backend.handlers.mapeo_verificar_hogar({ p_login_code: "DIR0001", p_superadmin_ci: null, p_hogar_id: "h1", p_aprobar: false, p_observacion: "Dirección incorrecta" });
     assert.equal(backend._state().hogares[0].estado, "rechazado", "El estado debe poder pasar a rechazado");
+
+    // Una ubicación rechazada no debe poder "confirmar" una visita — el RPC lo
+    // rechaza de plano, sin registrar ni siquiera un intento fallido.
+    let rpcError = null;
+    try {
+      backend.handlers.mapeo_confirmar_visita({ p_login_code: "DIR0001", p_superadmin_ci: null, p_hogar_id: "h1", p_latitud: PUNTO.lat, p_longitud: PUNTO.lng, p_precision_gps: 10 });
+    } catch (err) {
+      rpcError = err.message;
+    }
+    assert.ok(rpcError && rpcError.includes("rechazada"), `Debe rechazar confirmar visita sobre ubicación rechazada, recibido: ${rpcError}`);
+    assert.equal(backend._state().visitasHogar.length, 0, "No debe registrarse ninguna visita contra una ubicación rechazada");
   });
 
   // --- 9) Visita dentro del radio ---

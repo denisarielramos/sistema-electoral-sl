@@ -169,7 +169,13 @@ const ModalHogar = ({
             <button
               type="button"
               onClick={() => onConfirmarVisita(hogarExistente)}
-              className="w-full h-10 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium border-0 shadow-sm flex items-center justify-center gap-2"
+              disabled={hogarExistente.estado === "rechazado"}
+              title={
+                hogarExistente.estado === "rechazado"
+                  ? "Ubicación rechazada: corríjala y vuelva a verificarla antes de confirmar una visita."
+                  : undefined
+              }
+              className="w-full h-10 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-sm font-medium border-0 shadow-sm flex items-center justify-center gap-2"
             >
               <MapPinned className="w-4 h-4" />
               Confirmar visita a este hogar

@@ -2,7 +2,7 @@
 import React from "react";
 import { X, Phone, MapPin, ExternalLink, Navigation, Edit3, CheckCircle2, XCircle, MapPinned } from "lucide-react";
 import EstadoMapaBadge from "./EstadoMapaBadge";
-import { getEstadoMapaHogar, buildGoogleMapsUrl, buildWazeUrl, formatearDistancia } from "../../utils/geoHelpers";
+import { getEstadoMapaHogar, buildGoogleMapsUrl, buildWazeUrl, formatearDistancia, ESTADOS_MAPA } from "../../utils/geoHelpers";
 import { getJerarquiaHogar } from "../../utils/mapeoHelpers";
 
 const PUEDE_VERIFICAR = ["superadmin", "dirigente"];
@@ -136,7 +136,8 @@ const HogarDetallePanel = ({
             </button>
             <button
               onClick={() => onConfirmarVisita(hogar)}
-              disabled={estado === "sin_ubicacion"}
+              disabled={estado === ESTADOS_MAPA.SIN_UBICACION || estado === ESTADOS_MAPA.RECHAZADO}
+              title={estado === ESTADOS_MAPA.RECHAZADO ? "Ubicación rechazada: corríjala y vuelva a verificarla antes de confirmar una visita." : undefined}
               className="flex-1 h-10 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-sm font-medium border-0 shadow-sm flex items-center justify-center gap-1.5"
             >
               <MapPinned className="w-3.5 h-3.5" /> Confirmar visita
