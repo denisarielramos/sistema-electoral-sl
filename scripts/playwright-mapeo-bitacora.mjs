@@ -84,6 +84,19 @@ const validarPrecisionGps = (p) => {
   }
 };
 
+// Espejo de mapeo_ci_a_bigint: votantes.ci es bigint en el esquema real (ver
+// supabase/migrations/20260727100000_mapeo_territorial_bitacora.sql, sección 0.1),
+// así que un votante_ci de texto no numérico debe rechazarse con un mensaje claro
+// en vez de asociarse silenciosamente — mapeo_asociar_votante/mapeo_desasociar_votante
+// convierten con esta validación antes de tocar hogar_votantes.
+const ciABigint = (ci) => {
+  const limpio = String(ci ?? "").trim();
+  if (!/^[0-9]+$/.test(limpio)) {
+    throw new Error(`CI inválido: "${ci}". Debe ser un número entero positivo.`);
+  }
+  return limpio;
+};
+
 function createMockBackend(dataset) {
   const { dirigentes, coordinadores, subcoordinadores, votantes } = dataset;
   let hogares = [];
@@ -235,22 +248,24 @@ function createMockBackend(dataset) {
     },
     mapeo_asociar_votante: (body) => {
       const actor = resolverActor(body);
+      const votanteCi = ciABigint(body.p_votante_ci);
       if (!hogarEnAlcance(body.p_hogar_id, actor.ci, actor.rol)) throw new Error("El hogar no está dentro de su alcance.");
-      if (!votanteEnAlcance(body.p_votante_ci, actor.ci, actor.rol)) throw new Error("El votante no está dentro de su alcance.");
-      const existente = hogarVotantes.find((hv) => hv.votante_ci === body.p_votante_ci && hv.activo);
+      if (!votanteEnAlcance(votanteCi, actor.ci, actor.rol)) throw new Error("El votante no está dentro de su alcance.");
+      const existente = hogarVotantes.find((hv) => hv.votante_ci === votanteCi && hv.activo);
       if (existente && existente.hogar_id !== body.p_hogar_id) throw new Error("El votante ya pertenece a otro hogar activo.");
-      if (!existente) hogarVotantes.push({ hogar_id: body.p_hogar_id, votante_ci: body.p_votante_ci, activo: true });
-      return { hogar_id: body.p_hogar_id, votante_ci: body.p_votante_ci, activo: true };
+      if (!existente) hogarVotantes.push({ hogar_id: body.p_hogar_id, votante_ci: votanteCi, activo: true });
+      return { hogar_id: body.p_hogar_id, votante_ci: votanteCi, activo: true };
     },
     mapeo_desasociar_votante: (body) => {
       const actor = resolverActor(body);
+      const votanteCi = ciABigint(body.p_votante_ci);
       if (!hogarEnAlcance(body.p_hogar_id, actor.ci, actor.rol)) throw new Error("El hogar no está dentro de su alcance.");
       // Un hogar compartido entre ramas no autoriza a desasociar a un votante de OTRA
       // rama solo porque el hogar está en alcance (espejo del chequeo agregado al RPC).
-      if (actor.rol !== "superadmin" && !votanteEnAlcance(body.p_votante_ci, actor.ci, actor.rol)) {
+      if (actor.rol !== "superadmin" && !votanteEnAlcance(votanteCi, actor.ci, actor.rol)) {
         throw new Error("El votante no está dentro de su alcance.");
       }
-      const fila = hogarVotantes.find((hv) => hv.hogar_id === body.p_hogar_id && hv.votante_ci === body.p_votante_ci);
+      const fila = hogarVotantes.find((hv) => hv.hogar_id === body.p_hogar_id && hv.votante_ci === votanteCi);
       if (fila) fila.activo = false;
       return null;
     },

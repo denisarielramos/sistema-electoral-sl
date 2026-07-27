@@ -56,6 +56,61 @@ BEGIN
   END IF;
 END $$;
 
+-- 0.1) Verificación de tipos de las columnas CI del esquema base — un intento
+-- anterior de aplicar esta migración falló en producción con:
+--   ERROR 42804: foreign key constraint "hogar_votantes_votante_ci_fkey" cannot be
+--   implemented. DETAIL: hogar_votantes.votante_ci y votantes.ci son de tipos
+--   incompatibles: text y bigint.
+-- Es decir: votantes.ci es bigint, no text como asumía la primera versión de este
+-- archivo. Como este repositorio no tiene forma de inspeccionar el esquema real de
+-- producción (el esquema base se provisiona por fuera, ver README.md), el resto de
+-- esta migración asume que TODAS las columnas que identifican personas por CI
+-- (votantes.ci/dirigente_ci/coordinador_ci/asignado_por, dirigentes.ci,
+-- coordinadores.ci/dirigente_ci, subcoordinadores.ci/coordinador_ci) comparten ese
+-- mismo tipo bigint — es la única forma consistente en que pudo funcionar hasta
+-- ahora el trigger de supabase/migrations/20260727000000_fix_votante_asignador_validation.sql,
+-- que ya compara asignado_por contra esos "ci" sin ningún cast. En vez de asumirlo
+-- en silencio, se verifica acá explícitamente: si alguna columna no es bigint, esta
+-- migración se detiene con un mensaje claro (en vez de fallar más abajo, dentro de
+-- una función, con un error críptico de tipos) para que quien la aplique ajuste los
+-- casts de mapeo_ci_a_bigint() antes de reintentar.
+DO $$
+DECLARE
+  v_incompatibles text[] := ARRAY[]::text[];
+  v_tipo text;
+BEGIN
+  SELECT data_type INTO v_tipo FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'votantes' AND column_name = 'ci';
+  IF v_tipo IS DISTINCT FROM 'bigint' THEN v_incompatibles := v_incompatibles || format('votantes.ci (%s)', COALESCE(v_tipo, 'no existe')); END IF;
+
+  SELECT data_type INTO v_tipo FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'votantes' AND column_name = 'dirigente_ci';
+  IF v_tipo IS DISTINCT FROM 'bigint' THEN v_incompatibles := v_incompatibles || format('votantes.dirigente_ci (%s)', COALESCE(v_tipo, 'no existe')); END IF;
+
+  SELECT data_type INTO v_tipo FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'votantes' AND column_name = 'coordinador_ci';
+  IF v_tipo IS DISTINCT FROM 'bigint' THEN v_incompatibles := v_incompatibles || format('votantes.coordinador_ci (%s)', COALESCE(v_tipo, 'no existe')); END IF;
+
+  SELECT data_type INTO v_tipo FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'votantes' AND column_name = 'asignado_por';
+  IF v_tipo IS DISTINCT FROM 'bigint' THEN v_incompatibles := v_incompatibles || format('votantes.asignado_por (%s)', COALESCE(v_tipo, 'no existe')); END IF;
+
+  SELECT data_type INTO v_tipo FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'dirigentes' AND column_name = 'ci';
+  IF v_tipo IS DISTINCT FROM 'bigint' THEN v_incompatibles := v_incompatibles || format('dirigentes.ci (%s)', COALESCE(v_tipo, 'no existe')); END IF;
+
+  SELECT data_type INTO v_tipo FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'coordinadores' AND column_name = 'ci';
+  IF v_tipo IS DISTINCT FROM 'bigint' THEN v_incompatibles := v_incompatibles || format('coordinadores.ci (%s)', COALESCE(v_tipo, 'no existe')); END IF;
+
+  SELECT data_type INTO v_tipo FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'coordinadores' AND column_name = 'dirigente_ci';
+  IF v_tipo IS DISTINCT FROM 'bigint' THEN v_incompatibles := v_incompatibles || format('coordinadores.dirigente_ci (%s)', COALESCE(v_tipo, 'no existe')); END IF;
+
+  SELECT data_type INTO v_tipo FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'subcoordinadores' AND column_name = 'ci';
+  IF v_tipo IS DISTINCT FROM 'bigint' THEN v_incompatibles := v_incompatibles || format('subcoordinadores.ci (%s)', COALESCE(v_tipo, 'no existe')); END IF;
+
+  SELECT data_type INTO v_tipo FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'subcoordinadores' AND column_name = 'coordinador_ci';
+  IF v_tipo IS DISTINCT FROM 'bigint' THEN v_incompatibles := v_incompatibles || format('subcoordinadores.coordinador_ci (%s)', COALESCE(v_tipo, 'no existe')); END IF;
+
+  IF array_length(v_incompatibles, 1) > 0 THEN
+    RAISE EXCEPTION 'Esta migración asume que todas las columnas de CI del esquema base son bigint (igual que votantes.ci). Columnas con un tipo distinto al esperado: %. Revise supabase/migrations/20260727100000_mapeo_territorial_bitacora.sql y ajuste los casts de mapeo_ci_a_bigint() antes de reintentar.', array_to_string(v_incompatibles, ', ');
+  END IF;
+END $$;
+
 -- coordinadores/subcoordinadores no tienen columna "activo" hoy (a diferencia de
 -- dirigentes, que sí la tiene y ya se usa para bloquear el login — ver src/App.jsx).
 -- La agregamos de forma aditiva (default true) para que mapeo_identidad pueda negar
@@ -122,10 +177,17 @@ CREATE INDEX IF NOT EXISTS ix_hogares_creado_por ON hogares(creado_por_ci);
 CREATE INDEX IF NOT EXISTS ix_hogares_activo ON hogares(activo);
 
 -- ======================= HOGAR_VOTANTES (asociación N:M, un hogar activo por votante) =======================
+-- votante_ci es bigint (no text) para poder implementar la FK contra votantes.ci,
+-- que es bigint en el esquema real (ver verificación de tipos en la sección 0.1).
+-- El intento anterior de esta migración declaraba esta columna como text, lo que
+-- Postgres rechaza al crear la FK con "foreign key constraint ... cannot be
+-- implemented" — no es posible crear la tabla con un tipo incompatible, así que si
+-- ese intento falló, hogar_votantes no llegó a existir: no hace falta un ALTER TABLE
+-- de reparación acá, re-ejecutar esta migración simplemente la crea bien esta vez.
 CREATE TABLE IF NOT EXISTS hogar_votantes (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   hogar_id    uuid NOT NULL REFERENCES hogares(id),
-  votante_ci  text NOT NULL REFERENCES votantes(ci),
+  votante_ci  bigint NOT NULL REFERENCES votantes(ci),
   activo      boolean NOT NULL DEFAULT true,
   created_at  timestamptz NOT NULL DEFAULT now(),
   updated_at  timestamptz NOT NULL DEFAULT now()
@@ -292,6 +354,30 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql IMMUTABLE;
 
+-- Convierte un CI de texto (como lo manda siempre el frontend, ver normalizeCI en
+-- src/utils/estructuraHelpers.js) al bigint real de votantes.ci/dirigentes.ci/
+-- coordinadores.ci/subcoordinadores.ci — necesario para comparar/insertar contra
+-- esas columnas, que son bigint (ver verificación de tipos en la sección 0.1). Un
+-- cast directo "::bigint" sin validar lanzaría un error críptico de Postgres
+-- ("invalid input syntax for type bigint") ante cualquier texto no numérico
+-- (vacío, con espacios, con letras); acá se valida explícitamente primero para dar
+-- un mensaje claro y consistente en cualquier RPC que reciba un CI de texto.
+CREATE OR REPLACE FUNCTION mapeo_ci_a_bigint(p_ci text)
+RETURNS bigint AS $$
+DECLARE
+  v_limpio text;
+BEGIN
+  IF p_ci IS NULL THEN
+    RAISE EXCEPTION 'CI no puede ser nulo.';
+  END IF;
+  v_limpio := btrim(p_ci);
+  IF v_limpio !~ '^[0-9]+$' THEN
+    RAISE EXCEPTION 'CI inválido: "%". Debe ser un número entero positivo.', p_ci;
+  END IF;
+  RETURN v_limpio::bigint;
+END;
+$$ LANGUAGE plpgsql IMMUTABLE;
+
 -- Resuelve (ci, rol) a partir de un login_code, buscando en dirigentes/coordinadores/
 -- subcoordinadores (mismas tablas y mismo campo que usa hoy src/App.jsx para el login).
 -- Sin filas = código inválido.
@@ -304,19 +390,23 @@ BEGIN
     RETURN;
   END IF;
 
-  SELECT d.ci INTO v_ci FROM dirigentes d WHERE d.login_code = p_login_code AND d.activo = true;
+  -- dirigentes/coordinadores/subcoordinadores.ci son bigint (ver sección 0.1) — se
+  -- castea explícitamente a text para que actor_ci viaje como texto por el resto de
+  -- este archivo, igual que los parámetros p_login_code/p_superadmin_ci que manda
+  -- el frontend.
+  SELECT d.ci::text INTO v_ci FROM dirigentes d WHERE d.login_code = p_login_code AND d.activo = true;
   IF v_ci IS NOT NULL THEN
     RETURN QUERY SELECT v_ci, 'dirigente'::text;
     RETURN;
   END IF;
 
-  SELECT c.ci INTO v_ci FROM coordinadores c WHERE c.login_code = p_login_code AND c.activo IS DISTINCT FROM false;
+  SELECT c.ci::text INTO v_ci FROM coordinadores c WHERE c.login_code = p_login_code AND c.activo IS DISTINCT FROM false;
   IF v_ci IS NOT NULL THEN
     RETURN QUERY SELECT v_ci, 'coordinador'::text;
     RETURN;
   END IF;
 
-  SELECT s.ci INTO v_ci FROM subcoordinadores s WHERE s.login_code = p_login_code AND s.activo IS DISTINCT FROM false;
+  SELECT s.ci::text INTO v_ci FROM subcoordinadores s WHERE s.login_code = p_login_code AND s.activo IS DISTINCT FROM false;
   IF v_ci IS NOT NULL THEN
     RETURN QUERY SELECT v_ci, 'subcoordinador'::text;
     RETURN;
@@ -365,29 +455,47 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 -- v.activo IS DISTINCT FROM false: misma convención que esActivo() en
 -- estructuraHelpers.js — un votante sin la columna activo poblada (legacy) cuenta
 -- como activo; solo activo=false lo excluye explícitamente.
-CREATE OR REPLACE FUNCTION mapeo_votante_en_alcance(p_votante_ci text, p_actor_ci text, p_actor_rol text)
+-- p_votante_ci es bigint (no text): esta función es de uso EXCLUSIVAMENTE interno
+-- (nunca se otorga a anon/authenticated, ver REVOKE más abajo) y todos sus
+-- llamadores "naturales" ya tienen un bigint a mano — hv.votante_ci en
+-- mapeo_hogar_en_alcance, v.ci (votantes.ci) en mapeo_listar_hogares/
+-- mapeo_listar_visitas. Las dos únicas RPC que reciben un votante_ci de TEXTO desde
+-- el frontend (mapeo_asociar_votante/mapeo_desasociar_votante) lo convierten con
+-- mapeo_ci_a_bigint() antes de llamar acá.
+CREATE OR REPLACE FUNCTION mapeo_votante_en_alcance(p_votante_ci bigint, p_actor_ci text, p_actor_rol text)
 RETURNS boolean AS $$
+DECLARE
+  v_actor_ci bigint;
 BEGIN
   IF p_actor_rol = 'superadmin' THEN
     RETURN EXISTS (SELECT 1 FROM votantes v WHERE v.ci = p_votante_ci AND v.activo IS DISTINCT FROM false);
-  ELSIF p_actor_rol = 'dirigente' THEN
+  END IF;
+
+  -- Todo actor no-superadmin llega resuelto por mapeo_identidad(), que lee
+  -- dirigentes.ci/coordinadores.ci/subcoordinadores.ci (bigint, ver sección 0.1) —
+  -- p_actor_ci siempre representa un entero válido en este punto. mapeo_ci_a_bigint
+  -- valida explícitamente en vez de dejar que un cast directo falle con un error
+  -- críptico si alguna vez llegara un valor corrupto.
+  v_actor_ci := mapeo_ci_a_bigint(p_actor_ci);
+
+  IF p_actor_rol = 'dirigente' THEN
     RETURN EXISTS (
       SELECT 1 FROM votantes v
       WHERE v.ci = p_votante_ci AND v.activo IS DISTINCT FROM false AND (
-        v.dirigente_ci = p_actor_ci
+        v.dirigente_ci = v_actor_ci
         -- Compatibilidad legacy (fila sin dirigente_ci poblado, solo asignado_por +
         -- asignado_por_rol='dirigente'). No debe imponerse sobre un dirigente_ci
         -- ACTUAL distinto (p. ej. el votante fue reasignado después) — igual que
         -- getVotantesDirectosDirigente exige que dirigente_ci coincida.
         OR (
-          v.dirigente_ci IS NULL AND v.asignado_por = p_actor_ci AND v.asignado_por_rol = 'dirigente'
+          v.dirigente_ci IS NULL AND v.asignado_por = v_actor_ci AND v.asignado_por_rol = 'dirigente'
         )
-        OR v.coordinador_ci IN (SELECT c.ci FROM coordinadores c WHERE c.dirigente_ci = p_actor_ci)
+        OR v.coordinador_ci IN (SELECT c.ci FROM coordinadores c WHERE c.dirigente_ci = v_actor_ci)
         OR (
           v.asignado_por_rol = 'subcoordinador'
           AND v.asignado_por IN (
             SELECT s.ci FROM subcoordinadores s
-            WHERE s.coordinador_ci IN (SELECT c.ci FROM coordinadores c WHERE c.dirigente_ci = p_actor_ci)
+            WHERE s.coordinador_ci IN (SELECT c.ci FROM coordinadores c WHERE c.dirigente_ci = v_actor_ci)
           )
         )
       )
@@ -396,17 +504,17 @@ BEGIN
     RETURN EXISTS (
       SELECT 1 FROM votantes v
       WHERE v.ci = p_votante_ci AND v.activo IS DISTINCT FROM false AND (
-        v.coordinador_ci = p_actor_ci
+        v.coordinador_ci = v_actor_ci
         -- Compatibilidad legacy: filas anteriores a la convención actual (que siempre
         -- puebla coordinador_ci) solo tienen asignado_por + asignado_por_rol='coordinador'
         -- — mismo fallback "estricto" que getVotantesDirectosCoord en estructuraHelpers.js.
         -- No debe imponerse sobre un coordinador_ci ACTUAL distinto (votante reasignado).
         OR (
-          v.coordinador_ci IS NULL AND v.asignado_por = p_actor_ci AND v.asignado_por_rol = 'coordinador'
+          v.coordinador_ci IS NULL AND v.asignado_por = v_actor_ci AND v.asignado_por_rol = 'coordinador'
         )
         OR (
           v.asignado_por_rol = 'subcoordinador'
-          AND v.asignado_por IN (SELECT s.ci FROM subcoordinadores s WHERE s.coordinador_ci = p_actor_ci)
+          AND v.asignado_por IN (SELECT s.ci FROM subcoordinadores s WHERE s.coordinador_ci = v_actor_ci)
         )
       )
     );
@@ -415,7 +523,7 @@ BEGIN
       SELECT 1 FROM votantes v
       WHERE v.ci = p_votante_ci
         AND v.activo IS DISTINCT FROM false
-        AND v.asignado_por = p_actor_ci
+        AND v.asignado_por = v_actor_ci
         AND (v.asignado_por_rol = 'subcoordinador' OR v.asignado_por_rol IS NULL OR v.asignado_por_rol = '')
     );
   END IF;
@@ -474,9 +582,10 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 REVOKE ALL ON FUNCTION mapeo_es_finito(double precision) FROM PUBLIC;
 REVOKE ALL ON FUNCTION mapeo_validar_precision_gps(double precision) FROM PUBLIC;
 REVOKE ALL ON FUNCTION mapeo_distancia_metros(double precision, double precision, double precision, double precision) FROM PUBLIC;
+REVOKE ALL ON FUNCTION mapeo_ci_a_bigint(text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION mapeo_identidad(text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION mapeo_resolver_actor(text, text) FROM PUBLIC;
-REVOKE ALL ON FUNCTION mapeo_votante_en_alcance(text, text, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION mapeo_votante_en_alcance(bigint, text, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION mapeo_hogar_en_alcance(uuid, text, text) FROM PUBLIC;
 
 -- ============================================================================
@@ -570,10 +679,15 @@ BEGIN
     h.verificado_por_ci, h.verificado_por_rol, h.fecha_verificacion,
     h.created_at, h.updated_at, h.ubicacion_actualizada_at,
     COALESCE((
+      -- ::text explícito en cada campo tipo CI: votantes.ci/dirigente_ci/coordinador_ci/
+      -- asignado_por son bigint (ver sección 0.1) y jsonb_build_object los serializaría
+      -- como número JSON si no se castean — el frontend (normalizeCI) tolera ambos, pero
+      -- castear acá deja un contrato de salida consistente y predecible (siempre texto)
+      -- para cualquier CI que devuelva este RPC, sin depender de esa tolerancia.
       SELECT jsonb_agg(jsonb_build_object(
-        'ci', v.ci, 'nombre', v.nombre, 'apellido', v.apellido,
-        'telefono', v.telefono, 'dirigente_ci', v.dirigente_ci,
-        'coordinador_ci', v.coordinador_ci, 'asignado_por', v.asignado_por,
+        'ci', v.ci::text, 'nombre', v.nombre, 'apellido', v.apellido,
+        'telefono', v.telefono, 'dirigente_ci', v.dirigente_ci::text,
+        'coordinador_ci', v.coordinador_ci::text, 'asignado_por', v.asignado_por::text,
         'asignado_por_rol', v.asignado_por_rol, 'voto_confirmado', v.voto_confirmado
       ))
       FROM hogar_votantes hv
@@ -773,6 +887,11 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
 -- ======================= ASOCIAR / DESASOCIAR VOTANTE =======================
+-- p_votante_ci sigue siendo text en la firma (así lo manda siempre el frontend, ver
+-- normalizeCI en src/utils/estructuraHelpers.js) — se convierte a bigint una sola
+-- vez al principio (mapeo_ci_a_bigint valida y da un mensaje claro ante un valor no
+-- numérico) y esa versión bigint es la que se usa contra hogar_votantes.votante_ci
+-- (bigint, ver sección 0.1) de ahí en adelante.
 CREATE OR REPLACE FUNCTION mapeo_asociar_votante(
   p_login_code text,
   p_superadmin_ci text,
@@ -782,32 +901,34 @@ CREATE OR REPLACE FUNCTION mapeo_asociar_votante(
 DECLARE
   v_ci text;
   v_rol text;
+  v_votante_ci bigint;
   v_fila hogar_votantes;
   v_hogar_existente uuid;
 BEGIN
   SELECT actor_ci, actor_rol INTO v_ci, v_rol FROM mapeo_resolver_actor(p_login_code, p_superadmin_ci);
+  v_votante_ci := mapeo_ci_a_bigint(p_votante_ci);
 
   IF NOT mapeo_hogar_en_alcance(p_hogar_id, v_ci, v_rol) THEN
     RAISE EXCEPTION 'El hogar % no está dentro de su alcance.', p_hogar_id;
   END IF;
-  IF NOT mapeo_votante_en_alcance(p_votante_ci, v_ci, v_rol) THEN
+  IF NOT mapeo_votante_en_alcance(v_votante_ci, v_ci, v_rol) THEN
     RAISE EXCEPTION 'El votante % no está dentro de su alcance.', p_votante_ci;
   END IF;
 
   SELECT hogar_id INTO v_hogar_existente
-  FROM hogar_votantes WHERE votante_ci = p_votante_ci AND activo = true;
+  FROM hogar_votantes WHERE votante_ci = v_votante_ci AND activo = true;
 
   IF v_hogar_existente IS NOT NULL AND v_hogar_existente <> p_hogar_id THEN
     RAISE EXCEPTION 'El votante % ya pertenece a otro hogar activo (%). Desasócielo primero.', p_votante_ci, v_hogar_existente;
   END IF;
 
   IF v_hogar_existente = p_hogar_id THEN
-    SELECT * INTO v_fila FROM hogar_votantes WHERE votante_ci = p_votante_ci AND activo = true;
+    SELECT * INTO v_fila FROM hogar_votantes WHERE votante_ci = v_votante_ci AND activo = true;
     RETURN v_fila;
   END IF;
 
   INSERT INTO hogar_votantes (hogar_id, votante_ci, activo)
-  VALUES (p_hogar_id, p_votante_ci, true)
+  VALUES (p_hogar_id, v_votante_ci, true)
   RETURNING * INTO v_fila;
 
   RETURN v_fila;
@@ -823,8 +944,10 @@ CREATE OR REPLACE FUNCTION mapeo_desasociar_votante(
 DECLARE
   v_ci text;
   v_rol text;
+  v_votante_ci bigint;
 BEGIN
   SELECT actor_ci, actor_rol INTO v_ci, v_rol FROM mapeo_resolver_actor(p_login_code, p_superadmin_ci);
+  v_votante_ci := mapeo_ci_a_bigint(p_votante_ci);
 
   IF NOT mapeo_hogar_en_alcance(p_hogar_id, v_ci, v_rol) THEN
     RAISE EXCEPTION 'El hogar % no está dentro de su alcance.', p_hogar_id;
@@ -833,14 +956,14 @@ BEGIN
   -- OTRO miembro) no autoriza a desasociar a ESTE votante si él mismo está fuera de
   -- alcance — sin este chequeo, un actor podría quitar a un votante de otra rama de un
   -- hogar compartido.
-  IF v_rol <> 'superadmin' AND NOT mapeo_votante_en_alcance(p_votante_ci, v_ci, v_rol) THEN
+  IF v_rol <> 'superadmin' AND NOT mapeo_votante_en_alcance(v_votante_ci, v_ci, v_rol) THEN
     RAISE EXCEPTION 'El votante % no está dentro de su alcance.', p_votante_ci;
   END IF;
 
   -- Desasociar (activo=false) — nunca borra la fila ni toca hogares/visitas_hogar.
   UPDATE hogar_votantes
   SET activo = false
-  WHERE hogar_id = p_hogar_id AND votante_ci = p_votante_ci AND activo = true;
+  WHERE hogar_id = p_hogar_id AND votante_ci = v_votante_ci AND activo = true;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
@@ -993,7 +1116,9 @@ BEGIN
     vh.precision_gps, vh.distancia_metros, vh.radio_permitido_usado,
     vh.resultado, vh.observacion, vh.fecha_hora,
     COALESCE((
-      SELECT jsonb_agg(jsonb_build_object('ci', v.ci, 'nombre', v.nombre, 'apellido', v.apellido))
+      -- ::text explícito (ver mismo comentario en mapeo_listar_hogares): votantes.ci es
+      -- bigint, se castea para un contrato de salida consistente.
+      SELECT jsonb_agg(jsonb_build_object('ci', v.ci::text, 'nombre', v.nombre, 'apellido', v.apellido))
       FROM hogar_votantes hv
       JOIN votantes v ON v.ci = hv.votante_ci
       WHERE hv.hogar_id = h.id AND hv.activo = true
