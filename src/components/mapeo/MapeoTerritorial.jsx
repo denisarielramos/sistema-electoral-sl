@@ -20,7 +20,7 @@ import ModalConfirmarVisita from "./ModalConfirmarVisita";
 import EstadoMapaBadge from "./EstadoMapaBadge";
 
 const MapeoTerritorial = ({ currentUser, estructura, onVolver }) => {
-  const { hogares, loading, error, recargar, crear, actualizar, verificar, asociarVotante, desasociarVotante } = useHogares(currentUser);
+  const { hogares, loading, error, recargar, crear, actualizar, verificar, asociarVotante, desasociarVotante, eliminar } = useHogares(currentUser);
   const { config, error: configError, recargar: recargarConfig } = useMapeoConfiguracion();
 
   const [query, setQuery] = useState("");
@@ -35,6 +35,7 @@ const MapeoTerritorial = ({ currentUser, estructura, onVolver }) => {
   const [modalVisitaHogar, setModalVisitaHogar] = useState(null);
   const [saving, setSaving] = useState(false);
   const [accionError, setAccionError] = useState(null);
+  const [accionExito, setAccionExito] = useState(null);
 
   const hogaresFiltrados = useMemo(
     () =>
@@ -217,6 +218,9 @@ const MapeoTerritorial = ({ currentUser, estructura, onVolver }) => {
       {accionError && (
         <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl px-4 py-3">{accionError}</p>
       )}
+      {accionExito && (
+        <p className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3">{accionExito}</p>
+      )}
 
       {/* Estados de carga/error/vacío */}
       {loading && (
@@ -286,6 +290,18 @@ const MapeoTerritorial = ({ currentUser, estructura, onVolver }) => {
           }
         }}
         onConfirmarVisita={(hogar) => { setModalVisitaHogar(hogar); setHogarSeleccionado(null); }}
+        onEliminarHogar={async (hogar) => {
+          setAccionError(null);
+          setAccionExito(null);
+          try {
+            await eliminar(hogar.id);
+            setHogarSeleccionado(null);
+            setAccionExito(`Se eliminó el mapeo del hogar "${hogar.nombre_familia || "sin nombre"}". Sus integrantes quedaron disponibles para otro hogar.`);
+          } catch (err) {
+            setAccionError(err.message);
+            throw err;
+          }
+        }}
       />
 
       {modalHogar && (

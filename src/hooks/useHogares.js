@@ -10,6 +10,7 @@ import {
   verificarHogar,
   asociarVotanteAHogar,
   desasociarVotanteDeHogar,
+  eliminarHogar,
 } from "../services/mapeoService";
 
 export const useHogares = (currentUser) => {
@@ -79,6 +80,15 @@ export const useHogares = (currentUser) => {
     [currentUser, recargar]
   );
 
+  const eliminar = useCallback(
+    async (hogarId) => {
+      const hogar = await eliminarHogar(currentUser, hogarId);
+      await recargar();
+      return hogar;
+    },
+    [currentUser, recargar]
+  );
+
   return {
     hogares,
     loading,
@@ -89,5 +99,6 @@ export const useHogares = (currentUser) => {
     verificar,
     asociarVotante,
     desasociarVotante,
+    eliminar,
   };
 };

@@ -1,6 +1,6 @@
 // ======================= PANEL DE DETALLE: HOGAR SELECCIONADO =======================
-import React from "react";
-import { X, Phone, MapPin, ExternalLink, Navigation, Edit3, CheckCircle2, XCircle, MapPinned } from "lucide-react";
+import React, { useEffect, useState } from "react";
+import { X, Phone, MapPin, ExternalLink, Navigation, Edit3, CheckCircle2, XCircle, MapPinned, Trash2 } from "lucide-react";
 import EstadoMapaBadge from "./EstadoMapaBadge";
 import { getEstadoMapaHogar, buildGoogleMapsUrl, buildWazeUrl, formatearDistancia, ESTADOS_MAPA } from "../../utils/geoHelpers";
 import { getJerarquiaHogar, ROL_INTEGRANTE_LABEL } from "../../utils/mapeoHelpers";
@@ -15,7 +15,21 @@ const HogarDetallePanel = ({
   onEditar,
   onVerificar, // (hogar, aprobar) => void
   onConfirmarVisita, // (hogar) => void
+  onEliminarHogar, // (hogar) => Promise — solo superadmin (ver botón "Eliminar mapeo")
 }) => {
+  const [confirmandoEliminar, setConfirmandoEliminar] = useState(false);
+  const [eliminando, setEliminando] = useState(false);
+  const [errorEliminar, setErrorEliminar] = useState(null);
+
+  // El panel es un único componente controlado por `hogar` (no se desmonta al pasar
+  // de un hogar a otro) — sin esto, la confirmación de eliminar quedaría abierta al
+  // seleccionar un hogar distinto.
+  useEffect(() => {
+    setConfirmandoEliminar(false);
+    setEliminando(false);
+    setErrorEliminar(null);
+  }, [hogar?.id]);
+
   if (!hogar) return null;
 
   const estado = getEstadoMapaHogar(hogar);
@@ -23,6 +37,18 @@ const HogarDetallePanel = ({
   const gmapsUrl = buildGoogleMapsUrl(hogar.latitud, hogar.longitud);
   const wazeUrl = buildWazeUrl(hogar.latitud, hogar.longitud);
   const puedeVerificar = PUEDE_VERIFICAR.includes(currentUser?.role);
+  const esSuperadmin = currentUser?.role === "superadmin";
+
+  const handleEliminar = async () => {
+    setEliminando(true);
+    setErrorEliminar(null);
+    try {
+      await onEliminarHogar(hogar);
+    } catch (err) {
+      setErrorEliminar(err.message || "Error al eliminar el mapeo del hogar.");
+      setEliminando(false);
+    }
+  };
 
   return (
     <div
@@ -160,6 +186,47 @@ const HogarDetallePanel = ({
               >
                 <XCircle className="w-3.5 h-3.5" /> Rechazar
               </button>
+            </div>
+          )}
+
+          {esSuperadmin && !confirmandoEliminar && (
+            <button
+              onClick={() => setConfirmandoEliminar(true)}
+              className="w-full h-9 rounded-xl border border-red-200 text-red-600 text-xs font-medium hover:bg-red-50 bg-white flex items-center justify-center gap-1.5"
+            >
+              <Trash2 className="w-3.5 h-3.5" /> Eliminar mapeo
+            </button>
+          )}
+
+          {esSuperadmin && confirmandoEliminar && (
+            <div className="bg-red-50 border border-red-200 rounded-xl p-3 space-y-2">
+              <p className="text-xs text-red-800">
+                ¿Estás seguro de que querés eliminar el mapeo del hogar{" "}
+                <strong>{hogar.nombre_familia || "sin nombre"}</strong>? El hogar
+                desaparecerá del mapa y sus integrantes quedarán disponibles para otro
+                hogar. La bitácora de visitas se conservará.
+              </p>
+              {errorEliminar && (
+                <p className="text-xs text-red-700 bg-red-100 border border-red-200 rounded-lg px-2 py-1.5">
+                  {errorEliminar}
+                </p>
+              )}
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setConfirmandoEliminar(false)}
+                  disabled={eliminando}
+                  className="flex-1 h-9 rounded-xl border border-slate-200 text-slate-700 text-xs font-medium hover:bg-slate-50 bg-white disabled:opacity-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleEliminar}
+                  disabled={eliminando}
+                  className="flex-1 h-9 rounded-xl bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-xs font-medium border-0 shadow-sm flex items-center justify-center gap-1.5"
+                >
+                  <Trash2 className="w-3.5 h-3.5" /> {eliminando ? "Eliminando…" : "Eliminar mapeo"}
+                </button>
+              </div>
             </div>
           )}
         </div>

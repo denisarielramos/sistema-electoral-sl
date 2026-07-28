@@ -128,6 +128,19 @@ export const desasociarVotanteDeHogar = async (currentUser, hogarId, votanteCi) 
   return unwrap(res, "Error al desasociar el votante");
 };
 
+// Elimina el MAPEO de un hogar (soft-delete: hogares.activo=false y se liberan todos
+// sus integrantes activos en hogar_votantes) — nunca borra filas ni toca visitas_hogar.
+// Solo superadmin puede hacerlo; el RPC rechaza cualquier otro rol del lado del
+// servidor, esto no es más que conveniencia de UI (ver mapeo_eliminar_hogar).
+export const eliminarHogar = async (currentUser, hogarId) => {
+  const actor = getActorParams(currentUser);
+  const res = await supabase.rpc("mapeo_eliminar_hogar", {
+    ...actor,
+    p_hogar_id: hogarId,
+  });
+  return unwrap(res, "Error al eliminar el mapeo del hogar");
+};
+
 // ======================= VISITAS =======================
 export const confirmarVisita = async (
   currentUser,

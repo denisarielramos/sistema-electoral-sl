@@ -412,6 +412,19 @@ function createMockBackend(dataset) {
           return { ...v, hogar_nombre_familia: h?.nombre_familia, hogar_direccion: h?.direccion, votantes: embedHogar(h, actor).votantes };
         });
     },
+    // Espejo de mapeo_eliminar_hogar: soft-delete (hogares.activo=false) + libera
+    // todas las asociaciones activas de hogar_votantes para ese hogar, nunca toca
+    // visitasHogar. Rechaza cualquier rol que no sea superadmin, del lado del
+    // "servidor" (el botón del frontend es solo conveniencia de UI).
+    mapeo_eliminar_hogar: (body) => {
+      const actor = resolverActor(body);
+      if (actor.rol !== "superadmin") throw new Error("Solo superadmin puede eliminar el mapeo de un hogar.");
+      const h = hogares.find((x) => x.id === body.p_hogar_id);
+      if (!h) throw new Error("El hogar no existe.");
+      hogarVotantes.forEach((hv) => { if (hv.hogar_id === body.p_hogar_id && hv.activo) hv.activo = false; });
+      h.activo = false;
+      return h;
+    },
   };
 
   return { handlers, dataset, seedHogar: (h) => { hogares.push(h); return h; }, seedHogarVotante: (hv) => hogarVotantes.push(hv), _state: () => ({ hogares, hogarVotantes, visitasHogar }) };
@@ -881,7 +894,72 @@ await (async () => {
     );
   });
 
-  // --- 13) Vista móvil ---
+  // --- 13) Eliminar mapeo de hogar (solo superadmin) ---
+  await test("Superadmin elimina el mapeo de un hogar: desaparece del mapa, libera integrantes y conserva la bitácora", async () => {
+    const dataset = buildDataset();
+    const backend = createMockBackend(dataset);
+    const fecha = new Date().toISOString();
+    backend.seedHogar({ id: "h1", nombre_familia: "Hogar A Eliminar", direccion: "Dir 1", referencia: "", latitud: PUNTO.lat, longitud: PUNTO.lng, precision_gps: 10, estado: "verificado", creado_por_ci: "1200001", creado_por_rol: "coordinador", activo: true, created_at: fecha, updated_at: fecha, ubicacion_actualizada_at: fecha });
+    backend.seedHogarVotante({ hogar_id: "h1", votante_ci: "1400001", activo: true });
+    backend.handlers.mapeo_confirmar_visita({ p_login_code: null, p_superadmin_ci: "9999999", p_hogar_id: "h1", p_latitud: PUNTO.lat, p_longitud: PUNTO.lng, p_precision_gps: 10 });
+
+    await withPage({ ci: "9999999", nombre: "Super", apellido: "Admin", role: "superadmin" }, backend, {}, async (page) => {
+      await page.locator("text=Mapeo territorial").first().click();
+      await page.waitForTimeout(600);
+      await page.locator("text=Hogar A Eliminar").first().click();
+      await page.waitForTimeout(300);
+
+      await page.getByRole("button", { name: /Eliminar mapeo/ }).click();
+      await page.waitForTimeout(200);
+      assert.ok(await page.locator("text=El hogar desaparecerá del mapa").count(), "Debe mostrar el texto de confirmación exacto");
+
+      await page.getByRole("button", { name: /Eliminar mapeo/ }).click();
+      await page.waitForTimeout(600);
+
+      assert.ok(await page.locator("text=Se eliminó el mapeo").count(), "Debe mostrar el mensaje de éxito");
+      // El nombre del hogar sigue apareciendo dentro del propio mensaje de éxito (a
+      // propósito, ver texto arriba) — se busca específicamente la tarjeta/botón de
+      // la lista, no cualquier texto en la página, para confirmar que ya no está en
+      // el mapa/listado.
+      assert.equal(await page.getByRole("button", { name: /Hogar A Eliminar/ }).count(), 0, "El hogar eliminado no debe seguir visible como tarjeta en el mapa/listado");
+    });
+
+    const estado = backend._state();
+    assert.equal(estado.hogares.find((h) => h.id === "h1").activo, false, "hogares.activo debe quedar en false");
+    assert.equal(estado.hogarVotantes.some((hv) => hv.hogar_id === "h1" && hv.activo), false, "El integrante debe quedar liberado (hogar_votantes.activo=false)");
+    // El integrante liberado debe poder asociarse a otro hogar.
+    const nuevo = backend.handlers.mapeo_crear_hogar({ p_login_code: null, p_superadmin_ci: "9999999", p_nombre_familia: "Hogar Nuevo", p_direccion: "", p_referencia: "", p_latitud: PUNTO.lat, p_longitud: PUNTO.lng, p_precision_gps: 10 });
+    backend.handlers.mapeo_asociar_votante({ p_login_code: null, p_superadmin_ci: "9999999", p_hogar_id: nuevo.id, p_votante_ci: "1400001" });
+    assert.equal(backend._state().hogarVotantes.some((hv) => hv.hogar_id === nuevo.id && hv.votante_ci === "1400001" && hv.activo), true, "El integrante liberado debe poder asociarse a otro hogar");
+    // La bitácora conserva la visita anterior con el nombre del hogar, aunque el mapeo esté inactivo.
+    const visitas = backend.handlers.mapeo_listar_visitas({ p_login_code: null, p_superadmin_ci: "9999999", p_hogar_id: "h1" });
+    assert.equal(visitas.length, 1, "La visita anterior debe seguir en la bitácora");
+    assert.equal(visitas[0].hogar_nombre_familia, "Hogar A Eliminar", "La bitácora debe conservar el nombre del hogar aunque el mapeo esté inactivo");
+  });
+
+  await test("Los demás roles no ven el botón Eliminar mapeo y el RPC rechaza la operación", async () => {
+    const dataset = buildDataset();
+    const backend = createMockBackend(dataset);
+    backend.seedHogar({ id: "h1", nombre_familia: "Hogar Protegido", direccion: "Dir 1", referencia: "", latitud: PUNTO.lat, longitud: PUNTO.lng, precision_gps: 10, estado: "verificado", creado_por_ci: "1100001", creado_por_rol: "dirigente", activo: true, created_at: new Date().toISOString(), updated_at: new Date().toISOString() });
+    backend.seedHogarVotante({ hogar_id: "h1", votante_ci: "1400001", activo: true });
+
+    await withPage({ ci: "1100001", nombre: "Dirigente", apellido: "Uno", role: "dirigente", loginCode: "DIR0001" }, backend, {}, async (page) => {
+      await page.locator("text=Mapeo territorial").first().click();
+      await page.waitForTimeout(600);
+      await page.locator("text=Hogar Protegido").first().click();
+      await page.waitForTimeout(300);
+      assert.equal(await page.getByRole("button", { name: /Eliminar mapeo/ }).count(), 0, "El dirigente NO debe ver el botón Eliminar mapeo");
+    });
+
+    assert.throws(
+      () => backend.handlers.mapeo_eliminar_hogar({ p_login_code: "DIR0001", p_superadmin_ci: null, p_hogar_id: "h1" }),
+      /Solo superadmin/,
+      "El RPC debe rechazar la eliminación de un rol que no sea superadmin"
+    );
+    assert.equal(backend._state().hogares.find((h) => h.id === "h1").activo, true, "El hogar no debe quedar afectado por el intento rechazado");
+  });
+
+  // --- 15) Vista móvil ---
   await test("El módulo es usable en viewport móvil (sin overflow horizontal)", async () => {
     const dataset = buildDataset();
     const backend = createMockBackend(dataset);

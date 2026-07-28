@@ -275,6 +275,7 @@ Todas en `supabase/migrations/20260727100000_mapeo_territorial_bitacora.sql`,
 | `mapeo_verificar_hogar(...)` | Solo superadmin/dirigente; aprueba o rechaza |
 | `mapeo_asociar_votante(...)` | Valida alcance de hogar y de votante; rechaza si el votante ya está en otro hogar activo |
 | `mapeo_desasociar_votante(...)` | `activo=false`, nunca borra la fila ni el hogar |
+| `mapeo_eliminar_hogar(...)` | Solo superadmin; elimina el MAPEO (hogares.activo=false y libera hogar_votantes), nunca borra ni toca visitas_hogar |
 | `mapeo_confirmar_visita(...)` | Calcula distancia y decide el resultado; siempre inserta (nunca actualiza) |
 | `mapeo_listar_visitas(...)` | Bitácora filtrada por alcance, con hogar/votantes embebidos |
 

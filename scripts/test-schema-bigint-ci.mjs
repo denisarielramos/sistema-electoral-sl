@@ -435,6 +435,84 @@ BEGIN
   END;
 END $$;
 
+-- ======================= ELIMINAR MAPEO DE HOGAR (soft-delete, solo superadmin) =======================
+-- Un no-superadmin (dirigente) debe ser rechazado por el RPC, no solo por la UI.
+DO $$
+DECLARE v_hogar_id uuid; v_error text;
+BEGIN
+  SELECT id INTO v_hogar_id FROM mapeo_crear_hogar('DIR0001', NULL, 'Hogar Rechazo Eliminar', 'Dir R', '', -25.3, -57.6, 10);
+  BEGIN
+    PERFORM mapeo_eliminar_hogar('DIR0001', NULL, v_hogar_id);
+    RAISE EXCEPTION 'FALLO: se esperaba que un dirigente fuera rechazado al intentar eliminar el mapeo de un hogar';
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS v_error = MESSAGE_TEXT;
+    IF v_error NOT ILIKE '%Solo superadmin%' THEN
+      RAISE EXCEPTION 'FALLO: mensaje de error inesperado: %', v_error;
+    END IF;
+  END;
+  IF NOT EXISTS (SELECT 1 FROM mapeo_listar_hogares(NULL, '9999999') WHERE nombre_familia = 'Hogar Rechazo Eliminar') THEN
+    RAISE EXCEPTION 'FALLO: el hogar no debería haberse eliminado tras el intento rechazado';
+  END IF;
+END $$;
+
+-- Superadmin elimina el mapeo: hogares.activo=false, se liberan los integrantes
+-- (hogar_votantes.activo=false), el hogar desaparece de mapeo_listar_hogares, un
+-- integrante liberado puede asociarse a otro hogar, y la bitácora conserva la
+-- visita anterior con el nombre del hogar aunque el mapeo esté inactivo.
+DO $$
+DECLARE
+  v_hogar_id uuid;
+  v_hogar_nuevo uuid;
+  v_hogar_eliminado hogares;
+  v_votantes jsonb;
+  v_error text;
+BEGIN
+  SELECT id INTO v_hogar_id FROM mapeo_crear_hogar(NULL, '9999999', 'Hogar Para Eliminar', 'Dir E', '', -25.3, -57.6, 10);
+  PERFORM mapeo_asociar_votante(NULL, '9999999', v_hogar_id, '4000003');
+  PERFORM mapeo_confirmar_visita(NULL, '9999999', v_hogar_id, -25.3, -57.6, 10);
+
+  SELECT * INTO v_hogar_eliminado FROM mapeo_eliminar_hogar(NULL, '9999999', v_hogar_id);
+  IF v_hogar_eliminado.activo IS DISTINCT FROM false THEN
+    RAISE EXCEPTION 'FALLO: mapeo_eliminar_hogar debería devolver el hogar con activo=false, obtuvo %', v_hogar_eliminado.activo;
+  END IF;
+
+  IF EXISTS (SELECT 1 FROM hogar_votantes WHERE hogar_id = v_hogar_id AND votante_ci = 4000003 AND activo = true) THEN
+    RAISE EXCEPTION 'FALLO: el integrante debería haber quedado liberado (hogar_votantes.activo=false) tras eliminar el mapeo';
+  END IF;
+
+  IF EXISTS (SELECT 1 FROM mapeo_listar_hogares(NULL, '9999999') WHERE id = v_hogar_id) THEN
+    RAISE EXCEPTION 'FALLO: un hogar con el mapeo eliminado no debería aparecer en mapeo_listar_hogares (ni para superadmin)';
+  END IF;
+
+  -- El integrante liberado debe poder asociarse a otro hogar sin rechazo por
+  -- "ya pertenece a otro hogar activo".
+  SELECT id INTO v_hogar_nuevo FROM mapeo_crear_hogar(NULL, '9999999', 'Hogar Nuevo Para Liberado', 'Dir E2', '', -25.3, -57.6, 10);
+  PERFORM mapeo_asociar_votante(NULL, '9999999', v_hogar_nuevo, '4000003');
+  IF NOT EXISTS (SELECT 1 FROM hogar_votantes WHERE hogar_id = v_hogar_nuevo AND votante_ci = 4000003 AND activo = true) THEN
+    RAISE EXCEPTION 'FALLO: el integrante liberado debería haberse podido asociar al nuevo hogar';
+  END IF;
+
+  -- La bitácora conserva la visita anterior con el nombre del hogar, aunque el
+  -- mapeo esté inactivo.
+  IF NOT EXISTS (
+    SELECT 1 FROM mapeo_listar_visitas(NULL, '9999999', v_hogar_id)
+    WHERE hogar_id = v_hogar_id AND hogar_nombre_familia = 'Hogar Para Eliminar'
+  ) THEN
+    RAISE EXCEPTION 'FALLO: la bitácora debería conservar la visita del hogar eliminado, con su nombre';
+  END IF;
+
+  -- Un hogar_id inexistente debe rechazarse con un mensaje claro.
+  BEGIN
+    PERFORM mapeo_eliminar_hogar(NULL, '9999999', gen_random_uuid());
+    RAISE EXCEPTION 'FALLO: se esperaba que un hogar_id inexistente lanzara excepción';
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS v_error = MESSAGE_TEXT;
+    IF v_error NOT ILIKE '%no existe%' THEN
+      RAISE EXCEPTION 'FALLO: mensaje de error inesperado para hogar_id inexistente: %', v_error;
+    END IF;
+  END;
+END $$;
+
 SELECT 'TODAS LAS PRUEBAS PASARON' AS resultado;
 `;
 

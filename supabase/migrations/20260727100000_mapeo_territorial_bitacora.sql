@@ -716,7 +716,7 @@ BEGIN
   IF v_rol = 'dirigente' THEN
     RETURN QUERY
     SELECT COALESCE(p.nombre, d.nombre, '')::text, COALESCE(p.apellido, d.apellido, '')::text,
-           d.telefono, 'dirigente'::text,
+           d.telefono::text, 'dirigente'::text,
            d.ci, NULL::bigint, d.ci, 'dirigente'::text, NULL::boolean
     FROM dirigentes d
     LEFT JOIN padron p ON p.ci = d.ci
@@ -724,7 +724,7 @@ BEGIN
   ELSIF v_rol = 'coordinador' THEN
     RETURN QUERY
     SELECT COALESCE(p.nombre, '')::text, COALESCE(p.apellido, '')::text,
-           c.telefono, 'coordinador'::text,
+           c.telefono::text, 'coordinador'::text,
            c.dirigente_ci, c.ci, c.ci, 'coordinador'::text, NULL::boolean
     FROM coordinadores c
     LEFT JOIN padron p ON p.ci = c.ci
@@ -732,7 +732,7 @@ BEGIN
   ELSIF v_rol = 'subcoordinador' THEN
     RETURN QUERY
     SELECT COALESCE(p.nombre, '')::text, COALESCE(p.apellido, '')::text,
-           s.telefono, 'subcoordinador'::text,
+           s.telefono::text, 'subcoordinador'::text,
            c.dirigente_ci, s.coordinador_ci, s.ci, 'subcoordinador'::text, NULL::boolean
     FROM subcoordinadores s
     LEFT JOIN coordinadores c ON c.ci = s.coordinador_ci
@@ -741,8 +741,8 @@ BEGIN
   ELSIF v_rol = 'votante' THEN
     RETURN QUERY
     SELECT COALESCE(p.nombre, '')::text, COALESCE(p.apellido, '')::text,
-           v.telefono, 'votante'::text,
-           v.dirigente_ci, v.coordinador_ci, v.asignado_por, v.asignado_por_rol, v.voto_confirmado
+           v.telefono::text, 'votante'::text,
+           v.dirigente_ci, v.coordinador_ci, v.asignado_por, v.asignado_por_rol::text, v.voto_confirmado
     FROM votantes v
     LEFT JOIN padron p ON p.ci = v.ci
     WHERE v.ci = p_ci;
@@ -1212,6 +1212,56 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
+-- ======================= ELIMINAR MAPEO DE HOGAR (soft-delete, solo superadmin) =======================
+-- Elimina el MAPEO de un hogar, no a sus integrantes: pone hogares.activo=false y
+-- libera (activo=false) todas las asociaciones activas en hogar_votantes para ese
+-- hogar, dejando a cada integrante disponible para asociarse a otro hogar. Nunca hace
+-- DELETE físico ni toca visitas_hogar — la bitácora conserva su historial completo
+-- (mapeo_listar_visitas no filtra por h.activo, y guarda su propia copia del nombre/
+-- dirección del hogar en el momento de cada visita vía el JOIN a hogares, que sigue
+-- existiendo con activo=false). mapeo_listar_hogares ya filtra "WHERE h.activo = true"
+-- incondicionalmente (para todos los roles, incluido superadmin) por lo que un hogar
+-- eliminado desaparece del mapa/listado/estadísticas sin necesidad de ningún cambio
+-- adicional ahí.
+--
+-- Solo superadmin puede invocarlo: se rechaza explícitamente cualquier otro rol del
+-- lado del servidor (el botón en el frontend es solo conveniencia de UI, no la única
+-- barrera). Las dos UPDATE quedan dentro de la misma llamada a esta función, que
+-- Postgres ejecuta como una única transacción implícita: si cualquier sentencia
+-- fallara, se revierte todo junto — no se necesita BEGIN/COMMIT explícito.
+CREATE OR REPLACE FUNCTION mapeo_eliminar_hogar(
+  p_login_code text,
+  p_superadmin_ci text,
+  p_hogar_id uuid
+) RETURNS hogares AS $$
+DECLARE
+  v_ci text;
+  v_rol text;
+  v_hogar hogares;
+BEGIN
+  SELECT actor_ci, actor_rol INTO v_ci, v_rol FROM mapeo_resolver_actor(p_login_code, p_superadmin_ci);
+
+  IF v_rol <> 'superadmin' THEN
+    RAISE EXCEPTION 'Solo superadmin puede eliminar el mapeo de un hogar.';
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM hogares h WHERE h.id = p_hogar_id) THEN
+    RAISE EXCEPTION 'El hogar % no existe.', p_hogar_id;
+  END IF;
+
+  UPDATE hogar_votantes
+  SET activo = false
+  WHERE hogar_id = p_hogar_id AND activo = true;
+
+  UPDATE hogares
+  SET activo = false
+  WHERE id = p_hogar_id
+  RETURNING * INTO v_hogar;
+
+  RETURN v_hogar;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+
 -- ======================= CONFIRMAR VISITA =======================
 -- Corazón de la bitácora: valida identidad, alcance, coordenadas y precisión GPS,
 -- calcula la distancia del lado del servidor y decide el resultado — el cliente
@@ -1399,6 +1449,7 @@ GRANT EXECUTE ON FUNCTION mapeo_actualizar_hogar(text, text, uuid, text, text, t
 GRANT EXECUTE ON FUNCTION mapeo_verificar_hogar(text, text, uuid, boolean, timestamptz, text) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION mapeo_asociar_votante(text, text, uuid, text) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION mapeo_desasociar_votante(text, text, uuid, text) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION mapeo_eliminar_hogar(text, text, uuid) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION mapeo_confirmar_visita(text, text, uuid, double precision, double precision, double precision, text) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION mapeo_listar_visitas(text, text, uuid) TO anon, authenticated;
 
