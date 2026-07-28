@@ -36,6 +36,10 @@ const buildDataset = () => ({
   dirigentes: [
     { ci: "1100001", nombre: "Dirigente", apellido: "Uno", telefono: "+595971100001", login_code: "DIR0001", es_externo: false, activo: true },
     { ci: "1100002", nombre: "Dirigente", apellido: "Dos", telefono: "+595971100002", login_code: "DIR0002", es_externo: false, activo: true },
+    // Dirigente "externo": sin fila en padron (ver más abajo) — usado para probar que
+    // también puede pertenecer a un hogar, con nombre/apellido resueltos desde
+    // dirigentes en vez de padron.
+    { ci: "1100003", nombre: "Externo", apellido: "SinPadron", telefono: "+595971100003", login_code: "DIR0003", es_externo: true, activo: true },
   ],
   coordinadores: [
     { ci: "1200001", dirigente_ci: "1100001", nombre: "Coordinador", apellido: "Uno", telefono: "+595971200001", login_code: "COO0001" },
@@ -165,25 +169,109 @@ function createMockBackend(dataset) {
     return false;
   };
 
+  // Espejo de mapeo_persona_rol_prioritario: a qué tabla pertenece una CI, sin filtrar
+  // por activo (usado tanto para alcance como para resolver nombre/rol de display).
+  // Prioridad dirigente > coordinador > subcoordinador > votante si la misma CI
+  // quedara en más de una tabla.
+  const personaRolPrioritario = (ci) => {
+    if (dirigentes.some((d) => d.ci === ci)) return "dirigente";
+    if (coordinadores.some((c) => c.ci === ci)) return "coordinador";
+    if (subcoordinadores.some((s) => s.ci === ci)) return "subcoordinador";
+    if (votantes.some((v) => v.ci === ci)) return "votante";
+    return null;
+  };
+
+  // Espejo de mapeo_persona_existe_activa: reemplaza la FK que antes exigía que
+  // votante_ci existiera en la tabla votantes específicamente.
+  const personaExisteActiva = (ci) => {
+    const d = dirigentes.find((x) => x.ci === ci);
+    if (d) return d.activo !== false;
+    const c = coordinadores.find((x) => x.ci === ci);
+    if (c) return c.activo !== false;
+    const s = subcoordinadores.find((x) => x.ci === ci);
+    if (s) return s.activo !== false;
+    const v = votantes.find((x) => x.ci === ci);
+    if (v) return v.activo !== false;
+    return false;
+  };
+
+  // Espejo de mapeo_persona_en_alcance: generaliza votanteEnAlcance para que un hogar
+  // pueda incluir también dirigentes/coordinadores/subcoordinadores, no solo votantes.
+  const personaEnAlcance = (personaCi, actorCi, actorRol) => {
+    if (actorRol === "superadmin") return true;
+    if (personaCi === actorCi) return true; // todo actor puede agregarse a sí mismo
+    const rol = personaRolPrioritario(personaCi);
+    if (rol === "votante") return votanteEnAlcance(personaCi, actorCi, actorRol);
+    if (rol === "coordinador") {
+      if (actorRol !== "dirigente") return false;
+      const c = coordinadores.find((x) => x.ci === personaCi);
+      return !!c && c.activo !== false && c.dirigente_ci === actorCi;
+    }
+    if (rol === "subcoordinador") {
+      const s = subcoordinadores.find((x) => x.ci === personaCi);
+      if (!s || s.activo === false) return false;
+      if (actorRol === "dirigente") {
+        const c = coordinadores.find((x) => x.ci === s.coordinador_ci);
+        return !!c && c.dirigente_ci === actorCi;
+      }
+      if (actorRol === "coordinador") return s.coordinador_ci === actorCi;
+      return false;
+    }
+    return false; // 'dirigente' (que no sea el propio actor) o CI que no existe en ninguna tabla
+  };
+
+  // Espejo de mapeo_persona_info: resuelve nombre/apellido/teléfono/rol de una persona
+  // de cualquiera de las 4 jerarquías, sintetizando dirigente_ci/coordinador_ci/
+  // asignado_por/asignado_por_rol con la misma forma que un votante para que
+  // getJerarquiaVotante/hogarTieneJerarquia (mapeoHelpers.js) sigan funcionando sin
+  // cambios cuando el integrante es un dirigente/coordinador/subcoordinador.
+  const personaInfo = (ci) => {
+    const rol = personaRolPrioritario(ci);
+    const p = padronPorCi.get(ci);
+    if (rol === "dirigente") {
+      const d = dirigentes.find((x) => x.ci === ci);
+      return { ci, nombre: p?.nombre ?? d.nombre ?? "", apellido: p?.apellido ?? d.apellido ?? "", telefono: d.telefono, rol: "dirigente", dirigente_ci: d.ci, coordinador_ci: null, asignado_por: d.ci, asignado_por_rol: "dirigente", voto_confirmado: null };
+    }
+    if (rol === "coordinador") {
+      const c = coordinadores.find((x) => x.ci === ci);
+      return { ci, nombre: p?.nombre ?? "", apellido: p?.apellido ?? "", telefono: c.telefono, rol: "coordinador", dirigente_ci: c.dirigente_ci, coordinador_ci: c.ci, asignado_por: c.ci, asignado_por_rol: "coordinador", voto_confirmado: null };
+    }
+    if (rol === "subcoordinador") {
+      const s = subcoordinadores.find((x) => x.ci === ci);
+      const c = coordinadores.find((x) => x.ci === s.coordinador_ci);
+      return { ci, nombre: p?.nombre ?? "", apellido: p?.apellido ?? "", telefono: s.telefono, rol: "subcoordinador", dirigente_ci: c?.dirigente_ci ?? null, coordinador_ci: s.coordinador_ci, asignado_por: s.ci, asignado_por_rol: "subcoordinador", voto_confirmado: null };
+    }
+    if (rol === "votante") {
+      const v = votantes.find((x) => x.ci === ci);
+      return { ci, nombre: p?.nombre ?? "", apellido: p?.apellido ?? "", telefono: v.telefono, rol: "votante", dirigente_ci: v.dirigente_ci, coordinador_ci: v.coordinador_ci, asignado_por: v.asignado_por, asignado_por_rol: v.asignado_por_rol, voto_confirmado: v.voto_confirmado };
+    }
+    // CI que no existe en ninguna tabla (p. ej. eliminada después de asociarse): no se
+    // descarta del listado, se devuelve con datos vacíos — mismo criterio que el
+    // LEFT JOIN LATERAL de mapeo_listar_hogares/listar_visitas.
+    return { ci, nombre: "", apellido: "", telefono: null, rol: null, dirigente_ci: null, coordinador_ci: null, asignado_por: null, asignado_por_rol: null, voto_confirmado: null };
+  };
+
   const hogarEnAlcance = (hogarId, actorCi, actorRol) => {
     if (actorRol === "superadmin") return true;
     // Espejo de mapeo_hogar_en_alcance en el SQL real: el creador solo tiene acceso
-    // transitorio mientras el hogar NUNCA tuvo ningún votante asociado (ni siquiera
+    // transitorio mientras el hogar NUNCA tuvo ningún integrante asociado (ni siquiera
     // uno ya desasociado) — en cuanto tuvo el primero, el alcance pasa a depender
-    // EXCLUSIVAMENTE de los votantes actualmente activos, para siempre. Comprobar
+    // EXCLUSIVAMENTE de los integrantes actualmente activos, para siempre. Comprobar
     // solo los activos acá (en vez de "alguna vez existió una fila") reabriría este
-    // fallback cada vez que se desasocia el último votante activo, dejando que el
+    // fallback cada vez que se desasocia el último integrante activo, dejando que el
     // creador original recupere acceso a un hogar que ya no está en su rama.
     const tuvoVotantesAlgunaVez = hogarVotantes.some((hv) => hv.hogar_id === hogarId);
     if (!tuvoVotantesAlgunaVez) {
       const hogar = hogares.find((h) => h.id === hogarId);
       return !!hogar && hogar.creado_por_ci === actorCi;
     }
-    return hogarVotantes.some((hv) => hv.hogar_id === hogarId && hv.activo && votanteEnAlcance(hv.votante_ci, actorCi, actorRol));
+    // personaEnAlcance (no votanteEnAlcance): un integrante puede ser un dirigente/
+    // coordinador/subcoordinador, no solo un votante.
+    return hogarVotantes.some((hv) => hv.hogar_id === hogarId && hv.activo && personaEnAlcance(hv.votante_ci, actorCi, actorRol));
   };
 
   // actor: si se provee, filtra los miembros embebidos a los que están en su alcance
-  // individual (espejo del filtro por-votante agregado a mapeo_listar_hogares /
+  // individual (espejo del filtro por-integrante agregado a mapeo_listar_hogares /
   // mapeo_listar_visitas — un hogar compartido entre ramas no debe exponer los
   // miembros de otra rama solo porque el hogar en sí está en alcance). Sin actor
   // (uso interno vía _state()/seed) no filtra, para no romper las aserciones que
@@ -192,16 +280,12 @@ function createMockBackend(dataset) {
     ...h,
     votantes: hogarVotantes
       .filter((hv) => hv.hogar_id === h.id && hv.activo)
-      .map((hv) => votantes.find((x) => x.ci === hv.votante_ci))
-      .filter(Boolean)
-      .filter((v) => !actor || actor.rol === "superadmin" || votanteEnAlcance(v.ci, actor.ci, actor.rol))
-      // Espejo del LEFT JOIN a padron en mapeo_listar_hogares/listar_visitas: si el
-      // votante no tuviera fila en padron, no se descarta del listado — se devuelven
-      // nombre/apellido vacíos en vez de perderlo.
-      .map((v) => {
-        const p = padronPorCi.get(v.ci);
-        return { ci: v.ci, nombre: p?.nombre ?? "", apellido: p?.apellido ?? "", telefono: v.telefono, dirigente_ci: v.dirigente_ci, coordinador_ci: v.coordinador_ci, asignado_por: v.asignado_por, asignado_por_rol: v.asignado_por_rol };
-      }),
+      .map((hv) => hv.votante_ci)
+      .filter((ci) => !actor || actor.rol === "superadmin" || personaEnAlcance(ci, actor.ci, actor.rol))
+      // Espejo de mapeo_persona_info: no se descarta el integrante si la persona no
+      // se resuelve del todo (p. ej. eliminada de todas las tablas), solo se devuelven
+      // los campos vacíos.
+      .map((ci) => personaInfo(ci)),
     ultima_visita: (() => {
       // Espejo del filtro agregado en mapeo_listar_hogares: una visita anterior a la
       // última reubicación del hogar ya no describe la ubicación vigente — no cuenta
@@ -268,9 +352,14 @@ function createMockBackend(dataset) {
       const actor = resolverActor(body);
       const votanteCi = ciABigint(body.p_votante_ci);
       if (!hogarEnAlcance(body.p_hogar_id, actor.ci, actor.rol)) throw new Error("El hogar no está dentro de su alcance.");
-      if (!votanteEnAlcance(votanteCi, actor.ci, actor.rol)) throw new Error("El votante no está dentro de su alcance.");
+      // Espejo de mapeo_asociar_votante real: valida existencia (reemplazo de la FK
+      // eliminada) antes de alcance, para un mensaje más claro.
+      if (!personaExisteActiva(votanteCi)) {
+        throw new Error("La CI no corresponde a ninguna persona activa (dirigente, coordinador, subcoordinador o votante).");
+      }
+      if (!personaEnAlcance(votanteCi, actor.ci, actor.rol)) throw new Error("La persona no está dentro de su alcance.");
       const existente = hogarVotantes.find((hv) => hv.votante_ci === votanteCi && hv.activo);
-      if (existente && existente.hogar_id !== body.p_hogar_id) throw new Error("El votante ya pertenece a otro hogar activo.");
+      if (existente && existente.hogar_id !== body.p_hogar_id) throw new Error("La persona ya pertenece a otro hogar activo.");
       if (!existente) hogarVotantes.push({ hogar_id: body.p_hogar_id, votante_ci: votanteCi, activo: true });
       return { hogar_id: body.p_hogar_id, votante_ci: votanteCi, activo: true };
     },
@@ -278,10 +367,12 @@ function createMockBackend(dataset) {
       const actor = resolverActor(body);
       const votanteCi = ciABigint(body.p_votante_ci);
       if (!hogarEnAlcance(body.p_hogar_id, actor.ci, actor.rol)) throw new Error("El hogar no está dentro de su alcance.");
-      // Un hogar compartido entre ramas no autoriza a desasociar a un votante de OTRA
-      // rama solo porque el hogar está en alcance (espejo del chequeo agregado al RPC).
-      if (actor.rol !== "superadmin" && !votanteEnAlcance(votanteCi, actor.ci, actor.rol)) {
-        throw new Error("El votante no está dentro de su alcance.");
+      // Un hogar compartido entre ramas no autoriza a desasociar a un integrante de
+      // OTRA rama solo porque el hogar está en alcance (espejo del chequeo agregado al
+      // RPC). personaEnAlcance (no votanteEnAlcance): el integrante puede ser un
+      // dirigente/coordinador/subcoordinador.
+      if (actor.rol !== "superadmin" && !personaEnAlcance(votanteCi, actor.ci, actor.rol)) {
+        throw new Error("La persona no está dentro de su alcance.");
       }
       const fila = hogarVotantes.find((hv) => hv.hogar_id === body.p_hogar_id && hv.votante_ci === votanteCi);
       if (fila) fila.activo = false;
@@ -511,6 +602,76 @@ await (async () => {
       await page.waitForTimeout(400);
       assert.equal(await page.locator("text=Votante Uno").count(), 1);
       assert.equal(await page.locator("text=Votante Dos").count(), 1);
+    });
+  });
+
+  // --- 6.1) Buscador de integrantes: no solo votantes ---
+  await test("El buscador de integrantes encuentra dirigentes/coordinadores y un dirigente puede agregarse a sí mismo", async () => {
+    const dataset = buildDataset();
+    const backend = createMockBackend(dataset);
+    backend.seedHogar({ id: "h1", nombre_familia: "Hogar Sin Integrantes", direccion: "Dir 1", referencia: "", latitud: PUNTO.lat, longitud: PUNTO.lng, precision_gps: 10, estado: "pendiente", creado_por_ci: "1100001", creado_por_rol: "dirigente", activo: true, created_at: new Date().toISOString(), updated_at: new Date().toISOString(), ubicacion_actualizada_at: new Date().toISOString() });
+
+    await withPage({ ci: "1100001", nombre: "Dirigente", apellido: "Uno", role: "dirigente", loginCode: "DIR0001" }, backend, {}, async (page) => {
+      await page.locator("text=Mapeo territorial").first().click();
+      await page.waitForTimeout(600);
+      await page.locator("text=Hogar Sin Integrantes").first().click();
+      await page.waitForTimeout(300);
+      await page.getByRole("button", { name: /Editar/ }).click();
+      await page.waitForTimeout(300);
+
+      // Buscar por CI a un COORDINADOR de su rama (no un votante) y asociarlo — antes
+      // de esta corrección, el buscador solo encontraba votantes.
+      const buscador = page.locator('input[placeholder*="Buscar por nombre"]');
+      await buscador.fill("1200001");
+      await page.waitForTimeout(300);
+      await page.getByRole("button", { name: /Coordinador Uno/ }).click();
+      await page.waitForTimeout(400);
+      assert.equal(backend._state().hogarVotantes.some((hv) => hv.votante_ci === "1200001" && hv.activo), true, "El coordinador debe haber quedado asociado");
+
+      // Buscar y asociarse a SÍ MISMO (dirigente) — el hogar donde vive.
+      await buscador.fill("1100001");
+      await page.waitForTimeout(300);
+      await page.getByRole("button", { name: /Dirigente Uno/ }).click();
+      await page.waitForTimeout(400);
+      assert.equal(backend._state().hogarVotantes.some((hv) => hv.votante_ci === "1100001" && hv.activo), true, "El dirigente debe haber podido agregarse a sí mismo");
+    });
+  });
+
+  // --- 6.2) Hogar mixto: dirigente + coordinador + subcoordinador + votante ---
+  await test("Un hogar puede agrupar dirigente, coordinador, subcoordinador y votante a la vez, mostrando el rol de cada integrante", async () => {
+    const dataset = buildDataset();
+    const backend = createMockBackend(dataset);
+    backend.seedHogar({ id: "h1", nombre_familia: "Hogar Mixto E2E", direccion: "Dir 1", referencia: "", latitud: PUNTO.lat, longitud: PUNTO.lng, precision_gps: 10, estado: "verificado", creado_por_ci: "1100001", creado_por_rol: "dirigente", activo: true, created_at: new Date().toISOString(), updated_at: new Date().toISOString(), ubicacion_actualizada_at: new Date().toISOString() });
+    backend.seedHogarVotante({ hogar_id: "h1", votante_ci: "1100001", activo: true }); // dirigente
+    backend.seedHogarVotante({ hogar_id: "h1", votante_ci: "1200001", activo: true }); // coordinador
+    backend.seedHogarVotante({ hogar_id: "h1", votante_ci: "1300001", activo: true }); // subcoordinador
+    backend.seedHogarVotante({ hogar_id: "h1", votante_ci: "1400001", activo: true }); // votante
+
+    await withPage({ ci: "9999999", nombre: "Super", apellido: "Admin", role: "superadmin" }, backend, {}, async (page) => {
+      await page.locator("text=Mapeo territorial").first().click();
+      await page.waitForTimeout(600);
+      await page.locator("text=Hogar Mixto E2E").first().click();
+      await page.waitForTimeout(400);
+      assert.equal(await page.locator("text=Integrantes (4)").count(), 1, "Debe mostrar los 4 integrantes de distinta jerarquía");
+    });
+  });
+
+  // --- 6.3) Dirigente externo (sin fila en padrón) ---
+  await test("Un dirigente externo (sin fila en padrón) puede pertenecer a un hogar", async () => {
+    const dataset = buildDataset();
+    const backend = createMockBackend(dataset);
+    backend.seedHogar({ id: "h1", nombre_familia: "Hogar Dirigente Externo", direccion: "Dir 1", referencia: "", latitud: PUNTO.lat, longitud: PUNTO.lng, precision_gps: 10, estado: "pendiente", creado_por_ci: "1100003", creado_por_rol: "dirigente", activo: true, created_at: new Date().toISOString(), updated_at: new Date().toISOString(), ubicacion_actualizada_at: new Date().toISOString() });
+    backend.seedHogarVotante({ hogar_id: "h1", votante_ci: "1100003", activo: true });
+
+    await withPage({ ci: "1100003", nombre: "Externo", apellido: "SinPadron", role: "dirigente", loginCode: "DIR0003" }, backend, {}, async (page) => {
+      await page.locator("text=Mapeo territorial").first().click();
+      await page.waitForTimeout(600);
+      await page.locator("text=Hogar Dirigente Externo").first().click();
+      await page.waitForTimeout(400);
+      // Sin fila en padron: nombre/apellido deben resolverse desde dirigentes. Aparece
+      // más de una vez en la página (encabezado de sesión, integrante del hogar,
+      // jerarquía responsable) — basta con que aparezca al menos una vez.
+      assert.ok((await page.locator("text=Externo SinPadron").count()) >= 1, "El dirigente externo debe mostrar su nombre desde dirigentes, no desde padron");
     });
   });
 

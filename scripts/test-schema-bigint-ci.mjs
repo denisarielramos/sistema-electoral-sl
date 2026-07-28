@@ -97,6 +97,9 @@ BEGIN
 END $$;
 
 INSERT INTO dirigentes (ci, nombre, apellido, login_code, activo) VALUES (1000001, 'Dir', 'Uno', 'DIR0001', true);
+-- Dirigente "externo" (sin fila en padron, ver más abajo) — usado para probar que
+-- mapeo_persona_info cae a dirigentes.nombre/apellido cuando no hay fila de padron.
+INSERT INTO dirigentes (ci, nombre, apellido, login_code, activo) VALUES (1000002, 'Externo', 'SinPadron', 'DIR0002', true);
 INSERT INTO coordinadores (ci, nombre, apellido, login_code, dirigente_ci) VALUES (2000001, 'Coord', 'Uno', 'COO0001', 1000001);
 INSERT INTO subcoordinadores (ci, nombre, apellido, login_code, coordinador_ci) VALUES (3000001, 'Sub', 'Uno', 'SUB0001', 2000001);
 -- Código deliberadamente duplicado entre dirigentes y coordinadores (login_code solo
@@ -107,12 +110,20 @@ INSERT INTO coordinadores (ci, nombre, apellido, login_code, dirigente_ci) VALUE
 INSERT INTO votantes (ci, dirigente_ci, coordinador_ci, asignado_por, asignado_por_rol, activo) VALUES
   (4000001, NULL, NULL, 3000001, 'subcoordinador', true),
   (4000002, 1000001, NULL, 1000001, 'dirigente', true),
-  (4000003, NULL, NULL, 9999999, 'subcoordinador', true);
+  (4000003, NULL, NULL, 9999999, 'subcoordinador', true),
+  -- Reservado para el hogar mixto (coordinador+subcoordinador+votante): 4000001 y
+  -- 4000002 ya quedan asociados a otros hogares en pruebas anteriores.
+  (4000004, NULL, NULL, 3000001, 'subcoordinador', true);
 -- padron: 4000002 sí tiene fila (caso normal, usado por mapeo_listar_hogares/
 -- listar_visitas más abajo). 4000001 deliberadamente NO tiene fila de padron, para
 -- probar que la ausencia no descarta al votante del listado (LEFT JOIN), solo deja
--- nombre/apellido vacíos.
-INSERT INTO padron (ci, nombre, apellido) VALUES (4000002, 'Directo', 'DelDirigente');
+-- nombre/apellido vacíos. 2000001 (coordinador) también tiene fila de padron, para
+-- probar que mapeo_persona_info usa padron (no coordinadores.nombre) para un
+-- integrante coordinador. 1000002 (dirigente "externo") NO tiene fila de padron a
+-- propósito.
+INSERT INTO padron (ci, nombre, apellido) VALUES
+  (4000002, 'Directo', 'DelDirigente'),
+  (2000001, 'CoordDesdePadron', 'Apellido');
 `;
 
 const ASSERTIONS_SQL = `
@@ -124,9 +135,33 @@ BEGIN
   IF v_tipo IS DISTINCT FROM 'bigint' THEN
     RAISE EXCEPTION 'FALLO: hogar_votantes.votante_ci debería ser bigint, es %', v_tipo;
   END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'hogar_votantes_votante_ci_fkey') THEN
-    RAISE EXCEPTION 'FALLO: falta la FK hogar_votantes_votante_ci_fkey';
+  -- Ya NO debe existir una FK contra votantes(ci): una FK normal no puede aceptar
+  -- también dirigentes/coordinadores/subcoordinadores. Se reemplazó por un trigger de
+  -- validación (ver el siguiente bloque).
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'hogar_votantes_votante_ci_fkey') THEN
+    RAISE EXCEPTION 'FALLO: hogar_votantes_votante_ci_fkey no debería existir (un hogar ahora admite cualquier jerarquía)';
   END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_hogar_votantes_validar_integrante') THEN
+    RAISE EXCEPTION 'FALLO: falta el trigger trg_hogar_votantes_validar_integrante (reemplazo de la FK eliminada)';
+  END IF;
+END $$;
+
+-- El trigger debe rechazar una CI que no exista en NINGUNA de las 4 tablas, aun
+-- insertando directo en hogar_votantes (sin pasar por el RPC) — es la defensa que
+-- reemplaza a la FK eliminada.
+DO $$
+DECLARE v_hogar_id uuid; v_error text;
+BEGIN
+  SELECT id INTO v_hogar_id FROM mapeo_crear_hogar('DIR0001', NULL, 'Hogar Trigger', 'Dir T', '', -25.3, -57.6, 10);
+  BEGIN
+    INSERT INTO hogar_votantes (hogar_id, votante_ci) VALUES (v_hogar_id, 8888888);
+    RAISE EXCEPTION 'FALLO: se esperaba que el trigger rechazara una CI inexistente en las 4 tablas';
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS v_error = MESSAGE_TEXT;
+    IF v_error NOT ILIKE '%no corresponde a ninguna persona activa%' THEN
+      RAISE EXCEPTION 'FALLO: mensaje de error inesperado del trigger: %', v_error;
+    END IF;
+  END;
 END $$;
 
 DO $$
@@ -241,6 +276,144 @@ DECLARE v_count int;
 BEGIN
   SELECT count(*) INTO v_count FROM mapeo_listar_hogares(NULL, '9999999');
   IF v_count < 3 THEN RAISE EXCEPTION 'FALLO: superadmin debería ver al menos 3 hogares, vio %', v_count; END IF;
+END $$;
+
+-- ======================= INTEGRANTES DE CUALQUIER JERARQUÍA (no solo votantes) =======================
+-- Un hogar solo admitía personas de la tabla votantes — por eso una CI como la del
+-- ejemplo real reportado (un coordinador) no aparecía en el buscador ni podía
+-- asociarse, aunque también fuera electora. Estas pruebas cubren exactamente ese caso.
+
+-- Asociar un COORDINADOR a un hogar (como lo haría su dirigente): mapeo_persona_info
+-- debe resolver rol='coordinador' y nombre/apellido desde padron (no desde
+-- coordinadores.nombre, que también existe pero no es la fuente prioritaria).
+DO $$
+DECLARE v_hogar_id uuid; v_votantes jsonb;
+BEGIN
+  SELECT id INTO v_hogar_id FROM mapeo_crear_hogar('DIR0001', NULL, 'Hogar Coordinador', 'Dir C', '', -25.3, -57.6, 10);
+  PERFORM mapeo_asociar_votante('DIR0001', NULL, v_hogar_id, '2000001');
+  SELECT votantes INTO v_votantes FROM mapeo_listar_hogares('DIR0001', NULL) WHERE nombre_familia = 'Hogar Coordinador';
+  IF jsonb_array_length(v_votantes) <> 1 THEN
+    RAISE EXCEPTION 'FALLO: se esperaba 1 integrante (el coordinador), obtuvo %', v_votantes;
+  END IF;
+  IF (v_votantes -> 0 ->> 'rol') <> 'coordinador' THEN
+    RAISE EXCEPTION 'FALLO: rol esperado "coordinador", obtuvo %', (v_votantes -> 0 ->> 'rol');
+  END IF;
+  IF (v_votantes -> 0 ->> 'nombre') <> 'CoordDesdePadron' OR (v_votantes -> 0 ->> 'apellido') <> 'Apellido' THEN
+    RAISE EXCEPTION 'FALLO: nombre/apellido del coordinador esperados desde padron ("CoordDesdePadron"/"Apellido"), obtuvo %/%', (v_votantes -> 0 ->> 'nombre'), (v_votantes -> 0 ->> 'apellido');
+  END IF;
+  -- Ya asociado a un hogar activo: intentar asociarlo a OTRO hogar debe rechazarse,
+  -- sin importar que ahora sea un coordinador y no un votante (requisito: una misma
+  -- CI solo puede pertenecer a un hogar activo, independientemente de su rol).
+  DECLARE
+    v_hogar_id_2 uuid;
+    v_error text;
+  BEGIN
+    SELECT id INTO v_hogar_id_2 FROM mapeo_crear_hogar('DIR0001', NULL, 'Hogar Coordinador 2', 'Dir C2', '', -25.3, -57.6, 10);
+    BEGIN
+      PERFORM mapeo_asociar_votante('DIR0001', NULL, v_hogar_id_2, '2000001');
+      RAISE EXCEPTION 'FALLO: se esperaba rechazo por CI ya asociada a otro hogar activo';
+    EXCEPTION WHEN OTHERS THEN
+      GET STACKED DIAGNOSTICS v_error = MESSAGE_TEXT;
+      IF v_error NOT ILIKE '%ya pertenece a otro hogar activo%' THEN
+        RAISE EXCEPTION 'FALLO: mensaje de error inesperado: %', v_error;
+      END IF;
+    END;
+  END;
+END $$;
+
+-- Un DIRIGENTE debe poder agregarse a SÍ MISMO al hogar donde vive.
+DO $$
+DECLARE v_hogar_id uuid; v_votantes jsonb;
+BEGIN
+  SELECT id INTO v_hogar_id FROM mapeo_crear_hogar('DIR0001', NULL, 'Hogar Del Dirigente', 'Dir Propio', '', -25.3, -57.6, 10);
+  PERFORM mapeo_asociar_votante('DIR0001', NULL, v_hogar_id, '1000001');
+  SELECT votantes INTO v_votantes FROM mapeo_listar_hogares('DIR0001', NULL) WHERE nombre_familia = 'Hogar Del Dirigente';
+  IF (v_votantes -> 0 ->> 'ci') <> '1000001' OR (v_votantes -> 0 ->> 'rol') <> 'dirigente' THEN
+    RAISE EXCEPTION 'FALLO: el dirigente debería poder agregarse a sí mismo, obtuvo %', v_votantes;
+  END IF;
+END $$;
+
+-- Un dirigente "externo" (sin fila en padron) también debe poder pertenecer a un
+-- hogar, usando dirigentes.nombre/apellido como fallback.
+DO $$
+DECLARE v_hogar_id uuid; v_votantes jsonb;
+BEGIN
+  SELECT id INTO v_hogar_id FROM mapeo_crear_hogar('DIR0002', NULL, 'Hogar Dirigente Externo', 'Dir Externo', '', -25.3, -57.6, 10);
+  PERFORM mapeo_asociar_votante('DIR0002', NULL, v_hogar_id, '1000002');
+  SELECT votantes INTO v_votantes FROM mapeo_listar_hogares('DIR0002', NULL) WHERE nombre_familia = 'Hogar Dirigente Externo';
+  IF (v_votantes -> 0 ->> 'nombre') <> 'Externo' OR (v_votantes -> 0 ->> 'apellido') <> 'SinPadron' THEN
+    RAISE EXCEPTION 'FALLO: dirigente externo debería resolver nombre/apellido desde dirigentes ("Externo"/"SinPadron"), obtuvo %/%', (v_votantes -> 0 ->> 'nombre'), (v_votantes -> 0 ->> 'apellido');
+  END IF;
+END $$;
+
+-- Un hogar puede agrupar coordinador + subcoordinador + votante a la vez (las 3
+-- jerarquías no-dirigente en una misma familia).
+DO $$
+DECLARE v_hogar_id uuid; v_votantes jsonb; v_roles text[];
+BEGIN
+  SELECT id INTO v_hogar_id FROM mapeo_crear_hogar('DIR0001', NULL, 'Hogar Mixto', 'Dir Mixto', '', -25.3, -57.6, 10);
+  PERFORM mapeo_asociar_votante('DIR0001', NULL, v_hogar_id, '3000001'); -- subcoordinador
+  PERFORM mapeo_asociar_votante('DIR0001', NULL, v_hogar_id, '4000004'); -- votante del subcoordinador
+  SELECT votantes INTO v_votantes FROM mapeo_listar_hogares('DIR0001', NULL) WHERE nombre_familia = 'Hogar Mixto';
+  IF jsonb_array_length(v_votantes) <> 2 THEN
+    RAISE EXCEPTION 'FALLO: se esperaban 2 integrantes (subcoordinador + votante), obtuvo %', v_votantes;
+  END IF;
+  SELECT array_agg(x ->> 'rol' ORDER BY x ->> 'rol') INTO v_roles FROM jsonb_array_elements(v_votantes) x;
+  IF v_roles <> ARRAY['subcoordinador', 'votante'] THEN
+    RAISE EXCEPTION 'FALLO: roles esperados [subcoordinador, votante], obtuvo %', v_roles;
+  END IF;
+  -- El coordinador del subcoordinador (2000001) debe poder ver este hogar mixto
+  -- (alcance transitivo), pese a que no contiene ningún votante directo suyo.
+  IF NOT mapeo_hogar_en_alcance(v_hogar_id, '2000001', 'coordinador') THEN
+    RAISE EXCEPTION 'FALLO: el coordinador debería tener alcance sobre un hogar que solo contiene a su subcoordinador y el votante de este';
+  END IF;
+END $$;
+
+-- mapeo_persona_en_alcance: alcance jerárquico para los 4 roles (no solo votantes).
+DO $$
+BEGIN
+  IF NOT mapeo_persona_en_alcance(2000001::bigint, '9999999', 'superadmin') THEN
+    RAISE EXCEPTION 'FALLO: superadmin debería tener alcance sobre cualquier persona';
+  END IF;
+  IF NOT mapeo_persona_en_alcance(2000001::bigint, '1000001', 'dirigente') THEN
+    RAISE EXCEPTION 'FALLO: el dirigente debería tener alcance sobre su propio coordinador';
+  END IF;
+  IF mapeo_persona_en_alcance(1000002::bigint, '1000001', 'dirigente') THEN
+    RAISE EXCEPTION 'FALLO: un dirigente NO debería tener alcance sobre otro dirigente';
+  END IF;
+  IF NOT mapeo_persona_en_alcance(3000001::bigint, '2000001', 'coordinador') THEN
+    RAISE EXCEPTION 'FALLO: el coordinador debería tener alcance sobre su propio subcoordinador';
+  END IF;
+  IF mapeo_persona_en_alcance(1000001::bigint, '2000001', 'coordinador') THEN
+    RAISE EXCEPTION 'FALLO: un coordinador NO debería tener alcance sobre su propio dirigente';
+  END IF;
+  IF NOT mapeo_persona_en_alcance(4000001::bigint, '3000001', 'subcoordinador') THEN
+    RAISE EXCEPTION 'FALLO: el subcoordinador debería tener alcance sobre su propio votante';
+  END IF;
+  IF mapeo_persona_en_alcance(2000001::bigint, '3000001', 'subcoordinador') THEN
+    RAISE EXCEPTION 'FALLO: un subcoordinador NO debería tener alcance sobre su propio coordinador';
+  END IF;
+  -- Todo actor puede agregarse a sí mismo, sin importar su rol.
+  IF NOT mapeo_persona_en_alcance(3000001::bigint, '3000001', 'subcoordinador') THEN
+    RAISE EXCEPTION 'FALLO: un subcoordinador debería tener alcance sobre sí mismo';
+  END IF;
+END $$;
+
+-- mapeo_asociar_votante debe rechazar (con mensaje claro) una CI que no exista en
+-- ninguna de las 4 tablas — validación explícita en el RPC, además del trigger.
+DO $$
+DECLARE v_hogar_id uuid; v_error text;
+BEGIN
+  SELECT id INTO v_hogar_id FROM mapeo_crear_hogar('DIR0001', NULL, 'Hogar CI Inexistente', 'Dir I', '', -25.3, -57.6, 10);
+  BEGIN
+    PERFORM mapeo_asociar_votante('DIR0001', NULL, v_hogar_id, '7777777');
+    RAISE EXCEPTION 'FALLO: se esperaba rechazo de una CI que no existe en ninguna tabla';
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS v_error = MESSAGE_TEXT;
+    IF v_error NOT ILIKE '%no corresponde a ninguna persona activa%' THEN
+      RAISE EXCEPTION 'FALLO: mensaje de error inesperado: %', v_error;
+    END IF;
+  END;
 END $$;
 
 -- login_code solo es UNIQUE dentro de cada tabla (dirigentes/coordinadores/

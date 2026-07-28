@@ -30,7 +30,7 @@ import {
 import {
   filtrarHogares,
   calcularEstadisticasMapeo,
-  votantesDelRolEnMapeo,
+  personasDelRolEnMapeo,
   construirVotantesEnHogarActivo,
   getJerarquiaHogar,
 } from "../src/utils/mapeoHelpers.js";
@@ -106,15 +106,20 @@ import {
   assert.equal(enUsoExcluyendoHogar1.has("4000003"), true);
 }
 
-// ======================= CASO 6: PERMISOS Y ALCANCE JERÁRQUICO =======================
+// ======================= CASO 6: PERMISOS Y ALCANCE JERÁRQUICO (personasDelRolEnMapeo) ==
+// personasDelRolEnMapeo reemplazó a votantesDelRolEnMapeo: un hogar ya no admite solo
+// votantes, así que la lista de personas disponibles para asociar debe incluir también
+// dirigentes/coordinadores/subcoordinadores (con su propio rol y, para cada actor no
+// superadmin, incluyendo su propia CI — un dirigente/coordinador/subcoordinador también
+// debe poder agregarse a sí mismo a un hogar).
 {
   const estructura = {
-    dirigentes: [{ ci: "1000001" }],
+    dirigentes: [{ ci: "1000001", nombre: "Ana", apellido: "Dir" }],
     coordinadores: [
-      { ci: "2000001", dirigente_ci: "1000001" },
-      { ci: "2000002", dirigente_ci: "9999999" }, // rama de otro dirigente
+      { ci: "2000001", dirigente_ci: "1000001", nombre: "Bea", apellido: "Coord" },
+      { ci: "2000002", dirigente_ci: "9999999", nombre: "Otro", apellido: "Coord" }, // rama de otro dirigente
     ],
-    subcoordinadores: [{ ci: "3000001", coordinador_ci: "2000001" }],
+    subcoordinadores: [{ ci: "3000001", coordinador_ci: "2000001", nombre: "Cara", apellido: "Sub" }],
     votantes: [
       { ci: "4000001", dirigente_ci: "1000001", coordinador_ci: "2000001", asignado_por: "2000001", asignado_por_rol: "coordinador" },
       { ci: "4000002", coordinador_ci: "2000001", asignado_por: "3000001", asignado_por_rol: "subcoordinador" },
@@ -122,40 +127,60 @@ import {
     ],
   };
 
-  // Superadmin ve todos los votantes.
-  const paraSuperadmin = votantesDelRolEnMapeo(estructura, { ci: "9", role: "superadmin" });
-  assert.equal(paraSuperadmin.length, 3);
+  // Superadmin ve a todas las personas de las 4 jerarquías.
+  const paraSuperadmin = personasDelRolEnMapeo(estructura, { ci: "9", role: "superadmin" });
+  assert.equal(paraSuperadmin.length, 7); // 1 dirigente + 2 coordinadores + 1 subcoordinador + 3 votantes
 
-  // Dirigente ve solo su rama (directos + de sus coordinadores + de los subs de esos
-  // coordinadores) — NO ve al votante de la rama del otro dirigente.
-  const paraDirigente = votantesDelRolEnMapeo(estructura, { ci: "1000001", role: "dirigente" });
-  const cisDirigente = paraDirigente.map((v) => v.ci).sort();
-  assert.deepEqual(cisDirigente, ["4000001", "4000002"]);
+  // Dirigente ve: a sí mismo, a sus coordinadores, a los subcoordinadores de esos
+  // coordinadores, y a todos los votantes de su rama — NO ve la rama del otro dirigente.
+  const paraDirigente = personasDelRolEnMapeo(estructura, { ci: "1000001", role: "dirigente" });
+  const porCiDirigente = new Map(paraDirigente.map((p) => [p.ci, p.rol]));
+  assert.deepEqual([...porCiDirigente.keys()].sort(), ["1000001", "2000001", "3000001", "4000001", "4000002"]);
+  assert.equal(porCiDirigente.get("1000001"), "dirigente"); // a sí mismo
+  assert.equal(porCiDirigente.get("2000001"), "coordinador");
+  assert.equal(porCiDirigente.get("3000001"), "subcoordinador");
+  assert.equal(porCiDirigente.get("4000001"), "votante");
+  assert.ok(!porCiDirigente.has("2000002"), "Dirigente no debe ver coordinadores de otra rama");
+  assert.ok(!porCiDirigente.has("4000003"), "Dirigente no debe ver votantes de otra rama");
 
-  // Coordinador ve directos + de sus subcoordinadores, nunca de otro coordinador.
-  const paraCoordinador = votantesDelRolEnMapeo(estructura, { ci: "2000001", role: "coordinador" });
-  const cisCoordinador = paraCoordinador.map((v) => v.ci).sort();
-  assert.deepEqual(cisCoordinador, ["4000001", "4000002"]);
-  assert.ok(!cisCoordinador.includes("4000003"), "Coordinador no debe ver votantes de otra rama");
+  // Coordinador ve: a sí mismo, a sus subcoordinadores y a todos sus votantes — nunca a
+  // otro coordinador ni a los votantes de otra rama.
+  const paraCoordinador = personasDelRolEnMapeo(estructura, { ci: "2000001", role: "coordinador" });
+  const porCiCoordinador = new Map(paraCoordinador.map((p) => [p.ci, p.rol]));
+  assert.deepEqual([...porCiCoordinador.keys()].sort(), ["2000001", "3000001", "4000001", "4000002"]);
+  assert.equal(porCiCoordinador.get("2000001"), "coordinador"); // a sí mismo
+  assert.ok(!porCiCoordinador.has("4000003"), "Coordinador no debe ver votantes de otra rama");
 
-  // Subcoordinador ve solo los votantes que él mismo asignó.
-  const paraSubcoordinador = votantesDelRolEnMapeo(estructura, { ci: "3000001", role: "subcoordinador" });
-  assert.deepEqual(paraSubcoordinador.map((v) => v.ci), ["4000002"]);
+  // Subcoordinador ve: a sí mismo y a los votantes que él mismo asignó.
+  const paraSubcoordinador = personasDelRolEnMapeo(estructura, { ci: "3000001", role: "subcoordinador" });
+  const porCiSubcoordinador = new Map(paraSubcoordinador.map((p) => [p.ci, p.rol]));
+  assert.deepEqual([...porCiSubcoordinador.keys()].sort(), ["3000001", "4000002"]);
+  assert.equal(porCiSubcoordinador.get("3000001"), "subcoordinador");
 
   // Sin usuario -> lista vacía (nunca todos por defecto).
-  assert.deepEqual(votantesDelRolEnMapeo(estructura, null), []);
+  assert.deepEqual(personasDelRolEnMapeo(estructura, null), []);
+
+  // Deduplicación por CI con prioridad dirigente > coordinador > subcoordinador >
+  // votante: si la misma CI quedó en más de una tabla (p. ej. un votante ascendido a
+  // coordinador sin limpiar su fila vieja en votantes), se muestra una sola vez con el
+  // rol más alto.
+  const estructuraConDuplicado = {
+    dirigentes: [{ ci: "1000001" }],
+    coordinadores: [{ ci: "5000001", dirigente_ci: "1000001" }],
+    subcoordinadores: [],
+    votantes: [{ ci: "5000001", dirigente_ci: "1000001" }], // misma CI que el coordinador de arriba
+  };
+  const paraDuplicado = personasDelRolEnMapeo(estructuraConDuplicado, { ci: "1000001", role: "dirigente" });
+  const coincidencias = paraDuplicado.filter((p) => p.ci === "5000001");
+  assert.equal(coincidencias.length, 1, "Una CI en 2 tablas no debe aparecer duplicada");
+  assert.equal(coincidencias[0].rol, "coordinador", "Debe priorizarse el rol más alto (coordinador sobre votante)");
 
   // getJerarquiaHogar resuelve nombres de dirigente/coordinador/subcoordinador a
-  // partir de los votantes embebidos de un hogar.
-  const estructuraConNombres = {
-    dirigentes: [{ ci: "1000001", nombre: "Ana", apellido: "Dir" }],
-    coordinadores: [{ ci: "2000001", nombre: "Bea", apellido: "Coord" }],
-    subcoordinadores: [{ ci: "3000001", nombre: "Cara", apellido: "Sub" }],
-  };
+  // partir de los integrantes embebidos de un hogar.
   const hogarConJerarquia = {
     votantes: [{ ci: "4000002", dirigente_ci: "1000001", coordinador_ci: "2000001", asignado_por: "3000001", asignado_por_rol: "subcoordinador" }],
   };
-  const jerarquia = getJerarquiaHogar(hogarConJerarquia, estructuraConNombres);
+  const jerarquia = getJerarquiaHogar(hogarConJerarquia, estructura);
   assert.equal(jerarquia.dirigente?.ci, "1000001");
   assert.equal(jerarquia.coordinador?.ci, "2000001");
   assert.equal(jerarquia.subcoordinador?.ci, "3000001");

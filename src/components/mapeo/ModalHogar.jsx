@@ -5,6 +5,7 @@ import { useGeolocation } from "../../hooks/useGeolocation";
 import { esCoordenadaValida, formatearPrecisionGps } from "../../utils/geoHelpers";
 import { normalizeCI } from "../../utils/estructuraHelpers";
 import { personaCoincideConsulta } from "../../utils/busquedaHelpers";
+import { ROL_INTEGRANTE_LABEL } from "../../utils/mapeoHelpers";
 import LeafletSeleccionarUbicacion from "./LeafletSeleccionarUbicacion";
 
 // votantesDisponibles: ya filtrados por alcance jerárquico (mismos helpers que el
@@ -283,16 +284,20 @@ const ModalHogar = ({
             </div>
           </div>
 
-          {/* Votantes asociados (solo al editar un hogar existente) */}
+          {/* Integrantes asociados (solo al editar un hogar existente) */}
           {hogarExistente && (
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1.5">
-                Votantes del hogar ({votantesAsociados.length})
+                Integrantes del hogar ({votantesAsociados.length})
               </label>
               <div className="space-y-1.5">
                 {votantesAsociados.map((v) => (
                   <div key={v.ci} className="flex items-center justify-between gap-2 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5">
-                    <span className="text-sm text-slate-700 truncate">{v.nombre} {v.apellido} <span className="text-slate-400">— CI: {v.ci}</span></span>
+                    <span className="text-sm text-slate-700 truncate min-w-0">
+                      {v.nombre} {v.apellido}
+                      {v.rol && <span className="ml-1.5 text-[10px] font-medium uppercase tracking-wide text-brand-600 bg-brand-50 border border-brand-200 rounded px-1 py-0.5">{ROL_INTEGRANTE_LABEL[v.rol] || v.rol}</span>}
+                      <span className="text-slate-400 block sm:inline"> — CI: {v.ci}{v.telefono ? ` · Tel: ${v.telefono}` : ""}</span>
+                    </span>
                     <button
                       type="button"
                       onClick={async () => {
@@ -300,19 +305,19 @@ const ModalHogar = ({
                         try {
                           await onDesasociarVotante(hogarExistente.id, normalizeCI(v.ci));
                         } catch (err) {
-                          setError(err.message || "Error al quitar el votante del hogar.");
+                          setError(err.message || "Error al quitar a la persona del hogar.");
                         }
                       }}
                       disabled={saving}
-                      title="Quitar del hogar (no borra al votante)"
-                      className="p-1 text-slate-400 hover:text-red-600 bg-transparent border-0 shadow-none disabled:opacity-50"
+                      title="Quitar del hogar (no borra a la persona)"
+                      className="p-1 text-slate-400 hover:text-red-600 bg-transparent border-0 shadow-none disabled:opacity-50 shrink-0"
                     >
                       <UserMinus className="w-3.5 h-3.5" />
                     </button>
                   </div>
                 ))}
                 {votantesAsociados.length === 0 && (
-                  <p className="text-xs text-slate-400 italic">Sin votantes asociados todavía.</p>
+                  <p className="text-xs text-slate-400 italic">Sin integrantes asociados todavía.</p>
                 )}
               </div>
 
@@ -323,7 +328,7 @@ const ModalHogar = ({
                     type="text"
                     value={busquedaVotante}
                     onChange={(e) => setBusquedaVotante(e.target.value)}
-                    placeholder="Buscar votante por nombre o CI para agregar..."
+                    placeholder="Buscar por nombre, apellido, CI o teléfono para agregar..."
                     className="w-full pl-8 pr-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white"
                     disabled={saving}
                   />
@@ -342,13 +347,17 @@ const ModalHogar = ({
                             await onAsociarVotante(hogarExistente.id, normalizeCI(v.ci));
                             setBusquedaVotante("");
                           } catch (err) {
-                            setError(err.message || "Error al asociar el votante al hogar.");
+                            setError(err.message || "Error al asociar la persona al hogar.");
                           }
                         }}
-                        className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50 border-0 bg-transparent shadow-none flex items-center justify-between"
+                        className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50 border-0 bg-transparent shadow-none flex items-center justify-between gap-2"
                       >
-                        <span>{v.nombre} {v.apellido} <span className="text-slate-400">— CI: {v.ci}</span></span>
-                        <Check className="w-3.5 h-3.5 text-slate-300" />
+                        <span className="min-w-0 truncate">
+                          {v.nombre} {v.apellido}
+                          {v.rol && <span className="ml-1.5 text-[10px] font-medium uppercase tracking-wide text-brand-600 bg-brand-50 border border-brand-200 rounded px-1 py-0.5">{ROL_INTEGRANTE_LABEL[v.rol] || v.rol}</span>}
+                          <span className="text-slate-400"> — CI: {v.ci}{v.telefono ? ` · Tel: ${v.telefono}` : ""}</span>
+                        </span>
+                        <Check className="w-3.5 h-3.5 text-slate-300 shrink-0" />
                       </button>
                     ))}
                   </div>

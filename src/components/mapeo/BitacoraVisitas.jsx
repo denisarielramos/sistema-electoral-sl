@@ -211,7 +211,7 @@ const BitacoraVisitas = ({ currentUser, estructura, onVolver }) => {
             <div className="px-5 py-4 space-y-2 text-sm">
               <p><span className="text-slate-400">Familia/hogar:</span> {detalle.hogar_nombre_familia || "Sin nombre"}</p>
               <p><span className="text-slate-400">Dirección:</span> {detalle.hogar_direccion || "Sin dato"}</p>
-              <p><span className="text-slate-400">Votantes:</span> {(detalle.votantes || []).map((v) => `${v.nombre} ${v.apellido}`).join(", ") || "Sin datos"}</p>
+              <p><span className="text-slate-400">Integrantes:</span> {(detalle.votantes || []).map((v) => `${v.nombre} ${v.apellido}`).join(", ") || "Sin datos"}</p>
               <p><span className="text-slate-400">Visitante:</span> {resolverNombreActor(detalle.visitante_ci, detalle.visitante_rol, estructura)} ({detalle.visitante_rol})</p>
               <p><span className="text-slate-400">Fecha y hora:</span> {new Date(detalle.fecha_hora).toLocaleString("es-PY")}</p>
               <p><span className="text-slate-400">Precisión GPS:</span> {formatearPrecisionGps(detalle.precision_gps)}</p>

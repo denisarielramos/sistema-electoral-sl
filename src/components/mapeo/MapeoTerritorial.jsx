@@ -9,7 +9,7 @@ import { Home, Search, Plus, RefreshCw, ArrowLeft } from "lucide-react";
 import { useHogares } from "../../hooks/useHogares";
 import { useMapeoConfiguracion } from "../../hooks/useMapeoConfiguracion";
 import { normalizeCI } from "../../utils/estructuraHelpers";
-import { filtrarHogares, calcularEstadisticasMapeo, getJerarquiaHogar, votantesDelRolEnMapeo, construirVotantesEnHogarActivo } from "../../utils/mapeoHelpers";
+import { filtrarHogares, calcularEstadisticasMapeo, getJerarquiaHogar, personasDelRolEnMapeo, construirVotantesEnHogarActivo } from "../../utils/mapeoHelpers";
 import { ESTADOS_MAPA, ESTADO_MAPA_LABEL, getEstadoMapaHogar } from "../../utils/geoHelpers";
 import { confirmarVisita as confirmarVisitaService } from "../../services/mapeoService";
 import MapeoStatsCards from "./MapeoStatsCards";
@@ -87,7 +87,7 @@ const MapeoTerritorial = ({ currentUser, estructura, onVolver }) => {
   }, [hogares, loading, modalHogar]);
 
   const votantesDisponibles = useMemo(() => {
-    const propios = votantesDelRolEnMapeo(estructura, currentUser);
+    const propios = personasDelRolEnMapeo(estructura, currentUser);
     return propios.filter((v) => !votantesEnHogarCI.has(normalizeCI(v.ci)));
   }, [estructura, currentUser, votantesEnHogarCI]);
 

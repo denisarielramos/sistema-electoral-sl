@@ -179,33 +179,76 @@ CREATE INDEX IF NOT EXISTS ix_hogares_estado ON hogares(estado);
 CREATE INDEX IF NOT EXISTS ix_hogares_creado_por ON hogares(creado_por_ci);
 CREATE INDEX IF NOT EXISTS ix_hogares_activo ON hogares(activo);
 
--- ======================= HOGAR_VOTANTES (asociación N:M, un hogar activo por votante) =======================
--- votante_ci es bigint (no text) para poder implementar la FK contra votantes.ci,
--- que es bigint en el esquema real (ver verificación de tipos en la sección 0.1).
--- El intento anterior de esta migración declaraba esta columna como text, lo que
--- Postgres rechaza al crear la FK con "foreign key constraint ... cannot be
--- implemented" — no es posible crear la tabla con un tipo incompatible, así que si
--- ese intento falló, hogar_votantes no llegó a existir: no hace falta un ALTER TABLE
--- de reparación acá, re-ejecutar esta migración simplemente la crea bien esta vez.
+-- ======================= HOGAR_VOTANTES (asociación N:M, un integrante activo por hogar) =======================
+-- votante_ci es bigint (no text) — mismo tipo que ci en dirigentes/coordinadores/
+-- subcoordinadores/votantes (ver verificación de tipos en la sección 0.1). Pese al
+-- nombre de la columna (histórico: la primera versión de este módulo solo admitía
+-- votantes), un hogar puede agrupar a CUALQUIER persona de las 4 jerarquías —
+-- dirigente, coordinador, subcoordinador o votante — para que, por ejemplo, un
+-- coordinador que también es elector pueda aparecer como integrante de su propio
+-- hogar, o un dirigente pueda agregarse a sí mismo al hogar donde vive. Una FK normal
+-- no puede apuntar a 4 tablas a la vez, así que en vez de REFERENCES se valida con un
+-- trigger (mapeo_validar_integrante_hogar más abajo) — mismo patrón que ya usa
+-- supabase/migrations/20260727000000_fix_votante_asignador_validation.sql para
+-- validar asignado_por contra la tabla que corresponda según asignado_por_rol.
 CREATE TABLE IF NOT EXISTS hogar_votantes (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   hogar_id    uuid NOT NULL REFERENCES hogares(id),
-  votante_ci  bigint NOT NULL REFERENCES votantes(ci),
+  votante_ci  bigint NOT NULL,
   activo      boolean NOT NULL DEFAULT true,
   created_at  timestamptz NOT NULL DEFAULT now(),
   updated_at  timestamptz NOT NULL DEFAULT now()
 );
 
-COMMENT ON TABLE hogar_votantes IS 'Asociación votante↔hogar. activo=false = desasociado (no se borra la fila: conserva historial, no afecta al hogar ni a sus visitas).';
+COMMENT ON TABLE hogar_votantes IS 'Asociación persona↔hogar (dirigente, coordinador, subcoordinador o votante — ver comentario arriba). activo=false = desasociado (no se borra la fila: conserva historial, no afecta al hogar ni a sus visitas).';
 
--- Un votante no puede pertenecer a más de un hogar ACTIVO simultáneamente.
--- (también evita duplicar la misma asociación hogar+votante, porque votante_ci
--- ya queda único entre las filas activas).
+-- Una versión anterior de esta migración declaraba esta columna con
+-- "REFERENCES votantes(ci)", lo que impedía asociar a cualquier persona que no fuera
+-- votante. Se elimina esa FK (si ya se había aplicado) — el DROP es idempotente y no
+-- pierde datos: las filas ya insertadas no se tocan, solo se deja de exigir que
+-- votante_ci exista en la tabla votantes específicamente.
+ALTER TABLE hogar_votantes DROP CONSTRAINT IF EXISTS hogar_votantes_votante_ci_fkey;
+
+-- Un integrante no puede pertenecer a más de un hogar ACTIVO simultáneamente.
+-- (también evita duplicar la misma asociación hogar+integrante, porque votante_ci
+-- ya queda único entre las filas activas). Es agnóstico de la tabla de origen de la
+-- CI, así que sigue cumpliéndose sin importar el rol.
 CREATE UNIQUE INDEX IF NOT EXISTS ux_hogar_votantes_votante_activo
   ON hogar_votantes(votante_ci) WHERE activo;
 
 CREATE INDEX IF NOT EXISTS ix_hogar_votantes_hogar ON hogar_votantes(hogar_id);
 CREATE INDEX IF NOT EXISTS ix_hogar_votantes_votante ON hogar_votantes(votante_ci);
+
+-- Reemplazo de la FK eliminada arriba: valida que votante_ci exista y esté activo en
+-- AL MENOS UNA de las 4 tablas de persona antes de permitir el INSERT/UPDATE — sin
+-- esto, con la FK ya eliminada, nada impediría insertar una CI que no corresponde a
+-- nadie. mapeo_persona_existe_activa se define más abajo junto con el resto de las
+-- funciones de resolución de persona (necesita dirigentes/coordinadores/
+-- subcoordinadores/votantes, que ya existen a esta altura del archivo).
+CREATE OR REPLACE FUNCTION mapeo_persona_existe_activa(p_ci bigint)
+RETURNS boolean AS $$
+  SELECT
+    EXISTS (SELECT 1 FROM dirigentes WHERE ci = p_ci AND activo = true)
+    OR EXISTS (SELECT 1 FROM coordinadores WHERE ci = p_ci AND activo IS DISTINCT FROM false)
+    OR EXISTS (SELECT 1 FROM subcoordinadores WHERE ci = p_ci AND activo IS DISTINCT FROM false)
+    OR EXISTS (SELECT 1 FROM votantes WHERE ci = p_ci AND activo IS DISTINCT FROM false);
+$$ LANGUAGE sql STABLE;
+
+CREATE OR REPLACE FUNCTION mapeo_validar_integrante_hogar()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF NOT mapeo_persona_existe_activa(NEW.votante_ci) THEN
+    RAISE EXCEPTION 'La CI % no corresponde a ninguna persona activa (dirigente, coordinador, subcoordinador o votante).', NEW.votante_ci;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_hogar_votantes_validar_integrante ON hogar_votantes;
+CREATE TRIGGER trg_hogar_votantes_validar_integrante
+  BEFORE INSERT OR UPDATE ON hogar_votantes
+  FOR EACH ROW
+  EXECUTE FUNCTION mapeo_validar_integrante_hogar();
 
 -- ======================= VISITAS_HOGAR (bitácora append-only) =======================
 CREATE TABLE IF NOT EXISTS visitas_hogar (
@@ -558,20 +601,175 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
+-- Rol jerárquico "activo más alto" de una CI, buscando en las 4 tablas de persona sin
+-- filtrar por activo (a diferencia de mapeo_persona_existe_activa) — se usa tanto para
+-- decidir el alcance (mapeo_persona_en_alcance) como para RESOLVER nombre/apellido/
+-- teléfono de una persona ya asociada (mapeo_persona_info), donde no queremos que una
+-- desactivación posterior haga desaparecer el nombre de alguien que sigue en la lista
+-- de integrantes del hogar. Prioridad dirigente > coordinador > subcoordinador >
+-- votante: si la misma CI quedó en más de una tabla (p. ej. un votante promovido a
+-- coordinador sin limpiar su fila vieja en votantes), se resuelve por el rol más alto.
+CREATE OR REPLACE FUNCTION mapeo_persona_rol_prioritario(p_ci bigint)
+RETURNS text AS $$
+  SELECT CASE
+    WHEN EXISTS (SELECT 1 FROM dirigentes WHERE ci = p_ci) THEN 'dirigente'
+    WHEN EXISTS (SELECT 1 FROM coordinadores WHERE ci = p_ci) THEN 'coordinador'
+    WHEN EXISTS (SELECT 1 FROM subcoordinadores WHERE ci = p_ci) THEN 'subcoordinador'
+    WHEN EXISTS (SELECT 1 FROM votantes WHERE ci = p_ci) THEN 'votante'
+    ELSE NULL
+  END;
+$$ LANGUAGE sql STABLE;
+
+-- ¿La persona p_persona_ci (de CUALQUIERA de las 4 jerarquías) está dentro del
+-- alcance de (p_actor_ci, p_actor_rol)? Generaliza mapeo_votante_en_alcance (que solo
+-- contempla la tabla votantes) para que un hogar pueda incluir también dirigentes/
+-- coordinadores/subcoordinadores:
+--   - Superadmin: alcance total.
+--   - Cualquier actor sobre sí mismo: todo dirigente/coordinador/subcoordinador debe
+--     poder agregarse a sí mismo a un hogar (p. ej. el hogar donde vive).
+--   - Persona con rol "dirigente" (que no sea el propio actor): fuera de alcance para
+--     cualquiera que no sea superadmin — no existe una jerarquía por encima de un
+--     dirigente salvo superadmin.
+--   - Persona con rol "coordinador": en alcance del dirigente del que depende
+--     (coordinadores.dirigente_ci).
+--   - Persona con rol "subcoordinador": en alcance del coordinador del que depende
+--     (subcoordinadores.coordinador_ci) y, transitivamente, del dirigente de ese
+--     coordinador.
+--   - Persona con rol "votante": delega en mapeo_votante_en_alcance, sin duplicar esa
+--     lógica ya probada (fallbacks legacy, exclusión de inactivos, etc.).
+CREATE OR REPLACE FUNCTION mapeo_persona_en_alcance(p_persona_ci bigint, p_actor_ci text, p_actor_rol text)
+RETURNS boolean AS $$
+DECLARE
+  v_actor_ci bigint;
+  v_rol_persona text;
+BEGIN
+  IF p_actor_rol = 'superadmin' THEN
+    RETURN true;
+  END IF;
+
+  v_actor_ci := mapeo_ci_a_bigint(p_actor_ci);
+  IF p_persona_ci = v_actor_ci THEN
+    RETURN true;
+  END IF;
+
+  v_rol_persona := mapeo_persona_rol_prioritario(p_persona_ci);
+
+  IF v_rol_persona = 'votante' THEN
+    RETURN mapeo_votante_en_alcance(p_persona_ci, p_actor_ci, p_actor_rol);
+  ELSIF v_rol_persona = 'coordinador' THEN
+    IF p_actor_rol <> 'dirigente' THEN RETURN false; END IF;
+    RETURN EXISTS (
+      SELECT 1 FROM coordinadores c
+      WHERE c.ci = p_persona_ci AND c.activo IS DISTINCT FROM false AND c.dirigente_ci = v_actor_ci
+    );
+  ELSIF v_rol_persona = 'subcoordinador' THEN
+    IF p_actor_rol = 'dirigente' THEN
+      RETURN EXISTS (
+        SELECT 1 FROM subcoordinadores s
+        JOIN coordinadores c ON c.ci = s.coordinador_ci
+        WHERE s.ci = p_persona_ci AND s.activo IS DISTINCT FROM false AND c.dirigente_ci = v_actor_ci
+      );
+    ELSIF p_actor_rol = 'coordinador' THEN
+      RETURN EXISTS (
+        SELECT 1 FROM subcoordinadores s
+        WHERE s.ci = p_persona_ci AND s.activo IS DISTINCT FROM false AND s.coordinador_ci = v_actor_ci
+      );
+    END IF;
+    RETURN false;
+  END IF;
+
+  RETURN false; -- 'dirigente' (que no sea el propio actor) o CI que no existe en ninguna tabla
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+
+-- Resuelve nombre/apellido/teléfono/rol de una persona (de cualquiera de las 4
+-- jerarquías) para embeber en mapeo_listar_hogares/mapeo_listar_visitas:
+--   - nombre/apellido: padron primero (datos electorales generales); para dirigentes
+--     sin fila en padron (dirigentes.es_externo), cae a dirigentes.nombre/apellido.
+--     Coordinador/subcoordinador/votante sin fila en padron: cadena vacía (mismo
+--     criterio que ya usaba este archivo para votantes).
+--   - teléfono: siempre de la tabla del rol correspondiente (no de padron, que no
+--     tiene teléfono) — son los datos de contacto propios de esa persona en ese rol.
+--   - dirigente_ci/coordinador_ci/asignado_por/asignado_por_rol: para un votante son
+--     sus propias columnas de jerarquía, sin cambios. Para dirigente/coordinador/
+--     subcoordinador se SINTETIZAN con la misma forma (apuntando a su propia CI en el
+--     nivel que ocupan y a su superior real en los niveles de arriba) para que los
+--     filtros de jerarquía del frontend (getJerarquiaVotante/hogarTieneJerarquia en
+--     mapeoHelpers.js), que ya saben leer estas 4 columnas, sigan funcionando sin
+--     cambios también cuando el integrante del hogar es un dirigente/coordinador/
+--     subcoordinador en vez de un votante.
+-- Sin filtro de activo (usa mapeo_persona_rol_prioritario): una persona asociada que
+-- luego se desactiva sigue mostrando su nombre acá — mapeo_persona_en_alcance es quien
+-- decide si además debe ser visible para un actor no-superadmin.
+CREATE OR REPLACE FUNCTION mapeo_persona_info(p_ci bigint)
+RETURNS TABLE(
+  nombre text, apellido text, telefono text, rol text,
+  dirigente_ci bigint, coordinador_ci bigint,
+  asignado_por bigint, asignado_por_rol text,
+  voto_confirmado boolean
+) AS $$
+DECLARE
+  v_rol text;
+BEGIN
+  v_rol := mapeo_persona_rol_prioritario(p_ci);
+
+  IF v_rol = 'dirigente' THEN
+    RETURN QUERY
+    SELECT COALESCE(p.nombre, d.nombre, '')::text, COALESCE(p.apellido, d.apellido, '')::text,
+           d.telefono, 'dirigente'::text,
+           d.ci, NULL::bigint, d.ci, 'dirigente'::text, NULL::boolean
+    FROM dirigentes d
+    LEFT JOIN padron p ON p.ci = d.ci
+    WHERE d.ci = p_ci;
+  ELSIF v_rol = 'coordinador' THEN
+    RETURN QUERY
+    SELECT COALESCE(p.nombre, '')::text, COALESCE(p.apellido, '')::text,
+           c.telefono, 'coordinador'::text,
+           c.dirigente_ci, c.ci, c.ci, 'coordinador'::text, NULL::boolean
+    FROM coordinadores c
+    LEFT JOIN padron p ON p.ci = c.ci
+    WHERE c.ci = p_ci;
+  ELSIF v_rol = 'subcoordinador' THEN
+    RETURN QUERY
+    SELECT COALESCE(p.nombre, '')::text, COALESCE(p.apellido, '')::text,
+           s.telefono, 'subcoordinador'::text,
+           c.dirigente_ci, s.coordinador_ci, s.ci, 'subcoordinador'::text, NULL::boolean
+    FROM subcoordinadores s
+    LEFT JOIN coordinadores c ON c.ci = s.coordinador_ci
+    LEFT JOIN padron p ON p.ci = s.ci
+    WHERE s.ci = p_ci;
+  ELSIF v_rol = 'votante' THEN
+    RETURN QUERY
+    SELECT COALESCE(p.nombre, '')::text, COALESCE(p.apellido, '')::text,
+           v.telefono, 'votante'::text,
+           v.dirigente_ci, v.coordinador_ci, v.asignado_por, v.asignado_por_rol, v.voto_confirmado
+    FROM votantes v
+    LEFT JOIN padron p ON p.ci = v.ci
+    WHERE v.ci = p_ci;
+  END IF;
+  -- v_rol NULL (persona no existe en ninguna tabla): sin filas — el llamador (LEFT
+  -- JOIN LATERAL) debe manejar esto sin descartar la fila de hogar_votantes.
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public STABLE;
+
 -- ¿El hogar p_hogar_id está dentro del alcance de (p_actor_ci, p_actor_rol)? Un
 -- hogar está en el alcance de un actor no-superadmin si:
---   a) NUNCA tuvo ningún votante asociado (ni siquiera uno ya desasociado) Y él
+--   a) NUNCA tuvo ningún integrante asociado (ni siquiera uno ya desasociado) Y él
 --      mismo lo creó (creado_por_ci) — así un hogar recién creado sigue siendo
 --      visible/gestionable por quien lo acaba de cargar, en vez de desaparecer
 --      hasta que se le asocie alguien. Este acceso es solo transitorio y
---      PERMANENTE una vez perdido: en cuanto el hogar tuvo su primer votante
+--      PERMANENTE una vez perdido: en cuanto el hogar tuvo su primer integrante
 --      asociado, el alcance pasa a depender EXCLUSIVAMENTE de la membresía de
---      votantes (b) para siempre — nunca vuelve a caer en este fallback aunque
---      luego se desasocien todos los votantes activos. Comprobar "activo = true"
+--      integrantes (b) para siempre — nunca vuelve a caer en este fallback aunque
+--      luego se desasocien todos los integrantes activos. Comprobar "activo = true"
 --      acá (en vez de "alguna vez existió una fila") reabriría el fallback cada
---      vez que el último votante activo se desasocia, dejando que el creador
+--      vez que el último integrante activo se desasocia, dejando que el creador
 --      original recupere acceso a un hogar que ya no está en su rama; o
---   b) al menos uno de sus votantes asociados activos está en su alcance.
+--   b) al menos uno de sus integrantes asociados activos está en su alcance —
+--      mapeo_persona_en_alcance (no mapeo_votante_en_alcance) porque un integrante
+--      puede ser un dirigente/coordinador/subcoordinador, no solo un votante: un
+--      hogar que contenga únicamente, por ejemplo, un coordinador debe seguir siendo
+--      visible para su dirigente y para superadmin.
 CREATE OR REPLACE FUNCTION mapeo_hogar_en_alcance(p_hogar_id uuid, p_actor_ci text, p_actor_rol text)
 RETURNS boolean AS $$
 DECLARE
@@ -593,7 +791,7 @@ BEGIN
   RETURN EXISTS (
     SELECT 1 FROM hogar_votantes hv
     WHERE hv.hogar_id = p_hogar_id AND hv.activo = true
-      AND mapeo_votante_en_alcance(hv.votante_ci, p_actor_ci, p_actor_rol)
+      AND mapeo_persona_en_alcance(hv.votante_ci, p_actor_ci, p_actor_rol)
   );
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
@@ -613,6 +811,10 @@ REVOKE ALL ON FUNCTION mapeo_ci_a_bigint(text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION mapeo_identidad(text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION mapeo_resolver_actor(text, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION mapeo_votante_en_alcance(bigint, text, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION mapeo_persona_existe_activa(bigint) FROM PUBLIC;
+REVOKE ALL ON FUNCTION mapeo_persona_rol_prioritario(bigint) FROM PUBLIC;
+REVOKE ALL ON FUNCTION mapeo_persona_en_alcance(bigint, text, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION mapeo_persona_info(bigint) FROM PUBLIC;
 REVOKE ALL ON FUNCTION mapeo_hogar_en_alcance(uuid, text, text) FROM PUBLIC;
 
 -- ============================================================================
@@ -706,32 +908,32 @@ BEGIN
     h.verificado_por_ci, h.verificado_por_rol, h.fecha_verificacion,
     h.created_at, h.updated_at, h.ubicacion_actualizada_at,
     COALESCE((
-      -- ::text explícito en cada campo tipo CI: votantes.ci/dirigente_ci/coordinador_ci/
-      -- asignado_por son bigint (ver sección 0.1) y jsonb_build_object los serializaría
-      -- como número JSON si no se castean — el frontend (normalizeCI) tolera ambos, pero
-      -- castear acá deja un contrato de salida consistente y predecible (siempre texto)
-      -- para cualquier CI que devuelva este RPC, sin depender de esa tolerancia.
-      -- votantes NO tiene nombre/apellido — esos campos viven en padron (mismo patrón
-      -- que ya usa src/App.jsx al autenticar coordinador/subcoordinador, que hace
-      -- select ... padron(*) sobre esa misma relación). LEFT JOIN (no JOIN) para no
-      -- descartar en silencio a un votante cuya fila de padron falte o no calce: en
-      -- ese caso se devuelve nombre/apellido vacíos en vez de perder al votante del
-      -- listado.
+      -- ::text explícito en cada campo tipo CI: bigint en el esquema real (ver sección
+      -- 0.1) y jsonb_build_object los serializaría como número JSON si no se castean —
+      -- el frontend (normalizeCI) tolera ambos, pero castear acá deja un contrato de
+      -- salida consistente y predecible (siempre texto) para cualquier CI que devuelva
+      -- este RPC, sin depender de esa tolerancia.
+      -- Un integrante puede ser un dirigente, coordinador, subcoordinador o votante —
+      -- mapeo_persona_info resuelve nombre/apellido/teléfono/rol de la tabla que
+      -- corresponda (con padron como fuente de nombre/apellido y dirigentes como
+      -- fallback para dirigentes externos). LEFT JOIN LATERAL (no CROSS/JOIN) para no
+      -- descartar en silencio a un integrante cuya persona no se resuelva (p. ej. fue
+      -- eliminado de todas las tablas después de asociarse) — en ese caso se devuelven
+      -- nombre/apellido vacíos y rol nulo en vez de perderlo del listado.
       SELECT jsonb_agg(jsonb_build_object(
-        'ci', v.ci::text, 'nombre', COALESCE(p.nombre, ''), 'apellido', COALESCE(p.apellido, ''),
-        'telefono', v.telefono, 'dirigente_ci', v.dirigente_ci::text,
-        'coordinador_ci', v.coordinador_ci::text, 'asignado_por', v.asignado_por::text,
-        'asignado_por_rol', v.asignado_por_rol, 'voto_confirmado', v.voto_confirmado
+        'ci', hv.votante_ci::text, 'nombre', COALESCE(pi.nombre, ''), 'apellido', COALESCE(pi.apellido, ''),
+        'telefono', pi.telefono, 'rol', pi.rol, 'dirigente_ci', pi.dirigente_ci::text,
+        'coordinador_ci', pi.coordinador_ci::text, 'asignado_por', pi.asignado_por::text,
+        'asignado_por_rol', pi.asignado_por_rol, 'voto_confirmado', pi.voto_confirmado
       ))
       FROM hogar_votantes hv
-      JOIN votantes v ON v.ci = hv.votante_ci
-      LEFT JOIN padron p ON p.ci = v.ci
+      LEFT JOIN LATERAL mapeo_persona_info(hv.votante_ci) pi ON true
       WHERE hv.hogar_id = h.id AND hv.activo = true
         -- Un hogar puede tener miembros de ramas distintas (p. ej. familia repartida
         -- entre dos subcoordinadores). Estar en alcance del HOGAR no implica estar en
-        -- alcance de CADA votante — solo se embeben los miembros que el actor puede
+        -- alcance de CADA integrante — solo se embeben los miembros que el actor puede
         -- ver individualmente (superadmin ve todos).
-        AND (v_rol = 'superadmin' OR mapeo_votante_en_alcance(v.ci, v_ci, v_rol))
+        AND (v_rol = 'superadmin' OR mapeo_persona_en_alcance(hv.votante_ci, v_ci, v_rol))
     ), '[]'::jsonb) AS votantes,
     (
       SELECT jsonb_build_object(
@@ -920,12 +1122,14 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
--- ======================= ASOCIAR / DESASOCIAR VOTANTE =======================
+-- ======================= ASOCIAR / DESASOCIAR INTEGRANTE =======================
 -- p_votante_ci sigue siendo text en la firma (así lo manda siempre el frontend, ver
 -- normalizeCI en src/utils/estructuraHelpers.js) — se convierte a bigint una sola
 -- vez al principio (mapeo_ci_a_bigint valida y da un mensaje claro ante un valor no
 -- numérico) y esa versión bigint es la que se usa contra hogar_votantes.votante_ci
--- (bigint, ver sección 0.1) de ahí en adelante.
+-- (bigint, ver sección 0.1) de ahí en adelante. Pese al nombre (histórico), el CI
+-- puede pertenecer a un dirigente, coordinador, subcoordinador o votante — ver
+-- comentario en la definición de la tabla hogar_votantes.
 CREATE OR REPLACE FUNCTION mapeo_asociar_votante(
   p_login_code text,
   p_superadmin_ci text,
@@ -945,15 +1149,22 @@ BEGIN
   IF NOT mapeo_hogar_en_alcance(p_hogar_id, v_ci, v_rol) THEN
     RAISE EXCEPTION 'El hogar % no está dentro de su alcance.', p_hogar_id;
   END IF;
-  IF NOT mapeo_votante_en_alcance(v_votante_ci, v_ci, v_rol) THEN
-    RAISE EXCEPTION 'El votante % no está dentro de su alcance.', p_votante_ci;
+  -- Chequeo explícito ANTES del de alcance: un mensaje claro ("no existe") es más útil
+  -- que el genérico "no está en su alcance" cuando la CI directamente no corresponde a
+  -- nadie. El trigger trg_hogar_votantes_validar_integrante (sobre hogar_votantes)
+  -- repite esta misma validación como defensa en profundidad, no solo acá.
+  IF NOT mapeo_persona_existe_activa(v_votante_ci) THEN
+    RAISE EXCEPTION 'La CI % no corresponde a ninguna persona activa (dirigente, coordinador, subcoordinador o votante).', p_votante_ci;
+  END IF;
+  IF NOT mapeo_persona_en_alcance(v_votante_ci, v_ci, v_rol) THEN
+    RAISE EXCEPTION 'La persona con CI % no está dentro de su alcance.', p_votante_ci;
   END IF;
 
   SELECT hogar_id INTO v_hogar_existente
   FROM hogar_votantes WHERE votante_ci = v_votante_ci AND activo = true;
 
   IF v_hogar_existente IS NOT NULL AND v_hogar_existente <> p_hogar_id THEN
-    RAISE EXCEPTION 'El votante % ya pertenece a otro hogar activo (%). Desasócielo primero.', p_votante_ci, v_hogar_existente;
+    RAISE EXCEPTION 'La persona con CI % ya pertenece a otro hogar activo (%). Desasócielo primero.', p_votante_ci, v_hogar_existente;
   END IF;
 
   IF v_hogar_existente = p_hogar_id THEN
@@ -987,11 +1198,11 @@ BEGIN
     RAISE EXCEPTION 'El hogar % no está dentro de su alcance.', p_hogar_id;
   END IF;
   -- Un hogar puede tener miembros de ramas distintas: estar en alcance del hogar (por
-  -- OTRO miembro) no autoriza a desasociar a ESTE votante si él mismo está fuera de
-  -- alcance — sin este chequeo, un actor podría quitar a un votante de otra rama de un
+  -- OTRO miembro) no autoriza a desasociar a ESTE integrante si él mismo está fuera de
+  -- alcance — sin este chequeo, un actor podría quitar a alguien de otra rama de un
   -- hogar compartido.
-  IF v_rol <> 'superadmin' AND NOT mapeo_votante_en_alcance(v_votante_ci, v_ci, v_rol) THEN
-    RAISE EXCEPTION 'El votante % no está dentro de su alcance.', p_votante_ci;
+  IF v_rol <> 'superadmin' AND NOT mapeo_persona_en_alcance(v_votante_ci, v_ci, v_rol) THEN
+    RAISE EXCEPTION 'La persona con CI % no está dentro de su alcance.', p_votante_ci;
   END IF;
 
   -- Desasociar (activo=false) — nunca borra la fila ni toca hogares/visitas_hogar.
@@ -1150,18 +1361,22 @@ BEGIN
     vh.precision_gps, vh.distancia_metros, vh.radio_permitido_usado,
     vh.resultado, vh.observacion, vh.fecha_hora,
     COALESCE((
-      -- ::text explícito (ver mismo comentario en mapeo_listar_hogares): votantes.ci es
-      -- bigint, se castea para un contrato de salida consistente. nombre/apellido
-      -- vienen de padron (votantes no los tiene) vía LEFT JOIN — igual que en
-      -- mapeo_listar_hogares, para no descartar al votante si falta su fila de padron.
-      SELECT jsonb_agg(jsonb_build_object('ci', v.ci::text, 'nombre', COALESCE(p.nombre, ''), 'apellido', COALESCE(p.apellido, '')))
+      -- ::text explícito (ver mismo comentario en mapeo_listar_hogares): bigint en el
+      -- esquema real, se castea para un contrato de salida consistente. mapeo_persona_info
+      -- resuelve nombre/apellido/teléfono/rol de la tabla que corresponda (dirigente/
+      -- coordinador/subcoordinador/votante) — igual que en mapeo_listar_hogares.
+      SELECT jsonb_agg(jsonb_build_object(
+        'ci', hv.votante_ci::text, 'nombre', COALESCE(pi.nombre, ''), 'apellido', COALESCE(pi.apellido, ''),
+        'telefono', pi.telefono, 'rol', pi.rol, 'dirigente_ci', pi.dirigente_ci::text,
+        'coordinador_ci', pi.coordinador_ci::text, 'asignado_por', pi.asignado_por::text,
+        'asignado_por_rol', pi.asignado_por_rol, 'voto_confirmado', pi.voto_confirmado
+      ))
       FROM hogar_votantes hv
-      JOIN votantes v ON v.ci = hv.votante_ci
-      LEFT JOIN padron p ON p.ci = v.ci
+      LEFT JOIN LATERAL mapeo_persona_info(hv.votante_ci) pi ON true
       WHERE hv.hogar_id = h.id AND hv.activo = true
-        -- Mismo filtro por-votante que mapeo_listar_hogares: un hogar compartido entre
-        -- ramas no debe exponer los miembros fuera del alcance del actor.
-        AND (v_rol = 'superadmin' OR mapeo_votante_en_alcance(v.ci, v_ci, v_rol))
+        -- Mismo filtro por-integrante que mapeo_listar_hogares: un hogar compartido
+        -- entre ramas no debe exponer los miembros fuera del alcance del actor.
+        AND (v_rol = 'superadmin' OR mapeo_persona_en_alcance(hv.votante_ci, v_ci, v_rol))
     ), '[]'::jsonb) AS votantes
   FROM visitas_hogar vh
   JOIN hogares h ON h.id = vh.hogar_id

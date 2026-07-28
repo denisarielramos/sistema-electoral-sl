@@ -8,21 +8,88 @@ import {
   getTodosVotantesDirigente,
   getTodosVotantesCoord,
   getVotantesDeSubcoord,
+  getCoordsDeDigente,
+  getSubsDeDigente,
+  getMisSubcoordinadores,
 } from "./estructuraHelpers.js";
 import { personaCoincideConsulta, normalizeTexto } from "./busquedaHelpers.js";
 import { getEstadoMapaHogar, ESTADOS_MAPA } from "./geoHelpers.js";
 
-// Votantes visibles para currentUser en el módulo de mapeo — SOLO para conveniencia
-// de UI (autocompletar a quién asociar a un hogar). Reutiliza los mismos helpers de
-// alcance que ya usa el resto del dashboard; el límite de seguridad real para
-// hogares/visitas lo aplican las funciones RPC mapeo_* del lado del servidor.
-export const votantesDelRolEnMapeo = (estructura, currentUser) => {
+// Etiquetas para el "rol actual" que devuelve el servidor (mapeo_persona_info) junto
+// a cada integrante de un hogar — dirigente/coordinador/subcoordinador/votante.
+export const ROL_INTEGRANTE_LABEL = {
+  dirigente: "Dirigente",
+  coordinador: "Coordinador",
+  subcoordinador: "Subcoordinador",
+  votante: "Votante",
+};
+
+// Combina varios grupos { rol, personas } (en orden de prioridad) en una sola lista
+// sin CIs repetidas, etiquetando cada persona con su rol. Si la misma CI aparece en
+// más de un grupo (p. ej. un votante ascendido a coordinador cuya fila vieja en
+// votantes nunca se limpió), se queda con la del grupo de MAYOR jerarquía (el primero
+// de la lista que la contenga) — mismo criterio de prioridad que usa el servidor
+// (mapeo_persona_rol_prioritario): dirigente > coordinador > subcoordinador > votante.
+const combinarConRolYDedup = (gruposPorRol) => {
+  const porCI = new Map();
+  for (const { rol, personas } of gruposPorRol) {
+    for (const p of personas) {
+      const ci = normalizeCI(p.ci);
+      if (!ci || porCI.has(ci)) continue;
+      porCI.set(ci, { ...p, ci, rol });
+    }
+  }
+  return [...porCI.values()];
+};
+
+// Personas de CUALQUIERA de las 4 jerarquías (dirigente/coordinador/subcoordinador/
+// votante) disponibles para asociar a un hogar, según el alcance de currentUser —
+// SOLO para conveniencia de UI (autocompletar el buscador de integrantes). Reutiliza
+// los mismos helpers de alcance que ya usa el resto del dashboard; el límite de
+// seguridad real lo aplican mapeo_persona_en_alcance/mapeo_asociar_votante del lado
+// del servidor. Cada actor no-superadmin puede además agregarse a SÍ MISMO (un
+// dirigente/coordinador/subcoordinador también es elector y puede vivir en un hogar
+// mapeado), por eso se incluye su propio registro en cada rama.
+export const personasDelRolEnMapeo = (estructura, currentUser) => {
   if (!currentUser) return [];
   const ci = normalizeCI(currentUser.ci);
-  if (currentUser.role === "superadmin") return estructura?.votantes || [];
-  if (currentUser.role === "dirigente") return getTodosVotantesDirigente(estructura, ci);
-  if (currentUser.role === "coordinador") return getTodosVotantesCoord(estructura, ci);
-  if (currentUser.role === "subcoordinador") return getVotantesDeSubcoord(estructura, ci);
+
+  if (currentUser.role === "superadmin") {
+    return combinarConRolYDedup([
+      { rol: "dirigente", personas: estructura?.dirigentes || [] },
+      { rol: "coordinador", personas: estructura?.coordinadores || [] },
+      { rol: "subcoordinador", personas: estructura?.subcoordinadores || [] },
+      { rol: "votante", personas: estructura?.votantes || [] },
+    ]);
+  }
+
+  if (currentUser.role === "dirigente") {
+    const propio = (estructura?.dirigentes || []).find((d) => normalizeCI(d.ci) === ci);
+    return combinarConRolYDedup([
+      { rol: "dirigente", personas: propio ? [propio] : [] },
+      { rol: "coordinador", personas: getCoordsDeDigente(estructura, ci) },
+      { rol: "subcoordinador", personas: getSubsDeDigente(estructura, ci) },
+      { rol: "votante", personas: getTodosVotantesDirigente(estructura, ci) },
+    ]);
+  }
+
+  if (currentUser.role === "coordinador") {
+    const propio = (estructura?.coordinadores || []).find((c) => normalizeCI(c.ci) === ci);
+    return combinarConRolYDedup([
+      { rol: "coordinador", personas: propio ? [propio] : [] },
+      { rol: "subcoordinador", personas: getMisSubcoordinadores(estructura, ci) },
+      { rol: "votante", personas: getTodosVotantesCoord(estructura, ci) },
+    ]);
+  }
+
+  if (currentUser.role === "subcoordinador") {
+    const propio = (estructura?.subcoordinadores || []).find((s) => normalizeCI(s.ci) === ci);
+    return combinarConRolYDedup([
+      { rol: "subcoordinador", personas: propio ? [propio] : [] },
+      { rol: "votante", personas: getVotantesDeSubcoord(estructura, ci) },
+    ]);
+  }
+
   return [];
 };
 

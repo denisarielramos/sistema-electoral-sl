@@ -3,7 +3,7 @@ import React from "react";
 import { X, Phone, MapPin, ExternalLink, Navigation, Edit3, CheckCircle2, XCircle, MapPinned } from "lucide-react";
 import EstadoMapaBadge from "./EstadoMapaBadge";
 import { getEstadoMapaHogar, buildGoogleMapsUrl, buildWazeUrl, formatearDistancia, ESTADOS_MAPA } from "../../utils/geoHelpers";
-import { getJerarquiaHogar } from "../../utils/mapeoHelpers";
+import { getJerarquiaHogar, ROL_INTEGRANTE_LABEL } from "../../utils/mapeoHelpers";
 
 const PUEDE_VERIFICAR = ["superadmin", "dirigente"];
 
@@ -82,12 +82,15 @@ const HogarDetallePanel = ({
 
           <div>
             <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">
-              Votantes ({(hogar.votantes || []).length})
+              Integrantes ({(hogar.votantes || []).length})
             </p>
             <div className="space-y-1.5">
               {(hogar.votantes || []).map((v) => (
                 <div key={v.ci} className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-sm">
-                  <p className="text-slate-700 font-medium">{v.nombre} {v.apellido}</p>
+                  <p className="text-slate-700 font-medium flex items-center gap-1.5 flex-wrap">
+                    {v.nombre} {v.apellido}
+                    {v.rol && <span className="text-[10px] font-medium uppercase tracking-wide text-brand-600 bg-brand-50 border border-brand-200 rounded px-1 py-0.5">{ROL_INTEGRANTE_LABEL[v.rol] || v.rol}</span>}
+                  </p>
                   <p className="text-xs text-slate-500 flex items-center gap-1">
                     CI: {v.ci}
                     {v.telefono && (
@@ -99,7 +102,7 @@ const HogarDetallePanel = ({
                 </div>
               ))}
               {(hogar.votantes || []).length === 0 && (
-                <p className="text-xs text-slate-400 italic">Sin votantes asociados.</p>
+                <p className="text-xs text-slate-400 italic">Sin integrantes asociados.</p>
               )}
             </div>
           </div>

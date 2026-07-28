@@ -478,7 +478,7 @@ const PersonCard = ({
             <X className="w-3.5 h-3.5" />
           </ActionBtn>
         )}
-        {esVotante && onAsignarUbicacion && (
+        {onAsignarUbicacion && (
           <ActionBtn onClick={() => onAsignarUbicacion(persona)} title="Asignar ubicación / agregar a hogar">
             <Home className="w-3.5 h-3.5" />
           </ActionBtn>
@@ -1729,6 +1729,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                     excelBusyKey={excelBusy}
                     expandible
                     isExpanded={isExpandedDir}
+                    onAsignarUbicacion={setVotanteParaUbicacion}
                   />
                 </div>
 
@@ -1774,6 +1775,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                                   excelBusyKey={excelBusy}
                                   expandible
                                   isExpanded={isExpandedCoord}
+                                  onAsignarUbicacion={setVotanteParaUbicacion}
                                 />
                               </div>
                               {isExpandedCoord && (
@@ -1810,6 +1812,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                                             excelBusyKey={excelBusy}
                                             expandible
                                             isExpanded={isExpandedSub}
+                                            onAsignarUbicacion={setVotanteParaUbicacion}
                                           />
                                         </div>
                                         {isExpandedSub && votsDeEste.length > 0 && (
@@ -1932,6 +1935,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                           excelBusyKey={excelBusy}
                           expandible
                           isExpanded={isExpandedCoord}
+                          onAsignarUbicacion={setVotanteParaUbicacion}
                         />
                       </div>
                       {isExpandedCoord && (
@@ -1967,6 +1971,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                                     excelBusyKey={excelBusy}
                                     expandible
                                     isExpanded={isExpandedSub}
+                                    onAsignarUbicacion={setVotanteParaUbicacion}
                                   />
                                 </div>
                                 {isExpandedSub && votsDeEste.length > 0 && (
@@ -2126,6 +2131,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                     counter={<VoteCounter confirmed={misVots.filter((v) => v.voto_confirmado).length} total={misVots.length} />}
                     expandible
                     isExpanded={isExpandedCoord}
+                    onAsignarUbicacion={setVotanteParaUbicacion}
                   />
                 </div>
                 {isExpandedCoord && (
@@ -2158,6 +2164,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                               counter={<VoteCounter confirmed={votsDeEste.filter((v) => v.voto_confirmado).length} total={votsDeEste.length} />}
                               expandible
                               isExpanded={isExpandedSub}
+                              onAsignarUbicacion={setVotanteParaUbicacion}
                             />
                           </div>
                           {isExpandedSub && votsDeEste.length > 0 && (
@@ -2345,6 +2352,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                     counter={<VoteCounter confirmed={votsDeEste.filter((v) => v.voto_confirmado).length} total={votsDeEste.length} />}
                     expandible
                     isExpanded={isExpandedSub}
+                    onAsignarUbicacion={setVotanteParaUbicacion}
                   />
                 </div>
                 {isExpandedSub && (() => {

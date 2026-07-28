@@ -107,17 +107,25 @@ Tablas nuevas (`supabase/migrations/20260727100000_mapeo_territorial_bitacora.sq
 | `activo` | `boolean` | soft-delete, igual convención que el resto del esquema |
 | `created_at`, `updated_at` | `timestamptz` | `updated_at` con trigger automático |
 
-### `hogar_votantes` (asociación N:M)
+### `hogar_votantes` (asociación N:M — integrantes del hogar)
 
 | Columna | Tipo | Notas |
 |---|---|---|
 | `hogar_id` | `uuid` FK → `hogares(id)` | |
-| `votante_ci` | `bigint` FK → `votantes(ci)` | `bigint` porque `votantes.ci` es `bigint` en el esquema real; sí tiene FK: un hogar agrupa votantes reales |
+| `votante_ci` | `bigint` | `bigint` porque todas las tablas de persona usan ese tipo de CI. Pese al nombre de la columna (histórico), NO tiene FK contra una sola tabla: un hogar puede agrupar a cualquier persona de las 4 jerarquías — dirigente, coordinador, subcoordinador o votante (p. ej. un coordinador que también es elector, o un dirigente asociado al hogar donde vive). Se valida con el trigger `trg_hogar_votantes_validar_integrante` (`mapeo_validar_integrante_hogar`), que exige que la CI exista y esté activa en al menos una de las 4 tablas — una FK normal no puede apuntar a 4 tablas a la vez. |
 | `activo` | `boolean` | desasociar = `activo=false`, nunca se borra la fila |
 
-Restricción clave: **un votante no puede pertenecer a más de un hogar activo a la
-vez** — se impone con un índice único parcial:
-`CREATE UNIQUE INDEX ... ON hogar_votantes(votante_ci) WHERE activo`.
+Restricción clave: **una misma CI no puede pertenecer a más de un hogar activo a la
+vez, sin importar su rol** — se impone con un índice único parcial:
+`CREATE UNIQUE INDEX ... ON hogar_votantes(votante_ci) WHERE activo`. Si la persona
+cambia de rol más adelante (p. ej. un votante asciende a coordinador), sigue asociada
+al mismo hogar por su CI sin necesidad de ningún cambio.
+
+Resolución de nombre/apellido/teléfono/rol de un integrante (`mapeo_persona_info`):
+prioridad `dirigente > coordinador > subcoordinador > votante` si la misma CI quedara
+en más de una tabla; nombre/apellido vienen de `padron`, con `dirigentes` como
+fallback para dirigentes externos (`es_externo`, sin fila en `padron`); el teléfono
+siempre viene de la tabla del rol correspondiente (no de `padron`, que no lo tiene).
 
 ### `visitas_hogar` (bitácora, **append-only**)
 
