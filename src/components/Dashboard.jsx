@@ -15,7 +15,8 @@ import {
   ChevronRight,
   Copy,
   Phone,
-  Check,
+  Trash2,
+  Check;
   X,
   MapPin,
   Users,
@@ -55,6 +56,7 @@ import {
 // ExcelJS no se incluya en el bundle inicial — solo se descarga al usarse.
 
 import { getEstadisticas } from "../services/estadisticasService";
+import { listarHogares, desasociarVotanteDeHogar } from "../services/mapeoService";
 
 import {
   normalizeCI,
@@ -385,6 +387,7 @@ const PersonCard = ({
   onConfirmar,
   onAnular,
   onAsignarUbicacion,
+  onEliminar,
   expandible = false,
   isExpanded = false,
   wrapped = false,
@@ -485,6 +488,11 @@ const PersonCard = ({
         )}
         {esSuperadmin && onDescargarExcel && (
           <ExcelDownloadButton excelKey={excelKey} busyKey={excelBusyKey} onDownload={onDescargarExcel} iconOnly />
+        )}
+        {onEliminar && (
+          <ActionBtn onClick={() => onEliminar(tipo, persona)} title={`Eliminar ${tipo}`} variant="danger">
+            <Trash2 className="w-3.5 h-3.5" />
+          </ActionBtn>
         )}
         {expandible && (isExpanded ? <ChevronDown className="w-4 h-4 text-slate-400" /> : <ChevronRight className="w-4 h-4 text-slate-400" />)}
       </div>
@@ -1438,6 +1446,117 @@ const Dashboard = ({ currentUser, onLogout }) => {
     [addModalTipo, handleAddVotante, handleAddSubcoordinador]
   );
 
+  // ======================= ELIMINAR PERSONA DE LA ESTRUCTURA =======================
+  // Restaura el comportamiento histórico: borrado físico y en cascada de la rama.
+  // Antes de borrar, libera las asociaciones activas en hogares mediante los RPC
+  // existentes; las visitas históricas y la bitácora nunca se eliminan.
+  const handleEliminarPersona = useCallback(async (tipo, persona) => {
+    if (!persona?.ci) return;
+
+    const ci = normalizeCI(persona.ci);
+    const miCI = normalizeCI(currentUser.ci);
+    const contieneCI = (lista) => lista.some((item) => normalizeCI(item.ci) === ci);
+
+    let permitido = currentUser.role === "superadmin";
+    if (currentUser.role === "dirigente") {
+      permitido =
+        (tipo === "coordinador" && contieneCI(getCoordsDeDigente(estructura, miCI))) ||
+        (tipo === "subcoordinador" && contieneCI(getSubsDeDigente(estructura, miCI))) ||
+        (tipo === "votante" && contieneCI(getTodosVotantesDirigente(estructura, miCI)));
+    } else if (currentUser.role === "coordinador") {
+      permitido =
+        (tipo === "subcoordinador" && contieneCI(getMisSubcoordinadores(estructura, miCI))) ||
+        (tipo === "votante" && contieneCI(getTodosVotantesCoord(estructura, miCI)));
+    } else if (currentUser.role === "subcoordinador") {
+      permitido =
+        tipo === "votante" && contieneCI(getVotantesDeSubcoord(estructura, miCI));
+    }
+
+    if (!permitido) {
+      alert("No tiene permiso para eliminar esta persona.");
+      return;
+    }
+
+    const cises = {
+      dirigentes: new Set(),
+      coordinadores: new Set(),
+      subcoordinadores: new Set(),
+      votantes: new Set(),
+    };
+
+    if (tipo === "dirigente") {
+      cises.dirigentes.add(ci);
+      getCoordsDeDigente(estructura, ci).forEach((item) => cises.coordinadores.add(normalizeCI(item.ci)));
+      getSubsDeDigente(estructura, ci).forEach((item) => cises.subcoordinadores.add(normalizeCI(item.ci)));
+      getTodosVotantesDirigente(estructura, ci).forEach((item) => cises.votantes.add(normalizeCI(item.ci)));
+    } else if (tipo === "coordinador") {
+      cises.coordinadores.add(ci);
+      getMisSubcoordinadores(estructura, ci).forEach((item) => cises.subcoordinadores.add(normalizeCI(item.ci)));
+      getTodosVotantesCoord(estructura, ci).forEach((item) => cises.votantes.add(normalizeCI(item.ci)));
+    } else if (tipo === "subcoordinador") {
+      cises.subcoordinadores.add(ci);
+      getVotantesDeSubcoord(estructura, ci).forEach((item) => cises.votantes.add(normalizeCI(item.ci)));
+    } else if (tipo === "votante") {
+      cises.votantes.add(ci);
+    } else {
+      alert("Tipo de persona no válido.");
+      return;
+    }
+
+    const nombre = `${persona.nombre || ""} ${persona.apellido || ""}`.trim() || `CI ${ci}`;
+    const descendientes =
+      cises.coordinadores.size + cises.subcoordinadores.size + cises.votantes.size -
+      (tipo === "votante" ? 1 : 0);
+
+    const detalleCascada = descendientes > 0
+      ? `\n\nTambién se eliminarán ${cises.coordinadores.size} coordinador(es), ${cises.subcoordinadores.size} subcoordinador(es) y ${cises.votantes.size} votante(s) de su rama.`
+      : "";
+
+    const confirmado = window.confirm(
+      `¿Está seguro que quiere eliminar a este ${tipo}: ${nombre}?${detalleCascada}\n\nEsta acción no se puede deshacer.`
+    );
+    if (!confirmado) return;
+
+    const todosLosCI = new Set([
+      ...cises.dirigentes,
+      ...cises.coordinadores,
+      ...cises.subcoordinadores,
+      ...cises.votantes,
+    ]);
+
+    try {
+      // Liberar integrantes de hogares sin borrar hogares ni visitas históricas.
+      const hogares = await listarHogares(currentUser);
+      for (const hogar of hogares) {
+        for (const integrante of hogar.votantes || []) {
+          const integranteCI = normalizeCI(integrante.ci);
+          if (todosLosCI.has(integranteCI)) {
+            await desasociarVotanteDeHogar(currentUser, hogar.id, integranteCI);
+          }
+        }
+      }
+
+      const borrar = async (tabla, valores) => {
+        const lista = [...valores];
+        if (lista.length === 0) return;
+        const { error } = await supabase.from(tabla).delete().in("ci", lista);
+        if (error) throw new Error(`Error eliminando de ${tabla}: ${error.message}`);
+      };
+
+      // Orden de hojas a raíz para no dejar referencias huérfanas.
+      await borrar("votantes", cises.votantes);
+      await borrar("subcoordinadores", cises.subcoordinadores);
+      await borrar("coordinadores", cises.coordinadores);
+      await borrar("dirigentes", cises.dirigentes);
+
+      await cargarEstructura();
+      alert(`${nombre} fue eliminado de la estructura.`);
+    } catch (error) {
+      console.error("Error eliminando persona:", error);
+      alert(error.message || "No se pudo eliminar la persona.");
+    }
+  }, [currentUser, estructura, cargarEstructura]);
+
   // ======================= BUSQUEDA INTERNA POR ESTRUCTURA =======================
   // En vez de reemplazar el arbol por una lista plana, la busqueda filtra el arbol
   // EN EL LUGAR: se calcula el conjunto de CI que matchean (matchCI) y cada nivel del
@@ -1714,6 +1833,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                   <PersonCard
                     persona={dir}
                     tipo="dirigente"
+                    onEliminar={handleEliminarPersona}
                     rolLabel="Dirigente"
                     onTelefono={handleOpenTelefono}
                     onDireccion={handleOpenDireccion}
@@ -1760,6 +1880,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                                 <PersonCard
                                   persona={coord}
                                   tipo="coordinador"
+                                  onEliminar={handleEliminarPersona}
                                   rolLabel="Coordinador"
                                   onTelefono={handleOpenTelefono}
                                   onDireccion={handleOpenDireccion}
@@ -1797,6 +1918,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                                           <PersonCard
                                             persona={sub}
                                             tipo="subcoordinador"
+                                            onEliminar={handleEliminarPersona}
                                             rolLabel="Subcoord"
                                             onTelefono={handleOpenTelefono}
                                             onDireccion={handleOpenDireccion}
@@ -1822,6 +1944,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                                                 key={v.ci}
                                                 persona={v}
                                                 tipo="votante"
+                                                onEliminar={handleEliminarPersona}
                                                 onTelefono={handleOpenTelefono}
                                                 onDireccion={handleOpenDireccion}
                                                 onConfirmar={handleConfirmar}
@@ -1843,6 +1966,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                                       key={v.ci}
                                       persona={v}
                                       tipo="votante"
+                                      onEliminar={handleEliminarPersona}
                                       onTelefono={handleOpenTelefono}
                                       onDireccion={handleOpenDireccion}
                                       onConfirmar={handleConfirmar}
@@ -1873,6 +1997,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                             key={v.ci}
                             persona={v}
                             tipo="votante"
+                            onEliminar={handleEliminarPersona}
                             onTelefono={handleOpenTelefono}
                             onDireccion={handleOpenDireccion}
                             onConfirmar={handleConfirmar}
@@ -1920,6 +2045,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                         <PersonCard
                           persona={coord}
                           tipo="coordinador"
+                          onEliminar={handleEliminarPersona}
                           rolLabel="Coordinador"
                           onTelefono={handleOpenTelefono}
                           onDireccion={handleOpenDireccion}
@@ -1956,6 +2082,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                                   <PersonCard
                                     persona={sub}
                                     tipo="subcoordinador"
+                                    onEliminar={handleEliminarPersona}
                                     rolLabel="Subcoord"
                                     onTelefono={handleOpenTelefono}
                                     onDireccion={handleOpenDireccion}
@@ -1981,6 +2108,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                                         key={v.ci}
                                         persona={v}
                                         tipo="votante"
+                                        onEliminar={handleEliminarPersona}
                                         onTelefono={handleOpenTelefono}
                                         onDireccion={handleOpenDireccion}
                                         onConfirmar={handleConfirmar}
@@ -2001,6 +2129,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                               key={v.ci}
                               persona={v}
                               tipo="votante"
+                              onEliminar={handleEliminarPersona}
                               onTelefono={handleOpenTelefono}
                               onDireccion={handleOpenDireccion}
                               onConfirmar={handleConfirmar}
@@ -2119,6 +2248,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                   <PersonCard
                     persona={coord}
                     tipo="coordinador"
+                    onEliminar={handleEliminarPersona}
                     rolLabel="Coordinador"
                     onTelefono={handleOpenTelefono}
                     onDireccion={handleOpenDireccion}
@@ -2152,6 +2282,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                             <PersonCard
                               persona={sub}
                               tipo="subcoordinador"
+                              onEliminar={handleEliminarPersona}
                               rolLabel="Subcoord"
                               onTelefono={handleOpenTelefono}
                               onDireccion={handleOpenDireccion}
@@ -2174,6 +2305,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                                   key={v.ci}
                                   persona={v}
                                   tipo="votante"
+                                  onEliminar={handleEliminarPersona}
                                   onTelefono={handleOpenTelefono}
                                   onDireccion={handleOpenDireccion}
                                   onConfirmar={handleConfirmar}
@@ -2194,6 +2326,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                         key={v.ci}
                         persona={v}
                         tipo="votante"
+                        onEliminar={handleEliminarPersona}
                         onTelefono={handleOpenTelefono}
                         onDireccion={handleOpenDireccion}
                         onConfirmar={handleConfirmar}
@@ -2223,6 +2356,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                 key={v.ci}
                 persona={v}
                 tipo="votante"
+                onEliminar={handleEliminarPersona}
                 onTelefono={handleOpenTelefono}
                 onDireccion={handleOpenDireccion}
                 onConfirmar={handleConfirmar}
@@ -2340,6 +2474,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                   <PersonCard
                     persona={sub}
                     tipo="subcoordinador"
+                    onEliminar={handleEliminarPersona}
                     rolLabel="Subcoordinador"
                     onTelefono={handleOpenTelefono}
                     onDireccion={handleOpenDireccion}
@@ -2369,6 +2504,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                             key={v.ci}
                             persona={v}
                             tipo="votante"
+                            onEliminar={handleEliminarPersona}
                             onTelefono={handleOpenTelefono}
                             onDireccion={handleOpenDireccion}
                             onConfirmar={handleConfirmar}
@@ -2403,6 +2539,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                 key={v.ci}
                 persona={v}
                 tipo="votante"
+                onEliminar={handleEliminarPersona}
                 onTelefono={handleOpenTelefono}
                 onDireccion={handleOpenDireccion}
                 onConfirmar={handleConfirmar}
@@ -2486,6 +2623,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                 key={v.ci}
                 persona={v}
                 tipo="votante"
+                onEliminar={handleEliminarPersona}
                 onTelefono={handleOpenTelefono}
                 onDireccion={handleOpenDireccion}
                 onConfirmar={handleConfirmar}
