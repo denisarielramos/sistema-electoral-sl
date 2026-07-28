@@ -16,7 +16,7 @@ import {
   Copy,
   Phone,
   Trash2,
-  Check;
+  Check,
   X,
   MapPin,
   Users,
