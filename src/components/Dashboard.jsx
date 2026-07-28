@@ -31,6 +31,8 @@ import {
   ClipboardList,
   Printer,
   Map as MapIcon,
+  Home,
+  ListChecks,
 } from "lucide-react";
 
 import AddPersonModal from "../AddPersonModal";
@@ -41,6 +43,9 @@ import ModalDireccion from "./ModalDireccion";
 import ModalTerceraEdad from "./ModalTerceraEdad";
 import ConfirmVotoModal from "./ConfirmVotoModal";
 import VistaSeccional from "./VistaSeccional";
+import MapeoTerritorial from "./mapeo/MapeoTerritorial";
+import BitacoraVisitas from "./mapeo/BitacoraVisitas";
+import AccesoRapidoHogar from "./mapeo/AccesoRapidoHogar";
 import {
   generateSuperadminPDF,
   generateCoordinadorPDF,
@@ -428,6 +433,7 @@ const PersonCard = ({
   canAnular,
   onConfirmar,
   onAnular,
+  onAsignarUbicacion,
   expandible = false,
   isExpanded = false,
   wrapped = false,
@@ -524,6 +530,11 @@ const PersonCard = ({
         {esVotante && confirmado && canAnular?.(persona) && (
           <ActionBtn onClick={() => onAnular(persona)} title="Anular confirmación" variant="danger">
             <X className="w-3.5 h-3.5" />
+          </ActionBtn>
+        )}
+        {onAsignarUbicacion && (
+          <ActionBtn onClick={() => onAsignarUbicacion(persona)} title="Asignar ubicación / agregar a hogar">
+            <Home className="w-3.5 h-3.5" />
           </ActionBtn>
         )}
         {esSuperadmin && onDescargarExcel && (
@@ -892,6 +903,15 @@ const Dashboard = ({ currentUser, onLogout }) => {
   // Vista por seccional (superadmin): reemplaza el contenido del Dashboard por una
   // vista de solo lectura filtrable, reutilizando estructura/padronMap ya en memoria.
   const [mostrarSeccional, setMostrarSeccional] = useState(false);
+
+  // Mapeo territorial / Bitácora de visitas (superadmin, dirigente, coordinador):
+  // pantallas completas separadas, igual que Vista por seccional. Subcoordinador no
+  // accede a estos paneles — solo a "Asignar ubicación" desde la tarjeta de sus
+  // propios votantes (ver accesoRapidoHogar más abajo).
+  const [mostrarMapeo, setMostrarMapeo] = useState(false);
+  const [mostrarBitacora, setMostrarBitacora] = useState(false);
+  // Acceso rápido "Asignar ubicación" desde una tarjeta de votante (los 4 roles).
+  const [votanteParaUbicacion, setVotanteParaUbicacion] = useState(null);
 
   // ======================= FETCH PAGINADO DE TABLA ACTIVA =======================
   // Trae TODAS las filas activas de una tabla, de 1000 en 1000, sin embeds.
@@ -1849,6 +1869,20 @@ const Dashboard = ({ currentUser, onLogout }) => {
             <MapIcon className="w-4 h-4" />
             Vista por seccional
           </button>
+          <button
+            onClick={() => setMostrarMapeo(true)}
+            className="inline-flex items-center gap-2 px-4 h-9 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 rounded-lg text-sm font-medium transition-colors"
+          >
+            <Home className="w-4 h-4" />
+            Mapeo territorial
+          </button>
+          <button
+            onClick={() => setMostrarBitacora(true)}
+            className="inline-flex items-center gap-2 px-4 h-9 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 rounded-lg text-sm font-medium transition-colors"
+          >
+            <ListChecks className="w-4 h-4" />
+            Bitácora de visitas
+          </button>
         </div>
 
         <BuscadorInterno
@@ -1910,6 +1944,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                     excelBusyKey={excelBusy}
                     expandible
                     isExpanded={isExpandedDir}
+                    onAsignarUbicacion={setVotanteParaUbicacion}
                   />
                 </div>
 
@@ -1955,6 +1990,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                                   excelBusyKey={excelBusy}
                                   expandible
                                   isExpanded={isExpandedCoord}
+                                  onAsignarUbicacion={setVotanteParaUbicacion}
                                 />
                               </div>
                               {isExpandedCoord && (
@@ -1991,6 +2027,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                                             excelBusyKey={excelBusy}
                                             expandible
                                             isExpanded={isExpandedSub}
+                                            onAsignarUbicacion={setVotanteParaUbicacion}
                                           />
                                         </div>
                                         {isExpandedSub && votsDeEste.length > 0 && (
@@ -2006,6 +2043,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                                                 onAnular={handleAnular}
                                                 canConfirmar={canConfirmar}
                                                 canAnular={canAnular}
+                                                onAsignarUbicacion={setVotanteParaUbicacion}
                                                 wrapped
                                               />
                                             ))}
@@ -2026,6 +2064,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                                       onAnular={handleAnular}
                                       canConfirmar={canConfirmar}
                                       canAnular={canAnular}
+                                      onAsignarUbicacion={setVotanteParaUbicacion}
                                       wrapped
                                     />
                                   ))}
@@ -2055,6 +2094,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                             onAnular={handleAnular}
                             canConfirmar={canConfirmar}
                             canAnular={canAnular}
+                            onAsignarUbicacion={setVotanteParaUbicacion}
                             wrapped
                           />
                         ))}
@@ -2110,6 +2150,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                           excelBusyKey={excelBusy}
                           expandible
                           isExpanded={isExpandedCoord}
+                          onAsignarUbicacion={setVotanteParaUbicacion}
                         />
                       </div>
                       {isExpandedCoord && (
@@ -2145,6 +2186,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                                     excelBusyKey={excelBusy}
                                     expandible
                                     isExpanded={isExpandedSub}
+                                    onAsignarUbicacion={setVotanteParaUbicacion}
                                   />
                                 </div>
                                 {isExpandedSub && votsDeEste.length > 0 && (
@@ -2160,6 +2202,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                                         onAnular={handleAnular}
                                         canConfirmar={canConfirmar}
                                         canAnular={canAnular}
+                                        onAsignarUbicacion={setVotanteParaUbicacion}
                                         wrapped
                                       />
                                     ))}
@@ -2179,6 +2222,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                               onAnular={handleAnular}
                               canConfirmar={canConfirmar}
                               canAnular={canAnular}
+                              onAsignarUbicacion={setVotanteParaUbicacion}
                               wrapped
                             />
                           ))}
@@ -2240,6 +2284,20 @@ const Dashboard = ({ currentUser, onLogout }) => {
             <FileSpreadsheet className="w-4 h-4" />
             {excelBusy === "dirigente-propio" ? "Generando..." : "Descargar Excel"}
           </button>
+          <button
+            onClick={() => setMostrarMapeo(true)}
+            className="inline-flex items-center gap-2 px-4 h-9 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 rounded-lg text-sm font-medium transition-colors"
+          >
+            <Home className="w-4 h-4" />
+            Mapeo territorial
+          </button>
+          <button
+            onClick={() => setMostrarBitacora(true)}
+            className="inline-flex items-center gap-2 px-4 h-9 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 rounded-lg text-sm font-medium transition-colors"
+          >
+            <ListChecks className="w-4 h-4" />
+            Bitácora de visitas
+          </button>
         </div>
 
         <BuscadorInterno
@@ -2288,6 +2346,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                     counter={<VoteCounter confirmed={misVots.filter((v) => v.voto_confirmado).length} total={misVots.length} />}
                     expandible
                     isExpanded={isExpandedCoord}
+                    onAsignarUbicacion={setVotanteParaUbicacion}
                   />
                 </div>
                 {isExpandedCoord && (
@@ -2320,6 +2379,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                               counter={<VoteCounter confirmed={votsDeEste.filter((v) => v.voto_confirmado).length} total={votsDeEste.length} />}
                               expandible
                               isExpanded={isExpandedSub}
+                              onAsignarUbicacion={setVotanteParaUbicacion}
                             />
                           </div>
                           {isExpandedSub && votsDeEste.length > 0 && (
@@ -2335,6 +2395,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                                   onAnular={handleAnular}
                                   canConfirmar={canConfirmar}
                                   canAnular={canAnular}
+                                  onAsignarUbicacion={setVotanteParaUbicacion}
                                   wrapped
                                 />
                               ))}
@@ -2354,6 +2415,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                         onAnular={handleAnular}
                         canConfirmar={canConfirmar}
                         canAnular={canAnular}
+                        onAsignarUbicacion={setVotanteParaUbicacion}
                         wrapped
                       />
                     ))}
@@ -2382,6 +2444,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                 onAnular={handleAnular}
                 canConfirmar={canConfirmar}
                 canAnular={canAnular}
+                onAsignarUbicacion={setVotanteParaUbicacion}
                 wrapped
               />
             ))}
@@ -2445,6 +2508,20 @@ const Dashboard = ({ currentUser, onLogout }) => {
             <FileSpreadsheet className="w-4 h-4" />
             {excelBusy === "coordinador-propio" ? "Generando..." : "Descargar Excel"}
           </button>
+          <button
+            onClick={() => setMostrarMapeo(true)}
+            className="inline-flex items-center gap-2 px-4 h-9 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 rounded-lg text-sm font-medium transition-colors"
+          >
+            <Home className="w-4 h-4" />
+            Mapeo territorial
+          </button>
+          <button
+            onClick={() => setMostrarBitacora(true)}
+            className="inline-flex items-center gap-2 px-4 h-9 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 rounded-lg text-sm font-medium transition-colors"
+          >
+            <ListChecks className="w-4 h-4" />
+            Bitácora de visitas
+          </button>
         </div>
 
         <BuscadorInterno
@@ -2490,6 +2567,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                     counter={<VoteCounter confirmed={votsDeEste.filter((v) => v.voto_confirmado).length} total={votsDeEste.length} />}
                     expandible
                     isExpanded={isExpandedSub}
+                    onAsignarUbicacion={setVotanteParaUbicacion}
                   />
                 </div>
                 {isExpandedSub && (() => {
@@ -2512,6 +2590,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                             onAnular={handleAnular}
                             canConfirmar={canConfirmar}
                             canAnular={canAnular}
+                            onAsignarUbicacion={setVotanteParaUbicacion}
                             wrapped
                           />
                         ))
@@ -2545,6 +2624,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                 onAnular={handleAnular}
                 canConfirmar={canConfirmar}
                 canAnular={canAnular}
+                onAsignarUbicacion={setVotanteParaUbicacion}
                 wrapped
               />
             ))
@@ -2627,6 +2707,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                 onAnular={handleAnular}
                 canConfirmar={canConfirmar}
                 canAnular={canAnular}
+                onAsignarUbicacion={setVotanteParaUbicacion}
                 wrapped
               />
             ))
@@ -2706,6 +2787,10 @@ const Dashboard = ({ currentUser, onLogout }) => {
               Reintentar
             </button>
           </div>
+        ) : mostrarMapeo && currentUser.role !== "subcoordinador" ? (
+          <MapeoTerritorial currentUser={currentUser} estructura={estructura} onVolver={() => setMostrarMapeo(false)} />
+        ) : mostrarBitacora && currentUser.role !== "subcoordinador" ? (
+          <BitacoraVisitas currentUser={currentUser} estructura={estructura} onVolver={() => setMostrarBitacora(false)} />
         ) : currentUser.role === "superadmin" ? (
           renderSuperadmin()
         ) : currentUser.role === "dirigente" ? (
@@ -2807,6 +2892,14 @@ const Dashboard = ({ currentUser, onLogout }) => {
           onClose={() => setConfirmVotoState({ show: false, votante: null, accion: null })}
         />
       )}
+
+      {/* =========== MAPEO TERRITORIAL: acceso rápido desde una tarjeta de votante =========== */}
+      <AccesoRapidoHogar
+        currentUser={currentUser}
+        votante={votanteParaUbicacion}
+        votantesDisponibles={votanteParaUbicacion ? [votanteParaUbicacion] : []}
+        onClose={() => setVotanteParaUbicacion(null)}
+      />
 
       {/* =========== VERIFICAR ESTRUCTURA (superadmin) =========== */}
       {verificarOpen && currentUser.role === "superadmin" && (() => {
