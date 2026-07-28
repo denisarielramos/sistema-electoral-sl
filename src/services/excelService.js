@@ -264,3 +264,92 @@ export const generarExcelEstructura = async ({
   });
   downloadBlob(blob, buildExcelFileName(prefix, persona));
 };
+
+// ======================= EXPORTACIÓN: BITÁCORA DE VISITAS =======================
+// Reutiliza el mismo servicio/mecanismo (ExcelJS, mismos helpers de estilo y
+// descarga) para exportar el resultado YA FILTRADO de la bitácora de visitas del
+// módulo de mapeo territorial (src/components/mapeo). No hace red — recibe las filas
+// ya cargadas/filtradas en memoria (mismo patrón que generarExcelEstructura).
+
+const RESULTADO_LABELS = {
+  confirmada: "Confirmada",
+  fuera_de_radio: "Fuera de radio",
+  pendiente: "Pendiente",
+  cancelada: "Cancelada",
+  error_gps: "Error de GPS",
+};
+
+const ROL_LABELS_VISITA = {
+  superadmin: "Superadmin",
+  dirigente: "Dirigente",
+  coordinador: "Coordinador",
+  subcoordinador: "Subcoordinador",
+};
+
+const VISITAS_COLUMNS = [
+  { header: "Familia / hogar", key: "familia", width: 22 },
+  { header: "Dirección", key: "direccion", width: 30 },
+  { header: "Votantes del hogar", key: "votantes", width: 34 },
+  { header: "Visitante", key: "visitante", width: 22 },
+  { header: "CI visitante", key: "visitanteCi", width: 12, style: { numFmt: TEXT_FORMAT } },
+  { header: "Rol", key: "rol", width: 16 },
+  { header: "Fecha y hora", key: "fechaHora", width: 20 },
+  { header: "Precisión GPS", key: "precision", width: 14 },
+  { header: "Distancia", key: "distancia", width: 12 },
+  { header: "Radio utilizado", key: "radio", width: 14 },
+  { header: "Estado", key: "estado", width: 16 },
+  { header: "Observación", key: "observacion", width: 30 },
+  { header: "Jerarquía responsable", key: "jerarquia", width: 32 },
+];
+
+// visitas: filas ya devueltas por mapeo_listar_visitas (con `votantes` embebido) y ya
+// filtradas en la UI (búsqueda/filtros de la bitácora).
+// resolverJerarquia: (visita) => string — arma el texto de jerarquía responsable
+// (dirigente/coordinador/subcoordinador) a partir de estructura ya en memoria, para
+// no acoplar este servicio al shape de estructuraHelpers.
+// resolverNombreVisitante: (visita) => string — nombre completo de quien visitó,
+// resuelto por ci+rol contra estructura en memoria (la bitácora solo trae CI/rol).
+export const generarExcelVisitas = async (visitas = [], { resolverJerarquia, resolverNombreVisitante } = {}) => {
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = "Sistema Electoral";
+  workbook.created = new Date();
+
+  const hoja = workbook.addWorksheet("Bitácora de visitas");
+  hoja.columns = VISITAS_COLUMNS;
+
+  visitas.forEach((visita) => {
+    const votantesTexto = (visita.votantes || [])
+      .map((v) => `${str(v.nombre)} ${str(v.apellido)}`.trim())
+      .filter(Boolean)
+      .join(", ");
+
+    hoja.addRow({
+      familia: str(visita.hogar_nombre_familia) || "Sin nombre de familia",
+      direccion: str(visita.hogar_direccion),
+      votantes: votantesTexto,
+      visitante:
+        typeof resolverNombreVisitante === "function"
+          ? resolverNombreVisitante(visita)
+          : str(visita.visitante_ci),
+      visitanteCi: str(visita.visitante_ci),
+      rol: ROL_LABELS_VISITA[visita.visitante_rol] || str(visita.visitante_rol),
+      fechaHora: visita.fecha_hora ? new Date(visita.fecha_hora).toLocaleString("es-PY") : "",
+      precision: visita.precision_gps !== null && visita.precision_gps !== undefined ? `±${Math.round(visita.precision_gps)} m` : "Sin dato",
+      distancia: visita.distancia_metros !== null && visita.distancia_metros !== undefined ? `${Math.round(visita.distancia_metros)} m` : "Sin dato",
+      radio: `${str(visita.radio_permitido_usado)} m`,
+      estado: RESULTADO_LABELS[visita.resultado] || str(visita.resultado),
+      observacion: str(visita.observacion),
+      jerarquia: typeof resolverJerarquia === "function" ? resolverJerarquia(visita) : "",
+    });
+  });
+
+  styleHeaderRow(hoja.getRow(1));
+  hoja.views = [{ state: "frozen", ySplit: 1 }];
+  hoja.autoFilter = { from: "A1", to: `${columnLetter(VISITAS_COLUMNS.length)}1` };
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  const blob = new Blob([buffer], {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  });
+  downloadBlob(blob, `bitacora-visitas-${new Date().toISOString().slice(0, 10)}.xlsx`);
+};

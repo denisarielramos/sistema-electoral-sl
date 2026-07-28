@@ -101,6 +101,7 @@ const App = () => {
           apellido: coord.padron.apellido,
           telefono: coord.telefono || "",
           role: "coordinador",
+          loginCode: code,
         });
         return;
       }
@@ -119,6 +120,7 @@ const App = () => {
           apellido: sub.padron.apellido,
           telefono: sub.telefono || "",
           role: "subcoordinador",
+          loginCode: code,
         });
         return;
       }
@@ -138,6 +140,7 @@ const App = () => {
           apellido: dirigente.apellido || "",
           telefono: dirigente.telefono || "",
           role: "dirigente",
+          loginCode: code,
         });
         return;
       }
