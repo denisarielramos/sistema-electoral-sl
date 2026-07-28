@@ -18,6 +18,11 @@ const HEADER_FILL = "FFB91C1C"; // brand-700 (#b91c1c), mismo tono que los encab
 const HEADER_FONT = "FFFFFFFF";
 const TEXT_FORMAT = "@"; // fuerza formato de texto (sin notación científica, sin perder '+' ni ceros iniciales)
 
+// "Tercera edad" (key terceraEdad) se agrega condicionalmente en buildColumns —
+// solo cuando quien descarga es superadmin (ver incluirTerceraEdad en
+// generarExcelEstructura). Nunca aparece en el Excel de dirigente/coordinador/
+// subcoordinador, aunque buildRows siempre calcule ese valor: una columna sin
+// definir en worksheet.columns simplemente no se escribe en la hoja.
 const COLUMNS = [
   { header: "Nivel o rol", key: "nivel", width: 16 },
   { header: "Nombre", key: "nombre", width: 18 },
@@ -34,6 +39,9 @@ const COLUMNS = [
   { header: "Rol de quien lo asignó", key: "asignadoPorRol", width: 20 },
   { header: "Dirección o ubicación", key: "direccion", width: 32 },
 ];
+
+const buildColumns = (incluirTerceraEdad) =>
+  incluirTerceraEdad ? COLUMNS : COLUMNS.filter((c) => c.key !== "terceraEdad");
 
 // ======================= HELPERS =======================
 // str(): convierte a texto sin inventar valores — null/undefined -> "" (celda vacía).
@@ -205,6 +213,9 @@ const downloadBlob = (blob, filename) => {
 // roles: subconjunto de ["dirigente","coordinador","subcoordinador","votante"] — qué totales mostrar en "Resumen"
 // dirigentes/coordinadores/subcoordinadores/votantes: arrays ya filtrados por el alcance jerárquico del usuario
 // padronMap: Map<ciNormalizada, registroPadron> ya cargado en memoria (IndexedDB/estado) — no se consulta Supabase
+// incluirTerceraEdad: true únicamente cuando quien descarga es superadmin (decidido
+// por el llamador según currentUser.role — ver Dashboard.jsx). Por defecto false: si
+// algún llamador olvida pasarlo, el dato queda afuera en vez de filtrarse por error.
 export const generarExcelEstructura = async ({
   prefix,
   persona = null,
@@ -214,6 +225,7 @@ export const generarExcelEstructura = async ({
   subcoordinadores = [],
   votantes = [],
   padronMap = null,
+  incluirTerceraEdad = false,
 }) => {
   // Dedup por rol + CI normalizada antes de contar o listar.
   const scoped = {
@@ -250,13 +262,14 @@ export const generarExcelEstructura = async ({
   resumen.autoFilter = { from: "A1", to: "B1" };
 
   // ---- Hoja Estructura ----
+  const columns = buildColumns(incluirTerceraEdad);
   const estructuraSheet = workbook.addWorksheet("Estructura");
-  estructuraSheet.columns = COLUMNS;
+  estructuraSheet.columns = columns;
   rows.forEach((row) => estructuraSheet.addRow(row));
 
   styleHeaderRow(estructuraSheet.getRow(1));
   estructuraSheet.views = [{ state: "frozen", ySplit: 1 }];
-  estructuraSheet.autoFilter = { from: "A1", to: `${columnLetter(COLUMNS.length)}1` };
+  estructuraSheet.autoFilter = { from: "A1", to: `${columnLetter(columns.length)}1` };
 
   const buffer = await workbook.xlsx.writeBuffer();
   const blob = new Blob([buffer], {
