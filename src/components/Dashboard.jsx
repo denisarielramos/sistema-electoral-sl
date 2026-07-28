@@ -241,11 +241,25 @@ const OPCIONES_TERCERA_EDAD = [
   { value: "tercera", label: "Tercera edad" },
   { value: "no_tercera", label: "No tercera edad" },
 ];
-const FiltroTerceraEdad = ({ value, onChange }) => (
+// onDescargar/descargando: exclusivo superadmin también (mismo componente, pero
+// Dashboard.jsx solo lo monta desde renderSuperadmin) — exporta exactamente los
+// votantes visibles con el filtro + búsqueda actuales (ver
+// buildEstructuraFiltradaExcelPayload).
+const FiltroTerceraEdad = ({ value, onChange, onDescargar, descargando }) => (
   <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-card">
-    <label className="block text-sm font-semibold text-slate-700 mb-2">
-      Filtrar por tercera edad
-    </label>
+    <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
+      <label className="block text-sm font-semibold text-slate-700">
+        Filtrar por tercera edad
+      </label>
+      <button
+        onClick={onDescargar}
+        disabled={descargando}
+        className="inline-flex items-center gap-1.5 px-3 h-8 rounded-lg text-xs font-medium border border-emerald-200 text-emerald-700 hover:bg-emerald-50 bg-white disabled:opacity-50 shrink-0"
+      >
+        <FileSpreadsheet className="w-3.5 h-3.5" />
+        {descargando ? "Generando..." : "Descargar Excel filtrado"}
+      </button>
+    </div>
     <div className="flex flex-wrap gap-2">
       {OPCIONES_TERCERA_EDAD.map((opt) => (
         <button
@@ -1681,6 +1695,53 @@ const Dashboard = ({ currentUser, onLogout }) => {
     };
   }, [estructura, padronMap, esSuperadminExcel]);
 
+  // Botón "Descargar Excel filtrado" del bloque FiltroTerceraEdad (exclusivo
+  // superadmin): exporta EXACTAMENTE los votantes visibles con el filtro de
+  // tercera edad + la búsqueda interna actuales (votanteVisible, la misma función
+  // que ya decide qué votante se muestra en el árbol), y mantiene la estructura
+  // jerárquica correspondiente — un dirigente/coordinador/subcoordinador se
+  // incluye si él mismo coincide con la búsqueda o si tiene al menos un votante
+  // visible en su rama, exactamente el mismo criterio "ocultar ramas sin
+  // coincidencias" que ya aplica el árbol en pantalla (dirVisible/coordVisible/
+  // subVisible). Sin ningún filtro activo, incluye todo — igual que el árbol.
+  const buildEstructuraFiltradaExcelPayload = useCallback(() => {
+    const votantesFiltrados = estructura.votantes.filter(votanteVisible);
+    const ciVotantesFiltrados = new Set(votantesFiltrados.map((v) => normalizeCI(v.ci)));
+    const tieneDescendienteVisible = (votantesDeRama) =>
+      votantesDeRama.some((v) => ciVotantesFiltrados.has(normalizeCI(v.ci)));
+
+    const dirigentesFiltrados = estructura.dirigentes.filter((d) => {
+      const ci = normalizeCI(d.ci);
+      if (!hayFiltroActivo) return true;
+      if (matchCI && matchCI.has(ci)) return true;
+      return tieneDescendienteVisible(getTodosVotantesDirigente(estructura, ci));
+    });
+    const coordinadoresFiltrados = estructura.coordinadores.filter((c) => {
+      const ci = normalizeCI(c.ci);
+      if (!hayFiltroActivo) return true;
+      if (matchCI && matchCI.has(ci)) return true;
+      return tieneDescendienteVisible(getTodosVotantesCoord(estructura, ci));
+    });
+    const subcoordinadoresFiltrados = estructura.subcoordinadores.filter((s) => {
+      const ci = normalizeCI(s.ci);
+      if (!hayFiltroActivo) return true;
+      if (matchCI && matchCI.has(ci)) return true;
+      return tieneDescendienteVisible(getVotantesDeSubcoord(estructura, ci));
+    });
+
+    return {
+      prefix: "estructura-tercera-edad-filtrada",
+      persona: null,
+      roles: ["dirigente", "coordinador", "subcoordinador", "votante"],
+      dirigentes: dirigentesFiltrados,
+      coordinadores: coordinadoresFiltrados,
+      subcoordinadores: subcoordinadoresFiltrados,
+      votantes: votantesFiltrados,
+      padronMap,
+      incluirTerceraEdad: esSuperadminExcel,
+    };
+  }, [estructura, padronMap, matchCI, hayFiltroActivo, votanteVisible, esSuperadminExcel]);
+
   // key identifica al botón que disparó la descarga (para el estado "Generando..." y
   // para impedir clics repetidos). payload son los argumentos de generarExcelEstructura.
   const handleDescargarExcel = useCallback(async (key, payload) => {
@@ -1695,6 +1756,18 @@ const Dashboard = ({ currentUser, onLogout }) => {
       setExcelBusy(null);
     }
   }, [excelBusy]);
+
+  // Botón "Descargar Excel filtrado" (bloque FiltroTerceraEdad, exclusivo
+  // superadmin): si el filtro + búsqueda actuales no dejan ningún votante visible,
+  // avisa en vez de generar un Excel vacío.
+  const handleDescargarExcelFiltrado = useCallback(async () => {
+    const payload = buildEstructuraFiltradaExcelPayload();
+    if (payload.votantes.length === 0) {
+      alert("No hay votantes para exportar con el filtro y la búsqueda actuales.");
+      return;
+    }
+    await handleDescargarExcel("tercera-edad-filtrado", payload);
+  }, [buildEstructuraFiltradaExcelPayload, handleDescargarExcel]);
 
   // ======================= EXPAND TOGGLE =======================
   const toggleDir = (ci) => setExpandedDirs((prev) => ({ ...prev, [ci]: !prev[ci] }));
@@ -1783,7 +1856,12 @@ const Dashboard = ({ currentUser, onLogout }) => {
           onChange={setSearchQuery}
           onClear={() => setSearchQuery("")}
         />
-        <FiltroTerceraEdad value={terceraEdadFiltro} onChange={setTerceraEdadFiltro} />
+        <FiltroTerceraEdad
+          value={terceraEdadFiltro}
+          onChange={setTerceraEdadFiltro}
+          onDescargar={handleDescargarExcelFiltrado}
+          descargando={excelBusy === "tercera-edad-filtrado"}
+        />
 
         <BusquedaAviso matchCI={matchCI} query={searchQuery} />
 
