@@ -410,7 +410,7 @@ export default function VistaSeccional({
                         {p.local_votacion}
                       </td>
                       {hayMesa && <td className="px-4 py-3 text-slate-600 whitespace-nowrap">{p.mesa}</td>}
-                      {hayOrden && <td className="px-4 py-3 text-slate-600 whitespace-nowrap">{p.orden}</td>
+                      {hayOrden && <td className="px-4 py-3 text-slate-600 whitespace-nowrap">{p.orden}</td>}
                       <td className="px-4 py-3 text-slate-600 max-w-[200px] truncate" title={String(p.direccion)}>
                         {p.direccion}
                       </td>
