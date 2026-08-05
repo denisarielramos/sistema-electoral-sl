@@ -357,7 +357,8 @@ const VoteCounter = ({ confirmed, total }) => {
 // Una sola tarjeta para dirigente / coordinador / subcoordinador / votante. Mismos
 // datos (con "Sin dato"/"Sin teléfono"/"Sin dirección" en vez de ocultar el campo) y
 // mismo orden de acciones para las 4: Teléfono → Dirección/ubicación → WhatsApp →
-// Copiar código (si existe) → Confirmación → Excel (si corresponde) → Expandir.
+// Confirmación → Excel (si corresponde) → Expandir. El código de acceso se copia
+// desde el icono ubicado junto al nombre de la persona.
 // El contenido expandido (hijos en el árbol) lo decide quien la usa vía `children`;
 // esta tarjeta solo se encarga de mostrar los datos propios y sus acciones — nunca
 // cambia qué hijos corresponden a cada rol (eso sigue viniendo de estructuraHelpers).
@@ -411,6 +412,24 @@ const PersonCard = ({
       <div className="flex-1 min-w-0 space-y-0.5 text-xs sm:text-sm">
         <p className={`font-semibold flex items-center gap-1.5 flex-wrap ${hasName ? "text-slate-800" : "text-slate-400 italic"}`}>
           <span>{displayName}</span>
+          {tieneCode && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onCopy?.(loginCode);
+              }}
+              title="Copiar código de acceso"
+              aria-label={`Copiar código de acceso de ${displayName}`}
+              className="inline-flex items-center justify-center w-6 h-6 rounded-md border border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-slate-700 transition-colors bg-white shadow-none shrink-0"
+            >
+              {copiedCode === loginCode ? (
+                <Check className="w-3.5 h-3.5 text-emerald-600" />
+              ) : (
+                <Copy className="w-3.5 h-3.5" />
+              )}
+            </button>
+          )}
           {rolLabel && <Badge variant="purple">{rolLabel}</Badge>}
           {persona.es_externo && <Badge variant="amber">Externo</Badge>}
           {counter}
@@ -458,11 +477,7 @@ const PersonCard = ({
           </ActionBtn>
         )}
         <PersonWhatsAppButton persona={persona} tipo={tipo} loginCode={loginCode} iconOnly />
-        {tieneCode ? (
-          <ActionBtn onClick={() => onCopy?.(loginCode)} title="Copiar código de acceso">
-            {copiedCode === loginCode ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
-          </ActionBtn>
-        ) : tablaAcceso && esSuperadmin && onGenerarAcceso ? (
+        {!tieneCode && tablaAcceso && esSuperadmin && onGenerarAcceso ? (
           <button
             disabled={generandoAcceso === persona.ci}
             onClick={() => onGenerarAcceso(tablaAcceso, persona.ci)}
