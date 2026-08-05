@@ -164,17 +164,24 @@ function addSummaryBox(doc, startY, rows) {
 }
 
 // ======================= VOTER TABLE =======================
-const VOTER_COLUMNS = [
+const tieneDato = (value) => value !== null && value !== undefined && value !== "";
+
+const buildVoterColumns = (voters) => [
   { header: "Nombre y Apellido", dataKey: "nombre" },
   { header: "CI", dataKey: "ci" },
   { header: "Telefono", dataKey: "telefono" },
-  { header: "Mesa", dataKey: "mesa" },
-  { header: "Orden", dataKey: "orden" },
   { header: "Local de votacion", dataKey: "local" },
+  ...(voters.some((v) => tieneDato(v?.mesa))
+    ? [{ header: "Mesa", dataKey: "mesa" }]
+    : []),
+  ...(voters.some((v) => tieneDato(v?.orden))
+    ? [{ header: "Orden", dataKey: "orden" }]
+    : []),
   { header: "Confirmado", dataKey: "confirmado" },
 ];
 
 function addVoterTable(doc, startY, voters) {
+  const columns = buildVoterColumns(voters);
   const body = voters.map((v) => ({
     nombre: name(v),
     ci: str(v.ci) || "—",
@@ -187,7 +194,7 @@ function addVoterTable(doc, startY, voters) {
 
   autoTable(doc, {
     startY,
-    columns: VOTER_COLUMNS,
+    columns,
     body,
     margin: { left: M.left, right: M.right },
     headStyles: {

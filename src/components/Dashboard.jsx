@@ -65,7 +65,6 @@ import {
   getMisVotantes,
   getVotantesDirectosCoord,
   getTodosVotantesCoord,
-  getPersonasDisponibles,
   getCoordsDeDigente,
   getSubsDeDigente,
   getVotantesDirectosDirigente,
@@ -440,10 +439,15 @@ const PersonCard = ({
         <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-slate-500">
           <span className="truncate">Tel: {persona.telefono || "Sin teléfono"}</span>
           <span className="truncate">Dir: {direccionMostrar || "Sin dirección"}</span>
-          <span>Seccional: {persona.seccional || "Sin dato"}</span>
-          <span className="truncate">Local: {persona.local_votacion || "Sin dato"}</span>
-          <span>Mesa: {persona.mesa || "Sin dato"}</span>
-          <span>Orden: {persona.orden || "Sin dato"}</span>
+          <span className="truncate">
+            Local: {persona.local_codigo ? `${persona.local_codigo} · ` : ""}{persona.local_votacion || "Sin dato"}
+          </span>
+          {persona.mesa !== null && persona.mesa !== undefined && persona.mesa !== "" && (
+            <span>Mesa: {persona.mesa}</span>
+          )}
+          {persona.orden !== null && persona.orden !== undefined && persona.orden !== "" && (
+            <span>Orden: {persona.orden}</span>
+          )}
         </div>
         <div className="flex flex-wrap gap-1.5 pt-0.5">
           {esVotante && confirmado && (
@@ -714,7 +718,11 @@ const ModalAgregarDirigente = ({
             <div className="bg-brand-50 border border-brand-100 rounded-xl px-4 py-3">
               <p className="font-semibold text-sm text-slate-800">{personaPadron.nombre} {personaPadron.apellido || ""}</p>
               <p className="text-xs text-slate-500 mt-0.5">CI: {personaPadron.ci}</p>
-              {personaPadron.seccional && <p className="text-xs text-slate-500">Seccional: {personaPadron.seccional}</p>}
+              {personaPadron.local_votacion && (
+                <p className="text-xs text-slate-500">
+                  Local: {personaPadron.local_codigo ? `${personaPadron.local_codigo} · ` : ""}{personaPadron.local_votacion}
+                </p>
+              )}
             </div>
             <div>
               <label className={labelCls}>Telefono celular <span className="text-red-500">*</span></label>
@@ -861,8 +869,8 @@ const Dashboard = ({ currentUser, onLogout }) => {
   const [verificarCoordCI, setVerificarCoordCI] = useState("");
   const [verificarPrinting, setVerificarPrinting] = useState(null); // "dirigente" | "coord" | "sub-<ci>" | null
 
-  // Vista por seccional (superadmin): reemplaza el contenido del Dashboard por una
-  // vista de solo lectura filtrable, reutilizando estructura/padronMap ya en memoria.
+  // Vista por local de votación (superadmin): reemplaza el contenido del Dashboard por
+  // una vista de solo lectura filtrable, reutilizando estructura/padronMap ya en memoria.
   const [mostrarSeccional, setMostrarSeccional] = useState(false);
 
   // Mapeo territorial / Bitácora de visitas (superadmin, dirigente, coordinador):
@@ -969,7 +977,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
     for (;;) {
       const { data, error } = await supabase
         .from("padron")
-        .select("ci,nombre,apellido,seccional,local_votacion,mesa,orden,direccion")
+        .select("ci,nombre,apellido,local_codigo,local_votacion,mesa,orden,direccion,vigente")
         .range(desde, desde + PAGE - 1);
       if (error) throw error;
       if (!data || data.length === 0) break;
@@ -1140,14 +1148,14 @@ const Dashboard = ({ currentUser, onLogout }) => {
       rows.map((row) => {
         const p = padronMap.get(normalizeCI(row.ci)) || {};
         return {
-          ...p,      // datos del padrón (nombre, apellido, seccional, local_votacion, mesa, orden, direccion)
+          ...p,      // datos del padrón (nombre, apellido, local_codigo, local_votacion, mesa, orden, direccion)
           ...row,    // datos de estructura prevalecen
           ci: normalizeCI(row.ci),
           // Para dirigentes externos se conserva su nombre/apellido de la tabla dirigentes;
           // para el resto, cae al padrón si la estructura no lo trae.
           nombre: row.nombre || p.nombre || "",
           apellido: row.apellido || p.apellido || "",
-          seccional: row.seccional || p.seccional || "",
+          local_codigo: row.local_codigo ?? p.local_codigo ?? "",
           local_votacion: row.local_votacion || p.local_votacion || "",
           mesa: row.mesa || p.mesa || "",
           orden: row.orden || p.orden || "",
@@ -1163,11 +1171,34 @@ const Dashboard = ({ currentUser, onLogout }) => {
     };
   }, [estructuraRaw, padronMap]);
 
-  // ======================= PERSONAS DISPONIBLES =======================
-  const personasDisponibles = useMemo(
-    () => getPersonasDisponibles(padron, estructura),
-    [padron, estructura]
+  // Solo el padrón vigente se usa para vistas generales y para enriquecer datos.
+  // La búsqueda de altas consulta Supabase directamente y ya no recorre este arreglo.
+  const padronVigente = useMemo(
+    () => padron.filter((persona) => persona?.vigente !== false),
+    [padron]
   );
+
+  // ======================= PERSONAS YA ASIGNADAS =======================
+  // PadronSearch solo necesita conocer las CIs ocupadas. Evita generar un segundo
+  // arreglo de 170 mil elementos cada vez que cambia la estructura.
+  const personasDisponibles = useMemo(() => {
+    const asignadas = [];
+    const agregar = (personas, asignadoRol) => {
+      for (const persona of personas || []) {
+        asignadas.push({
+          ci: normalizeCI(persona.ci),
+          asignado: true,
+          asignadoRol,
+        });
+      }
+    };
+
+    agregar(estructura.dirigentes, "dirigente");
+    agregar(estructura.coordinadores, "coordinador");
+    agregar(estructura.subcoordinadores, "subcoordinador");
+    agregar(estructura.votantes, "votante");
+    return asignadas;
+  }, [estructura]);
 
   // ======================= ESTADÍSTICAS =======================
   const estadisticas = useMemo(
@@ -1792,7 +1823,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
             className="inline-flex items-center gap-2 px-4 h-9 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 rounded-lg text-sm font-medium transition-colors"
           >
             <MapIcon className="w-4 h-4" />
-            Vista por seccional
+            Vista por local de votación
           </button>
           <button
             onClick={() => setMostrarMapeo(true)}
@@ -2655,7 +2686,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
     );
   };
 
-  // ======================= VISTA POR SECCIONAL (superadmin, pantalla completa) =======================
+  // ======================= VISTA POR LOCAL DE VOTACIÓN (superadmin) =======================
   if (mostrarSeccional && currentUser.role === "superadmin") {
     return (
       <VistaSeccional
@@ -2746,7 +2777,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
         onClose={() => setShowAddModal(false)}
         tipo={addModalTipo}
         onAdd={handleAddPersona}
-        padron={padron}
+        padron={padronVigente}
         padronLoading={padronLoading}
         padronError={padronError}
         onRetryPadron={cargarPadron}
@@ -2756,7 +2787,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
       <ModalAgregarDirigente
         show={showAgregarDirigente}
         onClose={() => setShowAgregarDirigente(false)}
-        padron={padron}
+        padron={padronVigente}
         padronLoading={padronLoading}
         padronError={padronError}
         onRetryPadron={cargarPadron}
@@ -2773,7 +2804,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
             ? handleAddCoordinadorSuperadmin
             : handleAddCoordinadorDesdeModal
         }
-        padron={padron}
+        padron={padronVigente}
         padronLoading={padronLoading}
         padronError={padronError}
         onRetryPadron={cargarPadron}
