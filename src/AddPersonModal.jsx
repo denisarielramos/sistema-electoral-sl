@@ -116,8 +116,10 @@ const AddPersonModal = ({
               {(personaSeleccionada.apellido || "").toUpperCase()}
             </p>
             <p className="text-xs text-slate-500">CI: {personaSeleccionada.ci}</p>
-            {personaSeleccionada.seccional && (
-              <p className="text-xs text-slate-400">Seccional: {personaSeleccionada.seccional}</p>
+            {personaSeleccionada.local_votacion && (
+              <p className="text-xs text-slate-400">
+                Local: {personaSeleccionada.local_codigo ? `${personaSeleccionada.local_codigo} · ` : ""}{personaSeleccionada.local_votacion}
+              </p>
             )}
           </div>
 
