@@ -65,7 +65,6 @@ import {
   getMisVotantes,
   getVotantesDirectosCoord,
   getTodosVotantesCoord,
-  getPersonasDisponibles,
   getCoordsDeDigente,
   getSubsDeDigente,
   getVotantesDirectosDirigente,
@@ -1172,18 +1171,34 @@ const Dashboard = ({ currentUser, onLogout }) => {
     };
   }, [estructuraRaw, padronMap]);
 
-  // Solo el padrón vigente se usa para agregar nuevas personas. El padrón histórico
-  // permanece cargado para enriquecer roles existentes sin romper relaciones.
+  // Solo el padrón vigente se usa para vistas generales y para enriquecer datos.
+  // La búsqueda de altas consulta Supabase directamente y ya no recorre este arreglo.
   const padronVigente = useMemo(
     () => padron.filter((persona) => persona?.vigente !== false),
     [padron]
   );
 
-  // ======================= PERSONAS DISPONIBLES =======================
-  const personasDisponibles = useMemo(
-    () => getPersonasDisponibles(padronVigente, estructura),
-    [padronVigente, estructura]
-  );
+  // ======================= PERSONAS YA ASIGNADAS =======================
+  // PadronSearch solo necesita conocer las CIs ocupadas. Evita generar un segundo
+  // arreglo de 170 mil elementos cada vez que cambia la estructura.
+  const personasDisponibles = useMemo(() => {
+    const asignadas = [];
+    const agregar = (personas, asignadoRol) => {
+      for (const persona of personas || []) {
+        asignadas.push({
+          ci: normalizeCI(persona.ci),
+          asignado: true,
+          asignadoRol,
+        });
+      }
+    };
+
+    agregar(estructura.dirigentes, "dirigente");
+    agregar(estructura.coordinadores, "coordinador");
+    agregar(estructura.subcoordinadores, "subcoordinador");
+    agregar(estructura.votantes, "votante");
+    return asignadas;
+  }, [estructura]);
 
   // ======================= ESTADÍSTICAS =======================
   const estadisticas = useMemo(
