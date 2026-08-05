@@ -1,4 +1,4 @@
-// ======================= VISTA POR SECCIONAL (SUPERADMIN) =======================
+// ======================= VISTA POR LOCAL DE VOTACIÓN (SUPERADMIN) =======================
 // Adaptada de la rama improve-search-and-performance: a diferencia del original,
 // esta versión NO consulta Supabase — reutiliza `estructura` (ya enriquecida con el
 // padrón) y `padronMap`, ambos ya cargados en memoria/IndexedDB por Dashboard.jsx.
@@ -84,7 +84,7 @@ export default function VistaSeccional({
   onRetryPadron,
   onBack,
 }) {
-  const [filtroSeccional, setFiltroSeccional] = useState("");
+  const [filtroLocal, setFiltroLocal] = useState("");
   const [filtroRol, setFiltroRol] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -131,7 +131,7 @@ export default function VistaSeccional({
           ci,
           rol: ROLE_LABELS[role],
           nombreCompleto,
-          seccional: campo(persona, padronPersona, "seccional"),
+          local_codigo: campo(persona, padronPersona, "local_codigo"),
           local_votacion: campo(persona, padronPersona, "local_votacion"),
           mesa: campo(persona, padronPersona, "mesa"),
           orden: campo(persona, padronPersona, "orden"),
@@ -147,9 +147,12 @@ export default function VistaSeccional({
 
     const rolOrder = { Dirigente: 1, Coordinador: 2, Subcoordinador: 3, Votante: 4 };
     list.sort((a, b) => {
-      const secA = String(a.seccional);
-      const secB = String(b.seccional);
-      if (secA !== secB) return secA.localeCompare(secB, "es", { numeric: true });
+      const localA = String(a.local_codigo);
+      const localB = String(b.local_codigo);
+      if (localA !== localB) return localA.localeCompare(localB, "es", { numeric: true });
+      if (a.local_votacion !== b.local_votacion) {
+        return String(a.local_votacion).localeCompare(String(b.local_votacion), "es");
+      }
       if (rolOrder[a.rol] !== rolOrder[b.rol]) return rolOrder[a.rol] - rolOrder[b.rol];
       return a.nombreCompleto.localeCompare(b.nombreCompleto, "es");
     });
@@ -157,21 +160,26 @@ export default function VistaSeccional({
     return list;
   }, [estructura, padronMap]);
 
-  // ======================= SECCIONALES DISPONIBLES =======================
-  const seccionalesDisponibles = useMemo(() => {
-    const set = new Set();
+  // ======================= LOCALES DISPONIBLES =======================
+  const localesDisponibles = useMemo(() => {
+    const map = new Map();
     personas.forEach((p) => {
-      if (p.seccional && p.seccional !== SIN_DATO) set.add(String(p.seccional));
+      if (!p.local_votacion || p.local_votacion === SIN_DATO) return;
+      const codigo = p.local_codigo === SIN_DATO ? "" : String(p.local_codigo);
+      map.set(String(p.local_votacion), { nombre: String(p.local_votacion), codigo });
     });
-    return Array.from(set).sort((a, b) => a.localeCompare(b, "es", { numeric: true }));
+    return Array.from(map.values()).sort((a, b) => {
+      if (a.codigo !== b.codigo) return a.codigo.localeCompare(b.codigo, "es", { numeric: true });
+      return a.nombre.localeCompare(b.nombre, "es");
+    });
   }, [personas]);
 
   // ======================= FILTRADO =======================
   const personasFiltradas = useMemo(() => {
     let filtered = personas;
 
-    if (filtroSeccional) {
-      filtered = filtered.filter((p) => String(p.seccional) === filtroSeccional);
+    if (filtroLocal) {
+      filtered = filtered.filter((p) => String(p.local_votacion) === filtroLocal);
     }
     if (filtroRol) {
       filtered = filtered.filter((p) => p.rol === filtroRol);
@@ -181,19 +189,19 @@ export default function VistaSeccional({
       // reutiliza el matcher compartido (misma lógica que Dashboard.jsx) para que una
       // CI escrita como "4630621", "4.630.621", "4 630 621" o "4-630-621" matchee igual.
       filtered = filtered.filter((p) =>
-        personaCoincideConsulta({ nombre: p.nombreCompleto, ci: p.ci }, searchQuery)
+        personaCoincideConsulta({ nombre: p.nombreCompleto, ci: p.ci, local_votacion: p.local_votacion }, searchQuery)
       );
     }
 
     return filtered;
-  }, [personas, filtroSeccional, filtroRol, searchQuery]);
+  }, [personas, filtroLocal, filtroRol, searchQuery]);
 
   // ======================= PAGINACIÓN =======================
   const totalPages = Math.max(1, Math.ceil(personasFiltradas.length / ITEMS_PER_PAGE));
 
   // Los propios setters de filtro (más abajo) vuelven a la página 1 al cambiar,
   // en vez de sincronizarlo con un efecto separado.
-  const actualizarFiltroSeccional = (value) => { setFiltroSeccional(value); setCurrentPage(1); };
+  const actualizarFiltroLocal = (value) => { setFiltroLocal(value); setCurrentPage(1); };
   const actualizarFiltroRol = (value) => { setFiltroRol(value); setCurrentPage(1); };
   const actualizarBusqueda = (value) => { setSearchQuery(value); setCurrentPage(1); };
 
@@ -220,7 +228,9 @@ export default function VistaSeccional({
   }, [totalPages, currentPage]);
 
   // ======================= ESTADÍSTICAS (se recalculan con los filtros aplicados) =======================
-  const hayFiltros = filtroSeccional !== "" || filtroRol !== "" || searchQuery.trim() !== "";
+  const hayFiltros = filtroLocal !== "" || filtroRol !== "" || searchQuery.trim() !== "";
+  const hayMesa = personasFiltradas.some((p) => p.mesa !== SIN_DATO && p.mesa !== "");
+  const hayOrden = personasFiltradas.some((p) => p.orden !== SIN_DATO && p.orden !== "");
 
   const stats = useMemo(() => ({
     total: personasFiltradas.length,
@@ -247,7 +257,7 @@ export default function VistaSeccional({
                 <ArrowLeft className="w-5 h-5 text-slate-600" />
               </button>
               <div>
-                <h1 className="text-xl font-bold text-slate-800">Vista por seccional</h1>
+                <h1 className="text-xl font-bold text-slate-800">Vista por local de votación</h1>
                 <p className="text-sm text-slate-500">Consulta de personas asignadas</p>
               </div>
             </div>
@@ -303,15 +313,17 @@ export default function VistaSeccional({
         <div className="bg-white rounded-xl border border-slate-200 p-4">
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1.5">Seccional</label>
+              <label className="block text-xs font-medium text-slate-600 mb-1.5">Local de votación</label>
               <select
-                value={filtroSeccional}
-                onChange={(e) => actualizarFiltroSeccional(e.target.value)}
+                value={filtroLocal}
+                onChange={(e) => actualizarFiltroLocal(e.target.value)}
                 className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
               >
                 <option value="">Todas</option>
-                {seccionalesDisponibles.map((sec) => (
-                  <option key={sec} value={sec}>{sec}</option>
+                {localesDisponibles.map((local) => (
+                  <option key={local.nombre} value={local.nombre}>
+                    {local.codigo ? `${local.codigo} · ` : ""}{local.nombre}
+                  </option>
                 ))}
               </select>
             </div>
@@ -339,7 +351,7 @@ export default function VistaSeccional({
                   type="text"
                   value={searchQuery}
                   onChange={(e) => actualizarBusqueda(e.target.value)}
-                  placeholder="CI, nombre o apellido..."
+                  placeholder="CI, nombre, apellido o local..."
                   className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
                 />
               </div>
@@ -375,20 +387,20 @@ export default function VistaSeccional({
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-slate-50 border-b border-slate-200">
-                    <th className="text-left px-4 py-3 font-semibold text-slate-600 whitespace-nowrap">SECCIONAL</th>
+                    <th className="text-left px-4 py-3 font-semibold text-slate-600 whitespace-nowrap">CÓD. LOCAL</th>
                     <th className="text-left px-4 py-3 font-semibold text-slate-600 whitespace-nowrap">ROL</th>
                     <th className="text-left px-4 py-3 font-semibold text-slate-600 whitespace-nowrap">NOMBRE Y APELLIDO</th>
                     <th className="text-left px-4 py-3 font-semibold text-slate-600 whitespace-nowrap">CI</th>
                     <th className="text-left px-4 py-3 font-semibold text-slate-600 whitespace-nowrap">LOCAL</th>
-                    <th className="text-left px-4 py-3 font-semibold text-slate-600 whitespace-nowrap">MESA</th>
-                    <th className="text-left px-4 py-3 font-semibold text-slate-600 whitespace-nowrap">ORDEN</th>
+                    {hayMesa && <th className="text-left px-4 py-3 font-semibold text-slate-600 whitespace-nowrap">MESA</th>}
+                    {hayOrden && <th className="text-left px-4 py-3 font-semibold text-slate-600 whitespace-nowrap">ORDEN</th>}
                     <th className="text-left px-4 py-3 font-semibold text-slate-600 whitespace-nowrap">DIRECCION</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {personasPaginadas.map((p) => (
                     <tr key={`${p.rol}-${p.ci}`} className="hover:bg-slate-50 transition-colors">
-                      <td className="px-4 py-3 text-slate-700 whitespace-nowrap">{p.seccional}</td>
+                      <td className="px-4 py-3 text-slate-700 whitespace-nowrap">{p.local_codigo}</td>
                       <td className="px-4 py-3">
                         <Badge variant={p.rol.toLowerCase()}>{p.rol}</Badge>
                       </td>
@@ -397,8 +409,8 @@ export default function VistaSeccional({
                       <td className="px-4 py-3 text-slate-600 max-w-[200px] truncate" title={String(p.local_votacion)}>
                         {p.local_votacion}
                       </td>
-                      <td className="px-4 py-3 text-slate-600 whitespace-nowrap">{p.mesa}</td>
-                      <td className="px-4 py-3 text-slate-600 whitespace-nowrap">{p.orden}</td>
+                      {hayMesa && <td className="px-4 py-3 text-slate-600 whitespace-nowrap">{p.mesa}</td>}
+                      {hayOrden && <td className="px-4 py-3 text-slate-600 whitespace-nowrap">{p.orden}</td>
                       <td className="px-4 py-3 text-slate-600 max-w-[200px] truncate" title={String(p.direccion)}>
                         {p.direccion}
                       </td>
