@@ -18,17 +18,24 @@ import {
 //   tipo         - "votante" | "subcoordinador"  (coordinador va por ModalAgregarCoordinador)
 //   onAdd        - fn(persona) — para coord/sub; fn({...persona, telefono, tercera_edad}) para votante
 //   disponibles  - array de personas del padrón enriquecido
+//   esSuperadmin - boolean — controla exclusivamente el campo "tercera edad" (mismo
+//                  modelo de permisos de interfaz que el resto del Dashboard: quien
+//                  no es superadmin ni ve ni puede tocar este dato, se guarda como
+//                  false por defecto sin pedirle que elija nada).
 
 const AddPersonModal = ({
   show, onClose, tipo, onAdd,
   padron = [], padronLoading = false, padronError = null, onRetryPadron,
   disponibles = [],
+  esSuperadmin = false,
 }) => {
   // Paso 2 — solo para votantes
   const [personaSeleccionada, setPersonaSeleccionada] = useState(null);
   const [telefono, setTelefono] = useState("+595");
   const [telefonoError, setTelefonoError] = useState(null);
-  const [terceraEdad, setTerceraEdad] = useState(null); // null | true | false
+  // null | true | false — para quien no es superadmin arranca en false (no se le
+  // pide elegir, ver bloque condicional más abajo) en vez de null.
+  const [terceraEdad, setTerceraEdad] = useState(esSuperadmin ? null : false);
 
   const esVotante = tipo === "votante";
 
@@ -37,9 +44,9 @@ const AddPersonModal = ({
       setPersonaSeleccionada(null);
       setTelefono("+595");
       setTelefonoError(null);
-      setTerceraEdad(null);
+      setTerceraEdad(esSuperadmin ? null : false);
     }
-  }, [show]);
+  }, [show, esSuperadmin]);
 
   if (!show) return null;
 
@@ -53,7 +60,7 @@ const AddPersonModal = ({
     if (esVotante) {
       setPersonaSeleccionada(persona);
       setTelefono("+595");
-      setTerceraEdad(null);
+      setTerceraEdad(esSuperadmin ? null : false);
     } else {
       // Inserción directa para subcoord
       onAdd(persona);
@@ -67,7 +74,10 @@ const AddPersonModal = ({
       setTelefonoError(result.error);
       return;
     }
-    if (terceraEdad === null) {
+    // Solo superadmin ve el selector y debe elegir explícitamente; para los demás
+    // roles terceraEdad ya viene fijo en false (ver useState/handleSelectPersona),
+    // nunca null.
+    if (esSuperadmin && terceraEdad === null) {
       alert("Debe indicar si la persona es de tercera edad (Si o No).");
       return;
     }
@@ -78,7 +88,7 @@ const AddPersonModal = ({
     setPersonaSeleccionada(null);
     setTelefono("+595");
     setTelefonoError(null);
-    setTerceraEdad(null);
+    setTerceraEdad(esSuperadmin ? null : false);
   };
 
   // ============================
@@ -154,43 +164,45 @@ const AddPersonModal = ({
               )}
             </div>
 
-            {/* Tercera edad */}
-            <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-2">
-                <span className="flex items-center gap-1.5">
-                  <AlertCircle className="w-3.5 h-3.5 text-amber-500" />
-                  ¿Es persona de tercera edad?
-                  <span className="text-red-500">*</span>
-                </span>
-              </label>
-              <div className="flex gap-3">
-                <button
-                  type="button"
-                  onClick={() => setTerceraEdad(true)}
-                  className={`flex-1 h-10 rounded-xl text-sm font-medium border transition-colors ${
-                    terceraEdad === true
-                      ? "bg-amber-500 border-amber-500 text-white"
-                      : "bg-white border-slate-200 text-slate-700 hover:border-amber-300 hover:bg-amber-50"
-                  }`}
-                >
-                  Si
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setTerceraEdad(false)}
-                  className={`flex-1 h-10 rounded-xl text-sm font-medium border transition-colors ${
-                    terceraEdad === false
-                      ? "bg-slate-600 border-slate-600 text-white"
-                      : "bg-white border-slate-200 text-slate-700 hover:border-slate-400 hover:bg-slate-50"
-                  }`}
-                >
-                  No
-                </button>
+            {/* Tercera edad — exclusivo superadmin, ver esSuperadmin en props */}
+            {esSuperadmin && (
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-2">
+                  <span className="flex items-center gap-1.5">
+                    <AlertCircle className="w-3.5 h-3.5 text-amber-500" />
+                    ¿Es persona de tercera edad?
+                    <span className="text-red-500">*</span>
+                  </span>
+                </label>
+                <div className="flex gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setTerceraEdad(true)}
+                    className={`flex-1 h-10 rounded-xl text-sm font-medium border transition-colors ${
+                      terceraEdad === true
+                        ? "bg-amber-500 border-amber-500 text-white"
+                        : "bg-white border-slate-200 text-slate-700 hover:border-amber-300 hover:bg-amber-50"
+                    }`}
+                  >
+                    Si
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTerceraEdad(false)}
+                    className={`flex-1 h-10 rounded-xl text-sm font-medium border transition-colors ${
+                      terceraEdad === false
+                        ? "bg-slate-600 border-slate-600 text-white"
+                        : "bg-white border-slate-200 text-slate-700 hover:border-slate-400 hover:bg-slate-50"
+                    }`}
+                  >
+                    No
+                  </button>
+                </div>
+                {terceraEdad === null && (
+                  <p className="text-xs text-amber-600 mt-1.5">Debe seleccionar una opcion.</p>
+                )}
               </div>
-              {terceraEdad === null && (
-                <p className="text-xs text-amber-600 mt-1.5">Debe seleccionar una opcion.</p>
-              )}
-            </div>
+            )}
           </div>
 
           {/* Acciones */}
