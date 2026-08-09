@@ -87,21 +87,23 @@ export const getTodosVotantesCoord = (estructura, coordCI) => {
 
 // ======================= PERSONAS DISPONIBLES =======================
 export const getPersonasDisponibles = (padron, estructura) => {
+  const indexar = (rows = []) => {
+    const map = new Map();
+    for (const row of rows) map.set(normalizeCI(row.ci), row);
+    return map;
+  };
+
+  const dirigentesByCI = indexar(estructura.dirigentes);
+  const coordinadoresByCI = indexar(estructura.coordinadores);
+  const subcoordinadoresByCI = indexar(estructura.subcoordinadores);
+  const votantesByCI = indexar(estructura.votantes);
+
   return padron.map((p) => {
     const ci = normalizeCI(p.ci);
-
-    const dir = (estructura.dirigentes || []).find(
-      (d) => normalizeCI(d.ci) === ci
-    );
-    const coord = estructura.coordinadores.find(
-      (c) => normalizeCI(c.ci) === ci
-    );
-    const sub = estructura.subcoordinadores.find(
-      (s) => normalizeCI(s.ci) === ci
-    );
-    const vot = estructura.votantes.find(
-      (v) => normalizeCI(v.ci) === ci
-    );
+    const dir = dirigentesByCI.get(ci);
+    const coord = coordinadoresByCI.get(ci);
+    const sub = subcoordinadoresByCI.get(ci);
+    const vot = votantesByCI.get(ci);
 
     let rol = null;
     if (dir) rol = "dirigente";

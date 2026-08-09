@@ -7,16 +7,15 @@ import {
 } from "./utils/phoneValidation";
 
 // ======================= ADD PERSON MODAL =======================
-// Para votantes: flujo de 2 pasos.
+// Para votantes y subcoordinadores: flujo de 2 pasos.
 //   Paso 1: PadronSearch — buscar y seleccionar persona.
-//   Paso 2: ingresar teléfono y responder si es tercera edad.
-// Para coordinador/subcoordinador: selección directa (sin paso 2).
+//   Paso 2: ingresar teléfono; para votantes también responder si es tercera edad.
 //
 // Props:
 //   show         - boolean
 //   onClose      - fn
 //   tipo         - "votante" | "subcoordinador"  (coordinador va por ModalAgregarCoordinador)
-//   onAdd        - fn(persona) — para coord/sub; fn({...persona, telefono, tercera_edad}) para votante
+//   onAdd        - fn({...persona, telefono, tercera_edad?})
 //   disponibles  - array de personas del padrón enriquecido
 
 const AddPersonModal = ({
@@ -24,11 +23,12 @@ const AddPersonModal = ({
   padron = [], padronLoading = false, padronError = null, onRetryPadron,
   disponibles = [],
 }) => {
-  // Paso 2 — solo para votantes
+  // Paso 2 — datos obligatorios antes de insertar
   const [personaSeleccionada, setPersonaSeleccionada] = useState(null);
   const [telefono, setTelefono] = useState("+595");
   const [telefonoError, setTelefonoError] = useState(null);
   const [terceraEdad, setTerceraEdad] = useState(null); // null | true | false
+  const [saving, setSaving] = useState(false);
 
   const esVotante = tipo === "votante";
 
@@ -38,6 +38,7 @@ const AddPersonModal = ({
       setTelefono("+595");
       setTelefonoError(null);
       setTerceraEdad(null);
+      setSaving(false);
     }
   }, [show]);
 
@@ -50,28 +51,34 @@ const AddPersonModal = ({
 
   // ---- Selección de persona desde PadronSearch ----
   const handleSelectPersona = (persona) => {
-    if (esVotante) {
-      setPersonaSeleccionada(persona);
-      setTelefono("+595");
-      setTerceraEdad(null);
-    } else {
-      // Inserción directa para subcoord
-      onAdd(persona);
-    }
+    setPersonaSeleccionada(persona);
+    setTelefono("+595");
+    setTelefonoError(null);
+    setTerceraEdad(null);
   };
 
-  // ---- Confirmar votante (paso 2) ----
-  const handleConfirmarVotante = () => {
+  // ---- Confirmar persona (paso 2) ----
+  const handleConfirmarPersona = async () => {
+    if (saving) return;
     const result = validateParaguayPhone(telefono);
     if (!result.valid) {
       setTelefonoError(result.error);
       return;
     }
-    if (terceraEdad === null) {
+    if (esVotante && terceraEdad === null) {
       alert("Debe indicar si la persona es de tercera edad (Si o No).");
       return;
     }
-    onAdd({ ...personaSeleccionada, telefono: result.normalized, tercera_edad: terceraEdad });
+    setSaving(true);
+    try {
+      await onAdd({
+        ...personaSeleccionada,
+        telefono: result.normalized,
+        ...(esVotante ? { tercera_edad: terceraEdad } : {}),
+      });
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleVolver = () => {
@@ -82,9 +89,9 @@ const AddPersonModal = ({
   };
 
   // ============================
-  // PASO 2: formulario de datos (solo votante)
+  // PASO 2: formulario de datos obligatorios
   // ============================
-  if (esVotante && personaSeleccionada) {
+  if (personaSeleccionada) {
     return (
       <div
         className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-3 sm:p-4"
@@ -97,7 +104,9 @@ const AddPersonModal = ({
               <div className="p-1.5 bg-brand-100 rounded-lg">
                 <UserPlus className="w-4 h-4 text-brand-600" />
               </div>
-              <h3 className="text-base font-bold text-slate-800">Datos del Votante</h3>
+              <h3 className="text-base font-bold text-slate-800">
+                {esVotante ? "Datos del Votante" : "Datos del Subcoordinador"}
+              </h3>
             </div>
             <button
               onClick={onClose}
@@ -156,8 +165,8 @@ const AddPersonModal = ({
               )}
             </div>
 
-            {/* Tercera edad */}
-            <div>
+            {/* Tercera edad — solo votante */}
+            {esVotante && <div>
               <label className="block text-sm font-semibold text-slate-700 mb-2">
                 <span className="flex items-center gap-1.5">
                   <AlertCircle className="w-3.5 h-3.5 text-amber-500" />
@@ -192,16 +201,19 @@ const AddPersonModal = ({
               {terceraEdad === null && (
                 <p className="text-xs text-amber-600 mt-1.5">Debe seleccionar una opcion.</p>
               )}
-            </div>
+            </div>}
           </div>
 
           {/* Acciones */}
           <div className="px-5 pb-5 flex flex-col gap-2">
             <button
-              onClick={handleConfirmarVotante}
-              className="w-full h-10 bg-brand-600 hover:bg-brand-700 text-white rounded-xl text-sm font-semibold transition-colors border-0"
+              onClick={handleConfirmarPersona}
+              disabled={saving}
+              className="w-full h-10 bg-brand-600 hover:bg-brand-700 disabled:bg-brand-400 disabled:cursor-wait text-white rounded-xl text-sm font-semibold transition-colors border-0"
             >
-              Confirmar y Agregar Votante
+              {saving
+                ? "Guardando..."
+                : `Confirmar y Agregar ${esVotante ? "Votante" : "Subcoordinador"}`}
             </button>
             <button
               onClick={handleVolver}
