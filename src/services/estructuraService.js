@@ -4,59 +4,174 @@ import { supabase } from "../supabaseClient";
 import { normalizeCI } from "../utils/estructuraHelpers";
 import { savePadron, getAllPadron } from "../utils/padronDB";
 
-// ======================= CARGAR ESTRUCTURA COMPLETA =======================
-export const cargarEstructuraCompleta = async () => {
-// 1) Intentar cargar padrón desde IndexedDB
-let padron = await getAllPadron();
+const PADRON_CACHE_RELEASE = "sl-general-2026-v1";
+const PADRON_FIELDS = "ci,nombre,apellido,seccional,local_votacion,mesa,orden";
+const REQUESTED_PAGE_SIZE = 10000;
+const PARALLEL_REQUESTS = 4;
 
-// 2) Si no existe, descargar desde Supabase y guardar
-if (!padron || padron.length === 0) {
-  const { data, error } = await supabase
-    .from("padron")
-    .select("*")
-    .range(0, 100000);
-
-  if (error) throw error;
-
-  padron = data || [];
-  await savePadron(padron);
-}
-  // 3) Cargar estructura (estas tablas suelen ser mucho más chicas)
-  const { data: coords, error: e1 } = await supabase.from("coordinadores").select("*");
-  if (e1) throw e1;
-
-  const { data: subs, error: e2 } = await supabase.from("subcoordinadores").select("*");
-  if (e2) throw e2;
-
-  const { data: votos, error: e3 } = await supabase.from("votantes").select("*");
-  if (e3) throw e3;
-
-  // 4) Crear mapa para búsquedas O(1) (clave para velocidad)
+const mergeEstructura = ({ coords, subs, votos }, padron) => {
   const padronMap = new Map(
     (padron || []).map((p) => [normalizeCI(p.ci), p])
   );
 
-  const mapPadron = (ci) => padronMap.get(normalizeCI(ci));
+  const mergePadron = (items) =>
+    (items || []).map((item) => ({
+      ...(padronMap.get(normalizeCI(item.ci)) || {}),
+      ...item,
+      ci: normalizeCI(item.ci),
+    }));
 
-  // 5) Retornar estructura enriquecida
- return {
-  padron: padron || [],
+  return {
+    coordinadores: mergePadron(coords),
+    subcoordinadores: mergePadron(subs),
+    votantes: mergePadron(votos),
+  };
+};
 
-  coordinadores: (coords || []).map((c) => ({
-    ...c,
-    ...mapPadron(c.ci),
-  })),
+const cargarFilasDeEstructura = async () => {
+  const [coordsResult, subsResult, votosResult] = await Promise.all([
+    supabase.from("coordinadores").select("*"),
+    supabase.from("subcoordinadores").select("*"),
+    supabase.from("votantes").select("*"),
+  ]);
 
-  subcoordinadores: (subs || []).map((s) => ({
-    ...s,
-    ...mapPadron(s.ci),
-  })),
+  if (coordsResult.error) throw coordsResult.error;
+  if (subsResult.error) throw subsResult.error;
+  if (votosResult.error) throw votosResult.error;
 
-  votantes: (votos || []).map((v) => ({
-    ...v,
-    ...mapPadron(v.ci),
-  })),
- };
+  return {
+    coords: coordsResult.data || [],
+    subs: subsResult.data || [],
+    votos: votosResult.data || [],
+  };
+};
+
+const cargarPersonasAsignadas = async ({ coords, subs, votos }) => {
+  const cis = [...new Set(
+    [...coords, ...subs, ...votos]
+      .map((item) => normalizeCI(item.ci))
+      .filter(Boolean)
+  )];
+
+  if (cis.length === 0) return [];
+
+  const result = [];
+  const chunkSize = 400;
+
+  for (let i = 0; i < cis.length; i += chunkSize) {
+    const { data, error } = await supabase
+      .from("padron")
+      .select(PADRON_FIELDS)
+      .in("ci", cis.slice(i, i + chunkSize));
+
+    if (error) throw error;
+    result.push(...(data || []));
+  }
+
+  return result;
+};
+
+const descargarPadronCompleto = async (total, onProgress) => {
+  if (!total) return [];
+
+  // La primera página detecta el límite real configurado en Supabase.
+  const firstEnd = Math.min(total, REQUESTED_PAGE_SIZE) - 1;
+  const firstResult = await supabase
+    .from("padron")
+    .select(PADRON_FIELDS)
+    .order("ci", { ascending: true })
+    .range(0, firstEnd);
+
+  if (firstResult.error) throw firstResult.error;
+
+  const firstPage = firstResult.data || [];
+  if (firstPage.length === 0) {
+    throw new Error("Supabase no devolvió registros del padrón.");
+  }
+
+  const effectivePageSize = firstPage.length;
+  const pages = [firstPage];
+  let loaded = firstPage.length;
+  onProgress?.({ status: "downloading", loaded, total });
+
+  const ranges = [];
+  for (let start = effectivePageSize; start < total; start += effectivePageSize) {
+    ranges.push({
+      start,
+      end: Math.min(start + effectivePageSize - 1, total - 1),
+    });
+  }
+
+  for (let i = 0; i < ranges.length; i += PARALLEL_REQUESTS) {
+    const group = ranges.slice(i, i + PARALLEL_REQUESTS);
+    const responses = await Promise.all(
+      group.map(async ({ start, end }) => {
+        const { data, error } = await supabase
+          .from("padron")
+          .select(PADRON_FIELDS)
+          .order("ci", { ascending: true })
+          .range(start, end);
+
+        if (error) throw error;
+        loaded += (data || []).length;
+        onProgress?.({
+          status: "downloading",
+          loaded: Math.min(loaded, total),
+          total,
+        });
+        return data || [];
+      })
+    );
+
+    pages.push(...responses);
+  }
+
+  const padron = pages.flat();
+  if (padron.length !== total) {
+    throw new Error(`Descarga incompleta del padrón: ${padron.length} de ${total}.`);
+  }
+
+  return padron;
+};
+
+// ======================= CARGAR ESTRUCTURA COMPLETA =======================
+export const cargarEstructuraCompleta = async ({ onBaseReady, onProgress } = {}) => {
+  onProgress?.({ status: "checking", loaded: 0, total: 0 });
+
+  const [estructuraRaw, countResult] = await Promise.all([
+    cargarFilasDeEstructura(),
+    supabase.from("padron").select("ci", { count: "exact", head: true }),
+  ]);
+
+  if (countResult.error) throw countResult.error;
+  const total = countResult.count || 0;
+  const cacheVersion = `${PADRON_CACHE_RELEASE}:${total}`;
+  const cachedPadron = await getAllPadron(cacheVersion, total);
+
+  if (cachedPadron.length === total && total > 0) {
+    onProgress?.({ status: "ready", loaded: total, total, source: "cache" });
+    return {
+      padron: cachedPadron,
+      ...mergeEstructura(estructuraRaw, cachedPadron),
+    };
+  }
+
+  // La estructura aparece enseguida; la descarga completa sigue detrás.
+  const personasAsignadas = await cargarPersonasAsignadas(estructuraRaw);
+  onBaseReady?.({
+    padron: [],
+    ...mergeEstructura(estructuraRaw, personasAsignadas),
+  });
+
+  const padron = await descargarPadronCompleto(total, onProgress);
+  onProgress?.({ status: "saving", loaded: total, total });
+  await savePadron(padron, cacheVersion);
+  onProgress?.({ status: "ready", loaded: total, total, source: "download" });
+
+  return {
+    padron,
+    ...mergeEstructura(estructuraRaw, padron),
+  };
 };
 // ======================= AGREGAR PERSONA =======================
 export const agregarPersonaService = async ({

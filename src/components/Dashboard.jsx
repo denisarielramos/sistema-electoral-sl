@@ -317,6 +317,12 @@ const Dashboard = ({ currentUser, onLogout }) => {
   const [isConfirmSubLoading, setIsConfirmSubLoading] = useState(false);
 
   const [loadingEstructura, setLoadingEstructura] = useState(true);
+  const [padronSync, setPadronSync] = useState({
+    status: "idle",
+    loaded: 0,
+    total: 0,
+    error: "",
+  });
 
   // Verificar estructura view (superadmin only)
   const [verificarOpen, setVerificarOpen] = useState(false);
@@ -348,100 +354,49 @@ const Dashboard = ({ currentUser, onLogout }) => {
     setExpandedCoords((prev) => ({ ...prev, [key]: !prev[key] }));
   }, []);
 
-  // ======================= CARGAR PADRÓN =======================
-  const cargarPadronCompleto = async () => {
-    try {
-      const { count, error: countError } = await supabase
-        .from("padron")
-        .select("ci", { count: "exact", head: true });
+  useEffect(() => {
+    if (!currentUser) return undefined;
 
-      if (countError) { console.error("Error count padrón:", countError); return []; }
-      if (!count || count <= 0) { setPadron([]); return []; }
+    let active = true;
 
-      const { data, error } = await supabase
-        .from("padron")
-        .select("*")
-        .range(0, count - 1);
+    const init = async () => {
+      try {
+        setLoadingEstructura(true);
+        setPadronSync({ status: "checking", loaded: 0, total: 0, error: "" });
 
-      if (error) { console.error("Error cargando padrón:", error); return []; }
-      const result = data || [];
-      setPadron(result);
-      return result;
-    } catch (e) {
-      console.error("Error cargando padrón:", e);
-      return [];
-    }
-  };
-
-  // ======================= RECARGAR ESTRUCTURA =======================
-  // Accepts an optional padronData arg to avoid stale closure over padron state.
-  const recargarEstructura = useCallback(async (padronDataOverride) => {
-    try {
-      setLoadingEstructura(true);
-
-      let padronData = padronDataOverride || padron;
-      if (!padronData || padronData.length === 0) {
-        const { data: p } = await supabase.from("padron").select("*");
-        padronData = p || [];
-        setPadron(padronData);
-      }
-
-      const padronMap = new Map(
-        (padronData || []).map((p) => [normalizeCI(p.ci), p])
-      );
-
-      const { data: coordsRaw, error: coordsErr } = await supabase
-        .from("coordinadores").select("*");
-      if (coordsErr) console.error("Error coords:", coordsErr);
-
-      const { data: subsRaw, error: subsErr } = await supabase
-        .from("subcoordinadores").select("*");
-      if (subsErr) console.error("Error subs:", subsErr);
-
-      const { data: votosRaw, error: votosErr } = await supabase
-        .from("votantes").select("*");
-      if (votosErr) console.error("Error votos:", votosErr);
-
-      const mergePadron = (arr) =>
-        (arr || []).map((x) => {
-          const ci = normalizeCI(x.ci);
-          const p = padronMap.get(ci);
-          return { ...(p || {}), ...x, ci };
+        const data = await cargarEstructuraCompleta({
+          onBaseReady: (baseData) => {
+            if (!active) return;
+            setEstructura(baseData);
+            setLoadingEstructura(false);
+          },
+          onProgress: (progress) => {
+            if (!active) return;
+            setPadronSync({ ...progress, error: "" });
+          },
         });
 
-      setEstructura({
-        coordinadores: mergePadron(coordsRaw),
-        subcoordinadores: mergePadron(subsRaw),
-        votantes: mergePadron(votosRaw),
-      });
-    } catch (e) {
-      console.error("Error recargando estructura:", e);
-    } finally {
-      setLoadingEstructura(false);
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+        if (!active) return;
+        setEstructura(data);
+        setPadron(data.padron || []);
+      } catch (err) {
+        console.error("Error cargando estructura:", err);
+        if (active) {
+          setPadronSync({
+            status: "error",
+            loaded: 0,
+            total: 0,
+            error: err?.message || "No se pudo preparar el padrón.",
+          });
+        }
+      } finally {
+        if (active) setLoadingEstructura(false);
+      }
+    };
 
-  // Sequential init: load padron first, then pass it to recargarEstructura.
-  useEffect(() => {
-  if (!currentUser) return;
-
-  const init = async () => {
-    try {
-      setLoadingEstructura(true);
-
-     const data = await cargarEstructuraCompleta();
-setEstructura(data);
-setPadron(data.padron || []);
-    } catch (err) {
-      console.error("Error cargando estructura:", err);
-    } finally {
-      setLoadingEstructura(false);
-    }
-  };
-
-  init();
-}, [currentUser]);
+    init();
+    return () => { active = false; };
+  }, [currentUser]);
 
   // ======================= RBAC =======================
   const canEditarTelefono = (tipo, persona) => {
@@ -1001,6 +956,13 @@ setPadron(data.padron || []);
     subcoordinador: "Sub-coordinador",
   }[currentUser.role] ?? currentUser.role;
 
+  const isPadronSyncing = ["checking", "downloading", "saving"].includes(
+    padronSync.status
+  );
+  const padronProgress = padronSync.total > 0
+    ? Math.min(100, Math.round((padronSync.loaded / padronSync.total) * 100))
+    : 0;
+
   // ======================= UI =======================
   return (
     <div className="min-h-screen bg-slate-100">
@@ -1046,6 +1008,49 @@ setPadron(data.padron || []);
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+
+        {isPadronSyncing && (
+          <section
+            className="bg-white border border-brand-200 rounded-xl p-4 shadow-card"
+            aria-live="polite"
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-sm font-semibold text-slate-800">
+                  {padronSync.status === "saving"
+                    ? "Guardando el padrón en este dispositivo..."
+                    : padronSync.status === "checking"
+                    ? "Verificando el padrón guardado..."
+                    : "Descargando el padrón por única vez..."}
+                </p>
+                <p className="text-xs text-slate-500 mt-1">
+                  {padronSync.total > 0
+                    ? `${padronSync.loaded.toLocaleString("es-PY")} de ${padronSync.total.toLocaleString("es-PY")} registros`
+                    : "La estructura ya puede visualizarse mientras se prepara la búsqueda."}
+                </p>
+              </div>
+              {padronSync.total > 0 && (
+                <span className="text-sm font-bold text-brand-700 shrink-0">
+                  {padronProgress}%
+                </span>
+              )}
+            </div>
+            <div className="h-2 bg-brand-100 rounded-full overflow-hidden mt-3">
+              <div
+                className={`h-full bg-brand-600 rounded-full transition-all duration-300 ${
+                  padronSync.total === 0 ? "w-1/4 animate-pulse" : ""
+                }`}
+                style={padronSync.total > 0 ? { width: `${padronProgress}%` } : undefined}
+              />
+            </div>
+          </section>
+        )}
+
+        {padronSync.status === "error" && (
+          <section className="bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-700">
+            No se pudo preparar el padrón: {padronSync.error}
+          </section>
+        )}
 
         {/* =========== STATS CARDS =========== */}
         <section aria-label="Resumen estadístico">
@@ -1113,7 +1118,9 @@ setPadron(data.padron || []);
           {currentUser.role === "superadmin" && (
             <button
               onClick={() => { setModalType("coordinador"); setShowAddModal(true); }}
-              className="inline-flex items-center gap-2 bg-brand-600 hover:bg-brand-700 text-white px-4 h-10 rounded-xl text-sm font-medium transition-colors shadow-sm w-full sm:w-auto border-0"
+              disabled={padron.length === 0}
+              title={padron.length === 0 ? "El padrón se está preparando" : undefined}
+              className="inline-flex items-center gap-2 bg-brand-600 hover:bg-brand-700 text-white px-4 h-10 rounded-xl text-sm font-medium transition-colors shadow-sm w-full sm:w-auto border-0 disabled:opacity-50 disabled:cursor-wait"
             >
               <UserPlus className="w-4 h-4" />
               Agregar Coordinador
@@ -1133,7 +1140,9 @@ setPadron(data.padron || []);
           {currentUser.role === "coordinador" && (
             <button
               onClick={() => { setModalType("subcoordinador"); setShowAddModal(true); }}
-              className="inline-flex items-center gap-2 bg-brand-600 hover:bg-brand-700 text-white px-4 h-10 rounded-xl text-sm font-medium transition-colors shadow-sm w-full sm:w-auto border-0"
+              disabled={padron.length === 0}
+              title={padron.length === 0 ? "El padrón se está preparando" : undefined}
+              className="inline-flex items-center gap-2 bg-brand-600 hover:bg-brand-700 text-white px-4 h-10 rounded-xl text-sm font-medium transition-colors shadow-sm w-full sm:w-auto border-0 disabled:opacity-50 disabled:cursor-wait"
             >
               <UserPlus className="w-4 h-4" />
               Agregar Subcoordinador
@@ -1143,7 +1152,9 @@ setPadron(data.padron || []);
           {(currentUser.role === "coordinador" || currentUser.role === "subcoordinador") && (
             <button
               onClick={() => { setModalType("votante"); setShowAddModal(true); }}
-              className="inline-flex items-center gap-2 border border-brand-300 bg-white hover:bg-brand-50 text-brand-700 px-4 h-10 rounded-xl text-sm font-medium transition-colors w-full sm:w-auto shadow-sm"
+              disabled={padron.length === 0}
+              title={padron.length === 0 ? "El padrón se está preparando" : undefined}
+              className="inline-flex items-center gap-2 border border-brand-300 bg-white hover:bg-brand-50 text-brand-700 px-4 h-10 rounded-xl text-sm font-medium transition-colors w-full sm:w-auto shadow-sm disabled:opacity-50 disabled:cursor-wait"
             >
               <UserPlus className="w-4 h-4" />
               Agregar Votante

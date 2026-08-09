@@ -1,41 +1,57 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { Search, X, UserPlus, ChevronLeft, ChevronRight } from "lucide-react";
+
+const normalize = (text) =>
+  (text || "").toLowerCase()
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 
 const AddPersonModal = ({ show, onClose, tipo, onAdd, disponibles }) => {
   const [searchTerm, setSearchTerm] = useState("");
+  const [debouncedTerm, setDebouncedTerm] = useState("");
   const [page, setPage] = useState(1);
 
   useEffect(() => {
-    if (!show) { setSearchTerm(""); setPage(1); }
+    if (show) return undefined;
+    const timer = window.setTimeout(() => {
+      setSearchTerm("");
+      setDebouncedTerm("");
+      setPage(1);
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [show]);
 
-  useEffect(() => { setPage(1); }, [searchTerm]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedTerm(searchTerm), 180);
+    return () => window.clearTimeout(timer);
+  }, [searchTerm]);
 
-  if (!show) return null;
+  const term = show ? debouncedTerm.trim() : "";
 
-  const term = searchTerm.trim();
+  const filtered = useMemo(() => {
+    if (!term) return [];
 
-  const normalize = (text) =>
-    (text || "").toLowerCase()
-      .normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    const matches = [];
+    const words = normalize(term).split(" ").filter(Boolean);
 
-  const filtered = term
-    ? disponibles
-        .filter((p) => {
-          const fullName = `${p.nombre ?? ""} ${p.apellido ?? ""}`;
-          const fullNameNorm = normalize(fullName);
-          const ciTxt = (p.ci ?? "").toString().toLowerCase();
-          const words = normalize(term).split(" ").filter(Boolean);
-          return words.every((w) => ciTxt.includes(w) || fullNameNorm.includes(w));
-        })
-        .sort((a, b) => {
-          const exactA = a.ci?.toString() === searchTerm;
-          const exactB = b.ci?.toString() === searchTerm;
-          if (exactA && !exactB) return -1;
-          if (!exactA && exactB) return 1;
-          return (a.nombre || "").localeCompare(b.nombre || "");
-        })
-    : [];
+    for (const persona of disponibles) {
+      const searchText = persona._searchText || normalize(
+        `${persona.ci ?? ""} ${persona.nombre ?? ""} ${persona.apellido ?? ""}`
+      );
+
+      if (words.every((word) => searchText.includes(word))) {
+        matches.push(persona);
+        if (matches.length >= 200) break;
+      }
+    }
+
+    return matches.sort((a, b) => {
+      const exactA = a.ci?.toString() === searchTerm;
+      const exactB = b.ci?.toString() === searchTerm;
+      if (exactA && !exactB) return -1;
+      if (!exactA && exactB) return 1;
+      return (a.nombre || "").localeCompare(b.nombre || "");
+    });
+  }, [disponibles, searchTerm, term]);
 
   const pageSize = 20;
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
@@ -47,10 +63,14 @@ const AddPersonModal = ({ show, onClose, tipo, onAdd, disponibles }) => {
     : tipo === "subcoordinador" ? "Agregar Subcoordinador"
     : "Agregar Votante";
 
+  if (!show) return null;
+
   return (
     <div
       className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-3 sm:p-4"
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
     >
       <div className="bg-white rounded-2xl w-full max-w-xl shadow-modal overflow-hidden flex flex-col max-h-[90vh] animate-fade-in">
 
@@ -79,7 +99,10 @@ const AddPersonModal = ({ show, onClose, tipo, onAdd, disponibles }) => {
               type="text"
               value={searchTerm}
               placeholder="Buscar por CI, nombre o apellido..."
-              onChange={(e) => setSearchTerm(e.target.value)}
+              onChange={(e) => {
+                setSearchTerm(e.target.value);
+                setPage(1);
+              }}
               className="w-full pl-9 pr-9 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent bg-slate-50"
               autoFocus
             />

@@ -38,31 +38,44 @@ export const getVotantesDirectosCoord = (estructura, coordCi) => {
 
 // ======================= PERSONAS DISPONIBLES =======================
 export const getPersonasDisponibles = (padron, estructura) => {
+  const asignados = new Map();
+
+  (estructura.coordinadores || []).forEach((persona) => {
+    asignados.set(normalizeCI(persona.ci), {
+      rol: "coordinador",
+      asignadoPorNombre: "Superadmin",
+    });
+  });
+
+  (estructura.subcoordinadores || []).forEach((persona) => {
+    asignados.set(normalizeCI(persona.ci), {
+      rol: "subcoordinador",
+      asignadoPorNombre: persona.asignado_por_nombre || "",
+    });
+  });
+
+  (estructura.votantes || []).forEach((persona) => {
+    asignados.set(normalizeCI(persona.ci), {
+      rol: "votante",
+      asignadoPorNombre: persona.asignado_por_nombre || "",
+    });
+  });
+
   return padron.map((p) => {
     const ci = normalizeCI(p.ci);
-
-    const coord = estructura.coordinadores.find(
-      (c) => normalizeCI(c.ci) === ci
-    );
-    const sub = estructura.subcoordinadores.find(
-      (s) => normalizeCI(s.ci) === ci
-    );
-    const vot = estructura.votantes.find(
-      (v) => normalizeCI(v.ci) === ci
-    );
-
-    let rol = null;
-    if (coord) rol = "coordinador";
-    else if (sub) rol = "subcoordinador";
-    else if (vot) rol = "votante";
+    const asignacion = asignados.get(ci);
+    const searchText = `${ci} ${p.nombre || ""} ${p.apellido || ""}`
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "");
 
     return {
       ...p,
       ci,
-      asignado: rol !== null,
-      asignadoRol: rol,
-      asignadoPorNombre:
-        sub?.asignado_por_nombre || vot?.asignado_por_nombre || "",
+      asignado: Boolean(asignacion),
+      asignadoRol: asignacion?.rol || null,
+      asignadoPorNombre: asignacion?.asignadoPorNombre || "",
+      _searchText: searchText,
     };
   });
 };
