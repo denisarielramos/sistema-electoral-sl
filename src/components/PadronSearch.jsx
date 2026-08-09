@@ -25,14 +25,14 @@ const normalize = (value = "") =>
     .trim();
 
 // Puntaje de relevancia — menor = más relevante
-const relevance = (p, termNorm, isNumeric) => {
+const relevance = (entry, termNorm, isNumeric) => {
   if (isNumeric) {
-    const ci = String(p.ci ?? "");
+    const ci = entry.ci;
     if (ci === termNorm) return 0;              // CI exacta
     if (ci.startsWith(termNorm)) return 1;     // CI empieza con los dígitos
     return 2;                                  // CI contiene los dígitos
   }
-  const full = normalize(`${p.nombre ?? ""} ${p.apellido ?? ""}`);
+  const full = entry.full;
   if (full === termNorm) return 0;             // Nombre completo exacto
   if (full.startsWith(termNorm)) return 1;    // Empieza con la frase
   if (full.includes(termNorm)) return 2;      // Frase completa contenida
@@ -55,11 +55,15 @@ const PadronSearch = ({
   onClose,
 }) => {
   const [searchTerm, setSearchTerm] = useState("");
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("");
   const [page, setPage] = useState(1);
   const inputRef = useRef(null);
 
-  // Reset página al cambiar término
-  useEffect(() => { setPage(1); }, [searchTerm]);
+  // Evita recorrer todo el padrón en cada tecla mientras el usuario todavía escribe.
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearchTerm(searchTerm), 180);
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
 
   // Auto-foco al montar
   useEffect(() => {
@@ -76,26 +80,39 @@ const PadronSearch = ({
     return m;
   }, [disponibles]);
 
-  const term = searchTerm.trim();
+  // Nombre normalizado una sola vez al abrir el buscador, no una vez por tecla.
+  const indexedPadron = useMemo(
+    () => padron.map((persona) => ({
+      persona,
+      ci: String(persona.ci ?? "").replace(/\D/g, ""),
+      full: normalize(`${persona.nombre ?? ""} ${persona.apellido ?? ""}`),
+    })),
+    [padron]
+  );
+
+  const typedTerm = searchTerm.trim();
+  const term = debouncedSearchTerm.trim();
   const termNorm = normalize(term);
   const isNumeric = /^\d+$/.test(term);
-  const words = isNumeric ? [] : termNorm.split(" ").filter(Boolean);
+  const words = useMemo(
+    () => (isNumeric ? [] : termNorm.split(" ").filter(Boolean)),
+    [isNumeric, termNorm]
+  );
 
   const filtered = useMemo(() => {
     if (!term || term.length < 2) return [];
 
     const results = [];
-    for (const p of padron) {
-      const ci = String(p.ci ?? "");
+    for (const entry of indexedPadron) {
+      const { ci, full } = entry;
 
       if (isNumeric) {
         // Búsqueda por CI: el CI debe contener exactamente los dígitos escritos
-        if (ci.includes(term)) results.push(p);
+        if (ci.includes(term)) results.push(entry);
       } else {
         // Búsqueda por nombre/apellido: TODAS las palabras deben estar (AND)
-        const full = normalize(`${p.nombre ?? ""} ${p.apellido ?? ""}`);
         if (words.length > 0 && words.every((w) => full.includes(w))) {
-          results.push(p);
+          results.push(entry);
         }
       }
     }
@@ -104,13 +121,11 @@ const PadronSearch = ({
     results.sort((a, b) => {
       const diff = relevance(a, termNorm, isNumeric) - relevance(b, termNorm, isNumeric);
       if (diff !== 0) return diff;
-      return normalize(`${a.nombre ?? ""} ${a.apellido ?? ""}`).localeCompare(
-        normalize(`${b.nombre ?? ""} ${b.apellido ?? ""}`)
-      );
+      return a.full.localeCompare(b.full);
     });
 
-    return results.slice(0, maxResultados);
-  }, [padron, term, termNorm, isNumeric, words, maxResultados]);
+    return results.slice(0, maxResultados).map((entry) => entry.persona);
+  }, [indexedPadron, term, termNorm, isNumeric, words, maxResultados]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const pageData = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -153,14 +168,20 @@ const PadronSearch = ({
             ref={inputRef}
             type="text"
             value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
+            onChange={(e) => {
+              setSearchTerm(e.target.value);
+              setPage(1);
+            }}
             placeholder={padronLoading ? "Cargando padron..." : placeholder}
             disabled={padronLoading || !!padronError}
             className="w-full pl-9 pr-9 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
           />
           {searchTerm && !padronLoading && (
             <button
-              onClick={() => setSearchTerm("")}
+              onClick={() => {
+                setSearchTerm("");
+                setPage(1);
+              }}
               className="absolute right-3 top-1/2 -translate-y-1/2 p-0 bg-transparent border-0 shadow-none text-slate-400 hover:text-slate-600"
               aria-label="Limpiar"
             >
@@ -169,12 +190,12 @@ const PadronSearch = ({
           )}
         </div>
 
-        {!padronLoading && !padronError && term.length === 1 && (
+        {!padronLoading && !padronError && typedTerm.length === 1 && (
           <p className="text-xs text-amber-500 mt-1.5">
             Escriba al menos 2 caracteres para buscar.
           </p>
         )}
-        {!padronLoading && !padronError && term.length >= 2 && (
+        {!padronLoading && !padronError && typedTerm.length >= 2 && (
           <p className="text-xs text-slate-500 mt-1.5">
             {filtered.length === 0
               ? "Sin resultados"
@@ -209,7 +230,7 @@ const PadronSearch = ({
               </button>
             )}
           </div>
-        ) : !term || term.length < 2 ? (
+        ) : !typedTerm || typedTerm.length < 2 ? (
           /* ESTADO 3: Sin término de búsqueda */
           <div className="text-center py-12">
             <Search className="w-8 h-8 text-slate-200 mx-auto mb-2" />
@@ -232,7 +253,7 @@ const PadronSearch = ({
         ) : (
           /* ESTADO 5: Resultados */
           pageData.map((persona) => {
-            const ciKey = String(persona.ci ?? "");
+            const ciKey = String(persona.ci ?? "").replace(/\D/g, "");
             const asignadoInfo = asignadosMap.get(ciKey);
             const bloqueado = !!asignadoInfo;
             return (

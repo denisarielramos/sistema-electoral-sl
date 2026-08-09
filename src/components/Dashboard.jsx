@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../supabaseClient";
 import { generarAccessCodeUnico } from "../utils/accessCode";
 import {
@@ -73,6 +73,7 @@ import {
 } from "../utils/estructuraHelpers";
 import { personaCoincideConsulta } from "../utils/busquedaHelpers";
 import { getEstadoConfirmacionTarjeta } from "../utils/confirmacionHelpers";
+import { readPadronCache, savePadronCache } from "../utils/padronCache";
 
 // ======================= SMALL REUSABLE COMPONENTS =======================
 
@@ -113,6 +114,60 @@ const ActionBtn = ({ onClick, title, variant = "default", ariaLabel, children })
       {children}
     </button>
   );
+};
+
+// Mantiene los botones principales alineados: dos columnas en pantallas medianas
+// y una fila flexible en escritorio. Todos conservan la misma altura y ancho por fila.
+const ACTION_TOOLBAR_CLASS =
+  "grid grid-cols-1 sm:grid-cols-2 lg:flex lg:flex-wrap gap-2 [&>button]:w-full lg:[&>button]:w-auto [&>button]:justify-center";
+
+const PADRON_CACHE_SCHEMA = "sl-general-2026-v1";
+const PADRON_PAGE_SIZE = 1000;
+const PADRON_CONCURRENCY = 6;
+
+const obtenerTotalPadron = async () => {
+  const { count, error } = await supabase
+    .from("padron")
+    .select("ci", { count: "exact", head: true });
+  if (error) throw error;
+  return count || 0;
+};
+
+// Descarga las páginas en paralelo. El orden por CI mantiene la paginación estable.
+const descargarPadronSupabase = async (total, onProgress) => {
+  if (total === 0) return [];
+
+  const totalPages = Math.ceil(total / PADRON_PAGE_SIZE);
+  const pages = new Array(totalPages);
+  let nextPage = 0;
+  let completedPages = 0;
+
+  const worker = async () => {
+    for (;;) {
+      const pageIndex = nextPage;
+      nextPage += 1;
+      if (pageIndex >= totalPages) return;
+
+      const from = pageIndex * PADRON_PAGE_SIZE;
+      const { data, error } = await supabase
+        .from("padron")
+        .select("ci,nombre,apellido,local_codigo,local_votacion,mesa,orden,direccion,vigente")
+        .order("ci", { ascending: true })
+        .range(from, Math.min(from + PADRON_PAGE_SIZE - 1, total - 1));
+
+      if (error) throw error;
+      pages[pageIndex] = data || [];
+      completedPages += 1;
+      onProgress?.(Math.round((completedPages / totalPages) * 100));
+    }
+  };
+
+  const workers = Array.from(
+    { length: Math.min(PADRON_CONCURRENCY, totalPages) },
+    () => worker()
+  );
+  await Promise.all(workers);
+  return pages.flat();
 };
 
 // ======================= INVITACIÓN POR WHATSAPP =======================
@@ -469,7 +524,10 @@ const PersonCard = ({
         </div>
       </div>
 
-      <div className="flex gap-1.5 shrink-0 flex-wrap items-center" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="flex gap-1.5 shrink-0 flex-wrap items-center justify-start sm:justify-end w-full sm:w-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
         <ActionBtn onClick={() => onTelefono(tipo, persona)} title="Editar teléfono" variant="green">
           <Phone className="w-3.5 h-3.5" />
         </ActionBtn>
@@ -834,9 +892,10 @@ const Dashboard = ({ currentUser, onLogout }) => {
   });
   const [estructuraError, setEstructuraError] = useState(null);
   const [padron, setPadron] = useState([]);
-  const [padronLoaded, setPadronLoaded] = useState(false);
   const [padronLoading, setPadronLoading] = useState(false);
   const [padronError, setPadronError] = useState(null);
+  const [padronProgress, setPadronProgress] = useState(0);
+  const padronRequestRef = useRef(null);
   const [generandoAcceso, setGenerandoAcceso] = useState(null); // ci de quien está generando
   const [loading, setLoading] = useState(true);
 
@@ -936,112 +995,74 @@ const Dashboard = ({ currentUser, onLogout }) => {
     }
   }, [fetchAllActive]);
 
-  // ======================= PADRON: HELPERS INDEXEDDB =======================
-  const openPadronDB = () =>
-    new Promise((resolve, reject) => {
-      const req = indexedDB.open("PadronDB", 1);
-      req.onupgradeneeded = (e) => {
-        const db = e.target.result;
-        if (!db.objectStoreNames.contains("padron")) {
-          db.createObjectStore("padron", { keyPath: "ci" });
-        }
-      };
-      req.onsuccess = (e) => resolve(e.target.result);
-      req.onerror = () => reject(req.error);
-    });
-
-  const readAllFromDB = (db) =>
-    new Promise((resolve, reject) => {
-      if (!db.objectStoreNames.contains("padron")) { resolve([]); return; }
-      const tx = db.transaction("padron", "readonly");
-      const req = tx.objectStore("padron").getAll();
-      req.onsuccess = () => resolve(req.result || []);
-      req.onerror = () => reject(req.error);
-    });
-
-  const saveAllToDB = (db, registros) =>
-    new Promise((resolve, reject) => {
-      if (!db.objectStoreNames.contains("padron")) { resolve(); return; }
-      const tx = db.transaction("padron", "readwrite");
-      const store = tx.objectStore("padron");
-      store.clear();
-      for (const r of registros) store.put(r);
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
-
-  // Descarga el padrón completo desde Supabase usando paginación de 1000 filas
-  const descargarPadronSupabase = async () => {
-    const PAGE = 1000;
-    let desde = 0;
-    const acum = [];
-    for (;;) {
-      const { data, error } = await supabase
-        .from("padron")
-        .select("ci,nombre,apellido,local_codigo,local_votacion,mesa,orden,direccion,vigente")
-        .range(desde, desde + PAGE - 1);
-      if (error) throw error;
-      if (!data || data.length === 0) break;
-      acum.push(...data);
-      if (data.length < PAGE) break;
-      desde += PAGE;
-    }
-    return acum;
-  };
-
-  // ======================= CARGAR PADRÓN (ensurePadronLoaded) =======================
+  // ======================= PADRÓN: DESCARGA ÚNICA + CACHÉ LOCAL =======================
   const cargarPadron = useCallback(async () => {
-    // A: ya hay datos en el estado → no volver a cargar
-    if (padron.length > 0) { setPadronLoaded(true); return; }
+    if (padronRequestRef.current) return padronRequestRef.current;
 
-    setPadronLoading(true);
-    // No limpiamos padronError acá: si esto es un reintento tras un fallo previo, el
-    // aviso de error debe seguir visible (junto con el estado de carga) hasta que esta
-    // ejecución realmente termine — recién se limpia en cada rama de éxito de abajo.
-    try {
-      // B: leer IndexedDB
-      const db = await openPadronDB();
-      const cached = await readAllFromDB(db);
-
-      if (cached.length > 0) {
-        // IndexedDB tiene datos → usarlos inmediatamente
-        setPadron(cached);
-        setPadronLoaded(true);
-        setPadronLoading(false);
-        setPadronError(null);
-
-        // D: actualización en background (sin bloquear el buscador). Siempre se
-        // sincroniza, no solo cuando cambia la cantidad de filas: el padrón cacheado
-        // puede tener la misma cantidad de registros pero campos distintos (p. ej. una
-        // columna agregada al SELECT después de que el usuario ya tenía datos en
-        // IndexedDB), y comparar solo por longitud nunca detectaría ese caso.
-        descargarPadronSupabase()
-          .then(async (fresh) => {
-            if (fresh.length > 0) {
-              await saveAllToDB(db, fresh);
-              setPadron(fresh);
-            }
-          })
-          .catch(() => {/* ignorar errores del refresh en background */});
-        return;
-      }
-
-      // C: IndexedDB vacío → descargar desde Supabase
-      const registros = await descargarPadronSupabase();
-      if (registros.length > 0) {
-        await saveAllToDB(db, registros);
-        setPadron(registros);
-      }
-      setPadronLoaded(true);
+    const request = (async () => {
+      setPadronLoading(true);
+      setPadronProgress(0);
       setPadronError(null);
-    } catch (err) {
-      console.error("[Dashboard] Error cargando padrón:", err);
-      setPadronError("Error al cargar el padrón: " + (err?.message || "error desconocido"));
-      setPadronLoaded(true);
+
+      try {
+        let cached = null;
+        try {
+          cached = await readPadronCache();
+        } catch (cacheReadError) {
+          console.warn("[Dashboard] No se pudo leer el caché local:", cacheReadError);
+        }
+        let total;
+
+        try {
+          total = await obtenerTotalPadron();
+        } catch (countError) {
+          if (Array.isArray(cached?.data) && cached.data.length > 0) {
+            setPadron(cached.data);
+            setPadronProgress(100);
+            return;
+          }
+          throw countError;
+        }
+
+        const version = `${PADRON_CACHE_SCHEMA}:${total}`;
+        if (
+          cached?.version === version &&
+          cached?.total === total &&
+          Array.isArray(cached?.data)
+        ) {
+          setPadron(cached.data);
+          setPadronProgress(100);
+          return;
+        }
+
+        const registros = await descargarPadronSupabase(total, setPadronProgress);
+        if (registros.length !== total) {
+          throw new Error(`Se esperaban ${total} registros y se recibieron ${registros.length}.`);
+        }
+
+        setPadron(registros);
+        try {
+          await savePadronCache({ version, data: registros });
+        } catch (cacheWriteError) {
+          // La sesión sigue funcionando aunque el navegador rechace el almacenamiento.
+          console.warn("[Dashboard] No se pudo guardar el caché local:", cacheWriteError);
+        }
+        setPadronProgress(100);
+      } catch (err) {
+        console.error("[Dashboard] Error cargando padrón:", err);
+        setPadronError("Error al cargar el padrón: " + (err?.message || "error desconocido"));
+      } finally {
+        setPadronLoading(false);
+      }
+    })();
+
+    padronRequestRef.current = request;
+    try {
+      await request;
     } finally {
-      setPadronLoading(false);
+      padronRequestRef.current = null;
     }
-  }, [padron.length]);  // solo re-crea si cambia la longitud (de 0 a >0)
+  }, []);
 
   useEffect(() => {
     cargarEstructura();
@@ -1343,15 +1364,18 @@ const Dashboard = ({ currentUser, onLogout }) => {
   // ======================= AGREGAR COORDINADOR (SUPERADMIN) =======================
   // Recibe { persona, dirigenteCI } desde ModalAgregarCoordinador
   const handleAddCoordinadorSuperadmin = useCallback(async ({ persona, dirigenteCI }) => {
-    if (!dirigenteCI) { alert("Debe seleccionar un dirigente."); return; }
+    if (!dirigenteCI) { alert("Debe seleccionar un dirigente."); return false; }
+    const telResult = validateParaguayPhone(persona.telefono);
+    if (!telResult.valid) { alert(telResult.error); return false; }
     const ciCoord = normalizeCI(persona.ci);
     const chequeo = await verificarCIDisponible(ciCoord);
-    if (!chequeo.disponible) { alert(chequeo.mensaje); return; }
+    if (!chequeo.disponible) { alert(chequeo.mensaje); return false; }
     let loginCode;
     try { loginCode = await generarAccessCodeUnico(supabase); }
-    catch (err) { alert(err.message); return; }
+    catch (err) { alert(err.message); return false; }
     const payload = {
       ci: ciCoord,
+      telefono: telResult.normalized,
       dirigente_ci: normalizeCI(dirigenteCI),
       asignado_por_ci: null,
       asignado_por_rol: "superadmin",
@@ -1360,23 +1384,26 @@ const Dashboard = ({ currentUser, onLogout }) => {
       activo: true,
     };
     const { data, error } = await supabase.from("coordinadores").insert(payload).select().single();
-    if (error) { alert("Error al agregar coordinador: " + error.message); return; }
+    if (error) { alert("Error al agregar coordinador: " + error.message); return false; }
     const savedCode = data?.login_code || loginCode;
     alert(`Coordinador agregado. Código de acceso: ${savedCode}`);
-    setShowAgregarCoord(false);
     await cargarEstructura();
+    return true;
   }, [currentUser, cargarEstructura, verificarCIDisponible]);
 
   // ======================= AGREGAR COORDINADOR (DIRIGENTE vía ModalAgregarCoordinador) =======================
   const handleAddCoordinadorDesdeModal = useCallback(async ({ persona, dirigenteCI }) => {
+    const telResult = validateParaguayPhone(persona.telefono);
+    if (!telResult.valid) { alert(telResult.error); return false; }
     const ciCoord = normalizeCI(persona.ci);
     const chequeo = await verificarCIDisponible(ciCoord);
-    if (!chequeo.disponible) { alert(chequeo.mensaje); return; }
+    if (!chequeo.disponible) { alert(chequeo.mensaje); return false; }
     let loginCode;
     try { loginCode = await generarAccessCodeUnico(supabase); }
-    catch (err) { alert(err.message); return; }
+    catch (err) { alert(err.message); return false; }
     const payload = {
       ci: ciCoord,
+      telefono: telResult.normalized,
       dirigente_ci: normalizeCI(dirigenteCI || currentUser.ci),
       asignado_por_ci: normalizeCI(currentUser.ci),
       asignado_por_rol: "dirigente",
@@ -1385,23 +1412,26 @@ const Dashboard = ({ currentUser, onLogout }) => {
       activo: true,
     };
     const { data, error } = await supabase.from("coordinadores").insert(payload).select().single();
-    if (error) { alert("Error al agregar coordinador: " + error.message); return; }
+    if (error) { alert("Error al agregar coordinador: " + error.message); return false; }
     const savedCode = data?.login_code || loginCode;
     alert(`Coordinador agregado. Código de acceso: ${savedCode}`);
-    setShowAgregarCoord(false);
     await cargarEstructura();
+    return true;
   }, [currentUser, cargarEstructura, verificarCIDisponible]);
 
   // ======================= AGREGAR SUBCOORDINADOR (SUPERADMIN/COORDINADOR) =======================
   const handleAddSubcoordinador = useCallback(async (persona) => {
+    const telResult = validateParaguayPhone(persona.telefono);
+    if (!telResult.valid) { alert(telResult.error); return false; }
     const ciSub = normalizeCI(persona.ci);
     const chequeo = await verificarCIDisponible(ciSub);
-    if (!chequeo.disponible) { alert(chequeo.mensaje); return; }
+    if (!chequeo.disponible) { alert(chequeo.mensaje); return false; }
     let loginCode;
     try { loginCode = await generarAccessCodeUnico(supabase); }
-    catch (err) { alert(err.message); return; }
+    catch (err) { alert(err.message); return false; }
     const payload = {
       ci: ciSub,
+      telefono: telResult.normalized,
       coordinador_ci: normalizeCI(currentUser.ci),
       asignado_por_ci: normalizeCI(currentUser.ci),
       asignado_por_rol: "coordinador",
@@ -1410,11 +1440,12 @@ const Dashboard = ({ currentUser, onLogout }) => {
       activo: true,
     };
     const { data, error } = await supabase.from("subcoordinadores").insert(payload).select().single();
-    if (error) { alert("Error al agregar subcoordinador: " + error.message); return; }
+    if (error) { alert("Error al agregar subcoordinador: " + error.message); return false; }
     const savedCode = data?.login_code || loginCode;
     alert(`Subcoordinador agregado. Código de acceso: ${savedCode}`);
     setShowAddModal(false);
     await cargarEstructura();
+    return true;
   }, [currentUser, cargarEstructura, verificarCIDisponible]);
 
   // ======================= AGREGAR DIRIGENTE (SUPERADMIN) =======================
@@ -1766,7 +1797,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
         </div>
 
         {/* Botones de accion */}
-        <div className="flex flex-wrap gap-2">
+        <div className={ACTION_TOOLBAR_CLASS}>
           <button
             onClick={() => setShowAgregarDirigente(true)}
             className="inline-flex items-center gap-2 px-4 h-9 bg-brand-600 hover:bg-brand-700 text-white rounded-lg text-sm font-medium border-0 transition-colors"
@@ -2206,7 +2237,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
         </div>
 
         {/* Botones */}
-        <div className="flex flex-wrap gap-2">
+        <div className={ACTION_TOOLBAR_CLASS}>
           <button
             onClick={() => setShowAgregarCoord(true)}
             className="inline-flex items-center gap-2 px-4 h-9 bg-brand-600 hover:bg-brand-700 text-white rounded-lg text-sm font-medium border-0 transition-colors"
@@ -2428,7 +2459,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
         </div>
 
         {/* Botones */}
-        <div className="flex flex-wrap gap-2">
+        <div className={ACTION_TOOLBAR_CLASS}>
           <button
             onClick={() => { setAddModalTipo("subcoordinador"); setShowAddModal(true); }}
             className="inline-flex items-center gap-2 px-4 h-9 bg-brand-600 hover:bg-brand-700 text-white rounded-lg text-sm font-medium border-0 transition-colors"
@@ -2608,7 +2639,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
         </div>
 
         {/* Botones */}
-        <div className="flex flex-wrap gap-2">
+        <div className={ACTION_TOOLBAR_CLASS}>
           <button
             onClick={() => { setAddModalTipo("votante"); setShowAddModal(true); }}
             className="inline-flex items-center gap-2 px-4 h-9 bg-brand-600 hover:bg-brand-700 text-white rounded-lg text-sm font-medium border-0 transition-colors"
@@ -2725,6 +2756,41 @@ const Dashboard = ({ currentUser, onLogout }) => {
 
       {/* CONTENT */}
       <main className="max-w-5xl mx-auto px-4 py-5">
+        {padronLoading && (
+          <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 shadow-sm">
+            <div className="flex items-center justify-between gap-3 text-sm">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="w-4 h-4 border-2 border-blue-200 border-t-blue-600 rounded-full animate-spin shrink-0" />
+                <span className="font-medium text-blue-800 truncate">
+                  Preparando el padrón en este dispositivo
+                </span>
+              </div>
+              <span className="font-semibold text-blue-700 shrink-0">{padronProgress}%</span>
+            </div>
+            <div className="h-1.5 bg-blue-100 rounded-full overflow-hidden mt-2">
+              <div
+                className="h-full bg-blue-600 rounded-full transition-[width] duration-300"
+                style={{ width: `${padronProgress}%` }}
+              />
+            </div>
+            <p className="text-xs text-blue-600 mt-1.5">
+              Esta descarga se realiza una sola vez; luego queda guardada en el celular o navegador.
+            </p>
+          </div>
+        )}
+
+        {padronError && !padronLoading && (
+          <div className="mb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3">
+            <p className="text-sm text-red-700">{padronError}</p>
+            <button
+              onClick={cargarPadron}
+              className="h-9 px-4 rounded-lg bg-red-600 hover:bg-red-700 text-white text-sm font-medium border-0 shrink-0"
+            >
+              Reintentar descarga
+            </button>
+          </div>
+        )}
+
         {loading ? (
           <div className="text-center py-20">
             <div className="w-8 h-8 border-2 border-brand-200 border-t-brand-600 rounded-full animate-spin mx-auto mb-3" />

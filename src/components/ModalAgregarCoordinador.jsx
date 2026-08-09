@@ -1,15 +1,21 @@
 import React, { useState, useEffect } from "react";
-import { X, UserPlus, ChevronLeft, Check, Shield } from "lucide-react";
+import { X, UserPlus, ChevronLeft, Check, Shield, Phone } from "lucide-react";
 import PadronSearch from "./PadronSearch";
+import {
+  sanitizeParaguayPhoneInput,
+  validateParaguayPhone,
+} from "../utils/phoneValidation";
 
 // ======================= MODAL AGREGAR COORDINADOR =======================
 // Flujo superadmin (2 pasos):
 //   Paso 1: Seleccionar dirigente al que pertenecerá el coordinador.
 //   Paso 2: PadronSearch para seleccionar la persona coordinadora.
+//   Paso 3: ingresar y validar el celular obligatorio.
 //
 // Flujo dirigente (1 paso):
 //   Paso 1 omitido — el dirigente ya está determinado (currentUser).
-//   Paso 2: PadronSearch directamente.
+//   Paso 1: PadronSearch directamente.
+//   Paso 2: ingresar y validar el celular obligatorio.
 //
 // Props:
 //   show          - boolean
@@ -42,6 +48,9 @@ const ModalAgregarCoordinador = ({
   );
   const [saving, setSaving] = useState(false);
   const [confirmada, setConfirmada] = useState(null); // persona confirmada al final
+  const [personaSeleccionada, setPersonaSeleccionada] = useState(null);
+  const [telefono, setTelefono] = useState("+595");
+  const [telefonoError, setTelefonoError] = useState(null);
 
   useEffect(() => {
     if (!show) {
@@ -54,6 +63,9 @@ const ModalAgregarCoordinador = ({
       );
       setSaving(false);
       setConfirmada(null);
+      setPersonaSeleccionada(null);
+      setTelefono("+595");
+      setTelefonoError(null);
     }
   }, [show, rolActual, dirigenteCI]);
 
@@ -68,12 +80,35 @@ const ModalAgregarCoordinador = ({
     setPaso("buscar-persona");
   };
 
-  const handleSelectPersona = async (persona) => {
+  const handleSelectPersona = (persona) => {
+    setPersonaSeleccionada(persona);
+    setTelefono("+595");
+    setTelefonoError(null);
+  };
+
+  const handleConfirmarPersona = async () => {
     if (saving) return;
+    const result = validateParaguayPhone(telefono);
+    if (!result.valid) {
+      setTelefonoError(result.error);
+      return;
+    }
     setSaving(true);
-    await onAdd({ persona, dirigenteCI: dirigenteSeleccionado });
-    setSaving(false);
-    setConfirmada(persona);
+    try {
+      const agregado = await onAdd({
+        persona: { ...personaSeleccionada, telefono: result.normalized },
+        dirigenteCI: dirigenteSeleccionado,
+      });
+      if (agregado !== false) setConfirmada(personaSeleccionada);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleVolverABusqueda = () => {
+    setPersonaSeleccionada(null);
+    setTelefono("+595");
+    setTelefonoError(null);
   };
 
   // --- Vista: éxito ---
@@ -123,7 +158,7 @@ const ModalAgregarCoordinador = ({
               </div>
               <div>
                 <h3 className="text-base font-bold text-slate-800">Agregar Coordinador</h3>
-                <p className="text-xs text-slate-500">Paso 1 de 2 — Seleccionar dirigente</p>
+                <p className="text-xs text-slate-500">Paso 1 de 3 — Seleccionar dirigente</p>
               </div>
             </div>
             <button
@@ -206,10 +241,87 @@ const ModalAgregarCoordinador = ({
             <p className="text-xs text-brand-700 font-medium truncate">
               Dirigente: {dirigenteObj.nombre} {dirigenteObj.apellido || ""}
             </p>
-            <span className="text-xs text-brand-400 ml-auto shrink-0">Paso 2 de 2</span>
+            <span className="text-xs text-brand-400 ml-auto shrink-0">
+              Paso {personaSeleccionada ? 3 : 2} de 3
+            </span>
           </div>
         )}
 
+        {personaSeleccionada ? (
+          <div className="flex-1 overflow-y-auto">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 bg-slate-50">
+              <div className="flex items-center gap-2.5">
+                <div className="p-1.5 bg-brand-100 rounded-lg">
+                  <Phone className="w-4 h-4 text-brand-600" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-800">Celular del Coordinador</h3>
+                  <p className="text-xs text-slate-500">Último paso · dato obligatorio</p>
+                </div>
+              </div>
+              <button
+                onClick={onClose}
+                className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg border-0 bg-transparent shadow-none"
+                aria-label="Cerrar"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="px-5 py-3 border-b border-slate-100 bg-brand-50">
+              <p className="text-xs text-slate-500 mb-0.5">Persona seleccionada</p>
+              <p className="font-semibold text-sm text-slate-800">
+                {(personaSeleccionada.nombre || "").toUpperCase()} {" "}
+                {(personaSeleccionada.apellido || "").toUpperCase()}
+              </p>
+              <p className="text-xs text-slate-500">CI: {personaSeleccionada.ci}</p>
+            </div>
+
+            <div className="px-5 py-5">
+              <label className="flex items-center gap-1.5 text-sm font-semibold text-slate-700 mb-1.5">
+                <Phone className="w-3.5 h-3.5" />
+                Teléfono <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="tel"
+                inputMode="numeric"
+                autoComplete="tel"
+                maxLength={16}
+                value={telefono}
+                onChange={(e) => {
+                  setTelefono(sanitizeParaguayPhoneInput(e.target.value));
+                  setTelefonoError(null);
+                }}
+                placeholder="+595 9XX XXX XXX"
+                className={`w-full px-4 py-2.5 text-sm border rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent bg-slate-50 ${
+                  telefonoError ? "border-red-400" : "border-slate-200"
+                }`}
+              />
+              {telefonoError ? (
+                <p className="text-xs text-red-500 mt-1">{telefonoError}</p>
+              ) : (
+                <p className="text-xs text-slate-400 mt-1">Ej: 0981 123 456 o +595 981 123 456</p>
+              )}
+            </div>
+
+            <div className="px-5 pb-5 grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <button
+                onClick={handleVolverABusqueda}
+                disabled={saving}
+                className="w-full h-10 bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-700 rounded-xl text-sm font-medium border-0 transition-colors"
+              >
+                Volver a la búsqueda
+              </button>
+              <button
+                onClick={handleConfirmarPersona}
+                disabled={saving}
+                className="w-full h-10 bg-brand-600 hover:bg-brand-700 disabled:bg-brand-400 disabled:cursor-wait text-white rounded-xl text-sm font-semibold border-0 transition-colors"
+              >
+                {saving ? "Guardando..." : "Confirmar Coordinador"}
+              </button>
+            </div>
+          </div>
+        ) : (
         <PadronSearch
           padron={padron}
           padronLoading={padronLoading}
@@ -222,16 +334,17 @@ const ModalAgregarCoordinador = ({
           onBack={rolActual === "superadmin" ? () => setPaso("seleccionar-dirigente") : undefined}
           onClose={onClose}
         />
+        )}
 
         {/* Footer */}
-        <div className="px-5 py-4 border-t border-slate-100 shrink-0">
+        {!personaSeleccionada && <div className="px-5 py-4 border-t border-slate-100 shrink-0">
           <button
             onClick={onClose}
             className="w-full h-10 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-sm font-medium border-0 transition-colors"
           >
             Cerrar
           </button>
-        </div>
+        </div>}
       </div>
     </div>
   );
