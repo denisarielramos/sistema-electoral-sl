@@ -18,21 +18,35 @@ const HEADER_FILL = "FFB91C1C"; // brand-700 (#b91c1c), mismo tono que los encab
 const HEADER_FONT = "FFFFFFFF";
 const TEXT_FORMAT = "@"; // fuerza formato de texto (sin notación científica, sin perder '+' ni ceros iniciales)
 
-const COLUMNS = [
+const BASE_COLUMNS = [
   { header: "Nivel o rol", key: "nivel", width: 16 },
   { header: "Nombre", key: "nombre", width: 18 },
   { header: "Apellido", key: "apellido", width: 18 },
   { header: "CI", key: "ci", width: 12, style: { numFmt: TEXT_FORMAT } },
   { header: "Teléfono", key: "telefono", width: 16, style: { numFmt: TEXT_FORMAT } },
-  { header: "Seccional", key: "seccional", width: 12 },
-  { header: "Local de votación", key: "local", width: 28 },
+  { header: "Código local", key: "localCodigo", width: 13 },
+  { header: "Local de votación", key: "local", width: 32 },
+];
+
+const OPTIONAL_ELECTORAL_COLUMNS = [
   { header: "Mesa", key: "mesa", width: 10 },
   { header: "Orden", key: "orden", width: 10 },
+];
+
+const TRAILING_COLUMNS = [
   { header: "Tercera edad", key: "terceraEdad", width: 13 },
   { header: "Voto confirmado", key: "votoConfirmado", width: 15 },
   { header: "Asignado por", key: "asignadoPor", width: 22 },
   { header: "Rol de quien lo asignó", key: "asignadoPorRol", width: 20 },
   { header: "Dirección o ubicación", key: "direccion", width: 32 },
+];
+
+const buildColumns = (rows) => [
+  ...BASE_COLUMNS,
+  ...OPTIONAL_ELECTORAL_COLUMNS.filter(({ key }) =>
+    rows.some((row) => row[key] !== "")
+  ),
+  ...TRAILING_COLUMNS,
 ];
 
 // ======================= HELPERS =======================
@@ -97,7 +111,7 @@ const dedupeByCI = (list = []) => {
 // Único lugar donde se combinan los datos de la tabla de rol con los del padrón.
 // - nombre/apellido: prevalece el propio de la tabla de rol si existe (p. ej. dirigente
 //   externo, que no está en el padrón); si no existe, se completa con el padrón.
-// - seccional/local_votacion/mesa/orden: siempre provienen del padrón (ninguna tabla de
+// - local_codigo/local_votacion/mesa/orden: provienen del padrón (ninguna tabla de
 //   rol los almacena); si la persona no está en el padrón, quedan vacíos.
 // - teléfono/dirección/tercera_edad/voto_confirmado/confirmado/asignado_por*: siempre
 //   provienen de la tabla de rol (el padrón no tiene estas columnas).
@@ -110,7 +124,7 @@ const enrichPersona = (persona, padronMap) => {
     ci,
     nombre: persona?.nombre ?? padronPersona?.nombre ?? "",
     apellido: persona?.apellido ?? padronPersona?.apellido ?? "",
-    seccional: persona?.seccional ?? padronPersona?.seccional ?? "",
+    local_codigo: persona?.local_codigo ?? padronPersona?.local_codigo ?? "",
     local_votacion: persona?.local_votacion ?? padronPersona?.local_votacion ?? "",
     mesa: persona?.mesa ?? padronPersona?.mesa ?? "",
     orden: persona?.orden ?? padronPersona?.orden ?? "",
@@ -143,7 +157,7 @@ const buildRows = ({ dirigentes = [], coordinadores = [], subcoordinadores = [],
       apellido: str(persona.apellido),
       ci: str(persona.ci),
       telefono: str(persona.telefono),
-      seccional: str(persona.seccional),
+      localCodigo: str(persona.local_codigo),
       local: str(persona.local_votacion),
       mesa: str(persona.mesa),
       orden: str(persona.orden),
@@ -224,6 +238,7 @@ export const generarExcelEstructura = async ({
   };
 
   const rows = buildRows(scoped, padronMap);
+  const columns = buildColumns(rows);
   const totales = buildTotales(scoped);
 
   const workbook = new ExcelJS.Workbook();
@@ -251,12 +266,12 @@ export const generarExcelEstructura = async ({
 
   // ---- Hoja Estructura ----
   const estructuraSheet = workbook.addWorksheet("Estructura");
-  estructuraSheet.columns = COLUMNS;
+  estructuraSheet.columns = columns;
   rows.forEach((row) => estructuraSheet.addRow(row));
 
   styleHeaderRow(estructuraSheet.getRow(1));
   estructuraSheet.views = [{ state: "frozen", ySplit: 1 }];
-  estructuraSheet.autoFilter = { from: "A1", to: `${columnLetter(COLUMNS.length)}1` };
+  estructuraSheet.autoFilter = { from: "A1", to: `${columnLetter(columns.length)}1` };
 
   const buffer = await workbook.xlsx.writeBuffer();
   const blob = new Blob([buffer], {

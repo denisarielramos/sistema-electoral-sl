@@ -1,7 +1,7 @@
 // ======================= BÚSQUEDA: NORMALIZACIÓN Y MATCHING COMPARTIDO =======================
 // Usado tanto por la búsqueda interna del árbol (Dashboard.jsx) como por la tabla de
-// Vista por seccional (VistaSeccional.jsx), para no duplicar la lógica de comparación
-// de nombre/apellido/CI/teléfono en dos lugares.
+// Vista por local de votación (VistaSeccional.jsx), para no duplicar la lógica de
+// comparación de nombre/apellido/CI/teléfono/local en dos lugares.
 
 // Minúsculas, sin diacríticos, espacios colapsados — para nombre/apellido.
 // Deliberadamente NO toca dígitos ni separadores: la copia normalizada para CI se
@@ -51,7 +51,7 @@ const esConsultaSoloTelefono = (query) => {
   return sinDigitosNiSeparadoresDeTelefono.length === 0;
 };
 
-// persona: objeto con (al menos) nombre, apellido, ci, telefono.
+// persona: objeto con (al menos) nombre, apellido, ci, telefono y local_votacion.
 // rawQuery: la consulta TAL COMO la escribió el usuario (sin normalizar) — se usa una
 // copia normalizada solo para comparar CI; nombre/apellido/teléfono siguen su propia
 // normalización ya existente.
@@ -93,6 +93,7 @@ export const personaCoincideConsulta = (persona, rawQuery) => {
   const apellido = normalizeTexto(persona?.apellido);
   const nombreCompleto = normalizeTexto(`${persona?.nombre || ""} ${persona?.apellido || ""}`);
   const apellidoNombre = normalizeTexto(`${persona?.apellido || ""} ${persona?.nombre || ""}`);
+  const localVotacion = normalizeTexto(persona?.local_votacion);
 
   return tokens.every((t) => {
     const tDigitsTel = soloDigitosTelefono(t);
@@ -102,6 +103,7 @@ export const personaCoincideConsulta = (persona, rawQuery) => {
       apellido.includes(t) ||
       nombreCompleto.includes(t) ||
       apellidoNombre.includes(t) ||
+      localVotacion.includes(t) ||
       (tDigitsTel.length > 0 && telDigits.includes(tDigitsTel)) ||
       // Fragmento de teléfono "en crudo" (ej. el "+595" de una consulta mixta como
       // "Denis +595 981 123 456"), que solo, sin sacarle el código de país, sí es un
