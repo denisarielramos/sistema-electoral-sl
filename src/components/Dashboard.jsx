@@ -1409,6 +1409,27 @@ const Dashboard = ({ currentUser, onLogout }) => {
   // ======================= AGREGAR SUBCOORDINADOR (SUPERADMIN/COORDINADOR) =======================
   const handleAddSubcoordinador = useCallback(async (persona) => {
     const ciSub = normalizeCI(persona.ci);
+    const coordinadorCI = normalizeCI(currentUser.ci);
+
+    // Una sesión antigua puede permanecer en el navegador aunque el coordinador
+    // haya sido eliminado o desactivado. La validamos antes del INSERT para no
+    // mostrar al usuario un error técnico de clave foránea.
+    const { data: coordinadorActual, error: coordinadorError } = await supabase
+      .from("coordinadores")
+      .select("ci")
+      .eq("ci", coordinadorCI)
+      .eq("activo", true)
+      .maybeSingle();
+    if (coordinadorError) {
+      alert("No se pudo verificar tu acceso. Intentá nuevamente.");
+      return;
+    }
+    if (!coordinadorActual) {
+      alert("Tu acceso ya no está vigente. Ingresá nuevamente con tu código actual.");
+      onLogout();
+      return;
+    }
+
     const chequeo = await verificarCIDisponible(ciSub);
     if (!chequeo.disponible) { alert(chequeo.mensaje); return; }
     let loginCode;
@@ -1416,22 +1437,30 @@ const Dashboard = ({ currentUser, onLogout }) => {
     catch (err) { alert(err.message); return; }
     const payload = {
       ci: ciSub,
-      coordinador_ci: normalizeCI(currentUser.ci),
-      asignado_por_ci: normalizeCI(currentUser.ci),
+      coordinador_ci: coordinadorCI,
+      asignado_por_ci: coordinadorCI,
       asignado_por_rol: "coordinador",
       asignado_por_nombre: `${currentUser.nombre} ${currentUser.apellido || ""}`.trim(),
       login_code: loginCode,
       activo: true,
     };
     const { data, error } = await supabase.from("subcoordinadores").insert(payload).select().single();
-    if (error) { alert("Error al agregar subcoordinador: " + error.message); return; }
+    if (error) {
+      if (error.code === "23503") {
+        alert("Tu acceso ya no está vigente. Ingresá nuevamente con tu código actual.");
+        onLogout();
+        return;
+      }
+      alert("No se pudo agregar el subcoordinador. Intentá nuevamente.");
+      return;
+    }
     const savedCode = data?.login_code || loginCode;
     alert(`Subcoordinador agregado. Código de acceso: ${savedCode}`);
     setShowAddModal(false);
     await cargarEstructura();
-  }, [currentUser, cargarEstructura, verificarCIDisponible]);
+  }, [currentUser, cargarEstructura, verificarCIDisponible, onLogout]);
 
-  // ======================= AGREGAR DIRIGENTE (SUPERADMIN) =======================
+    // ======================= AGREGAR DIRIGENTE (SUPERADMIN) =======================
   const handleAgregarDirigenteDesdePadron = useCallback(async (persona) => {
     const ciDir = normalizeCI(persona.ci);
     const chequeo = await verificarCIDisponible(ciDir);
