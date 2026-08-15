@@ -930,21 +930,15 @@ const Dashboard = ({ currentUser, onLogout }) => {
   // ======================= PADRON: HELPERS INDEXEDDB =======================
   const openPadronDB = () =>
     new Promise((resolve, reject) => {
-      // La versión optimizada del padrón ya utilizó la versión 2 en algunos
-      // dispositivos. Abrirla nuevamente como versión 1 provoca VersionError.
-      // La versión 3 migra ambos formatos a la estructura que usa esta rama.
-      const req = indexedDB.open("PadronDB", 3);
+      // La versión 4 guarda el padrón completo en un único registro. Esto evita
+      // 170 mil escrituras individuales, especialmente lentas en Safari/iPhone.
+      const req = indexedDB.open("PadronDB", 4);
       req.onupgradeneeded = (e) => {
         const db = e.target.result;
         if (db.objectStoreNames.contains("padron")) {
-          const store = e.target.transaction.objectStore("padron");
-          if (store.keyPath !== "ci") {
-            db.deleteObjectStore("padron");
-            db.createObjectStore("padron", { keyPath: "ci" });
-          }
-        } else {
-          db.createObjectStore("padron", { keyPath: "ci" });
+          db.deleteObjectStore("padron");
         }
+        db.createObjectStore("padron");
       };
       req.onsuccess = (e) => resolve(e.target.result);
       req.onerror = () => reject(req.error);
@@ -954,39 +948,67 @@ const Dashboard = ({ currentUser, onLogout }) => {
     new Promise((resolve, reject) => {
       if (!db.objectStoreNames.contains("padron")) { resolve([]); return; }
       const tx = db.transaction("padron", "readonly");
-      const req = tx.objectStore("padron").getAll();
-      req.onsuccess = () => resolve(req.result || []);
+      const req = tx.objectStore("padron").get("full");
+      req.onsuccess = () => resolve(req.result || null);
       req.onerror = () => reject(req.error);
     });
 
-  const saveAllToDB = (db, registros) =>
-    new Promise((resolve, reject) => {
+  const saveAllToDB = async (db, registros) => {
+    try {
+      await navigator.storage?.persist?.();
+    } catch {
+      // El caché funciona igualmente si el navegador no concede persistencia.
+    }
+
+    return new Promise((resolve, reject) => {
       if (!db.objectStoreNames.contains("padron")) { resolve(); return; }
       const tx = db.transaction("padron", "readwrite");
-      const store = tx.objectStore("padron");
-      store.clear();
-      for (const r of registros) store.put(r);
+      tx.objectStore("padron").put({
+        data: registros,
+        total: registros.length,
+        savedAt: Date.now(),
+      }, "full");
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });
+  };
 
-  // Descarga el padrón completo desde Supabase usando paginación de 1000 filas
-  const descargarPadronSupabase = async () => {
+  const obtenerTotalPadron = async () => {
+    const { count, error } = await supabase
+      .from("padron")
+      .select("ci", { count: "exact", head: true });
+    if (error) throw error;
+    return count || 0;
+  };
+
+  // Descarga el padrón en paralelo para reducir la espera inicial en celulares.
+  const descargarPadronSupabase = async (totalConocido = null) => {
     const PAGE = 1000;
-    let desde = 0;
-    const acum = [];
-    for (;;) {
-      const { data, error } = await supabase
-        .from("padron")
-        .select("ci,nombre,apellido,seccional,local_votacion,mesa,orden,direccion")
-        .range(desde, desde + PAGE - 1);
-      if (error) throw error;
-      if (!data || data.length === 0) break;
-      acum.push(...data);
-      if (data.length < PAGE) break;
-      desde += PAGE;
-    }
-    return acum;
+    const total = totalConocido ?? await obtenerTotalPadron();
+    if (total === 0) return [];
+
+    const paginas = Math.ceil(total / PAGE);
+    const resultados = new Array(paginas);
+    let siguientePagina = 0;
+
+    const worker = async () => {
+      while (siguientePagina < paginas) {
+        const pagina = siguientePagina++;
+        const desde = pagina * PAGE;
+        const { data, error } = await supabase
+          .from("padron")
+          .select("ci,nombre,apellido,seccional,local_votacion,mesa,orden,direccion")
+          .order("ci", { ascending: true })
+          .range(desde, Math.min(desde + PAGE - 1, total - 1));
+        if (error) throw error;
+        resultados[pagina] = data || [];
+      }
+    };
+
+    await Promise.all(
+      Array.from({ length: Math.min(6, paginas) }, () => worker())
+    );
+    return resultados.flat();
   };
 
   // ======================= CARGAR PADRÓN (ensurePadronLoaded) =======================
@@ -1003,23 +1025,22 @@ const Dashboard = ({ currentUser, onLogout }) => {
       const db = await openPadronDB();
       const cached = await readAllFromDB(db);
 
-      if (cached.length > 0) {
+      if (cached?.data?.length > 0) {
         // IndexedDB tiene datos → usarlos inmediatamente
-        setPadron(cached);
+        setPadron(cached.data);
         setPadronLoaded(true);
         setPadronLoading(false);
         setPadronError(null);
 
-        // D: actualización en background (sin bloquear el buscador). Siempre se
-        // sincroniza, no solo cuando cambia la cantidad de filas: el padrón cacheado
-        // puede tener la misma cantidad de registros pero campos distintos (p. ej. una
-        // columna agregada al SELECT después de que el usuario ya tenía datos en
-        // IndexedDB), y comparar solo por longitud nunca detectaría ese caso.
-        descargarPadronSupabase()
-          .then(async (fresh) => {
-            if (fresh.length > 0) {
-              await saveAllToDB(db, fresh);
-              setPadron(fresh);
+        // Una consulta liviana de conteo invalida el caché solo si cambió el padrón.
+        obtenerTotalPadron()
+          .then(async (total) => {
+            if (total !== cached.total) {
+              const fresh = await descargarPadronSupabase(total);
+              if (fresh.length > 0) {
+                await saveAllToDB(db, fresh);
+                setPadron(fresh);
+              }
             }
           })
           .catch(() => {/* ignorar errores del refresh en background */});
@@ -1048,7 +1069,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
     cargarPadron();
   }, [cargarEstructura, cargarPadron]);
 
-  // ======================= COPY =======================
+    // ======================= COPY =======================
   const handleCopy = useCallback(async (code) => {
     if (!code) {
       alert("Este registro no tiene código de acceso.");
