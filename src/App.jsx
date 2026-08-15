@@ -37,14 +37,67 @@ const App = () => {
 
   // ======================= SESIÓN PERSISTENTE =======================
   useEffect(() => {
+    let cancelled = false;
     const saved = localStorage.getItem("currentUser");
     if (!saved) return;
-    try {
-      const u = JSON.parse(saved);
-      if (u && u.ci && u.role) setCurrentUser(u);
-    } catch (e) {
-      console.error("Error leyendo sesión local:", e);
-    }
+
+    const restaurarSesion = async () => {
+      try {
+        const u = JSON.parse(saved);
+        if (!u?.ci || !u?.role) {
+          localStorage.removeItem("currentUser");
+          return;
+        }
+
+        if (u.role === "superadmin") {
+          const sigueAutorizado = SUPERADMINS.some(
+            (admin) => normalizeCI(admin.ci) === normalizeCI(u.ci)
+          );
+          if (sigueAutorizado && !cancelled) setCurrentUser(u);
+          else localStorage.removeItem("currentUser");
+          return;
+        }
+
+        const tablaPorRol = {
+          dirigente: "dirigentes",
+          coordinador: "coordinadores",
+          subcoordinador: "subcoordinadores",
+        };
+        const tabla = tablaPorRol[u.role];
+        if (!tabla) {
+          localStorage.removeItem("currentUser");
+          return;
+        }
+
+        const { data, error } = await supabase
+          .from(tabla)
+          .select("ci")
+          .eq("ci", normalizeCI(u.ci))
+          .eq("activo", true)
+          .maybeSingle();
+
+        if (cancelled) return;
+        if (error) {
+          // Ante un fallo temporal de red conservamos la sesión existente.
+          console.warn("No se pudo validar la sesión guardada:", error);
+          setCurrentUser(u);
+          return;
+        }
+        if (data) {
+          setCurrentUser(u);
+          return;
+        }
+
+        localStorage.removeItem("currentUser");
+        alert("Tu acceso ya no está vigente. Ingresá nuevamente con tu código actual.");
+      } catch (e) {
+        console.error("Error leyendo sesión local:", e);
+        localStorage.removeItem("currentUser");
+      }
+    };
+
+    restaurarSesion();
+    return () => { cancelled = true; };
   }, []);
 
   const saveUser = (u) => {
