@@ -15,8 +15,7 @@ import { normalizeCI } from "./utils/estructuraHelpers";
 // ======================= SUPERADMINS LOCALES =======================
 const SUPERADMINS = [
   { ci: "4630621", pass: "16052018", nombre: "Denis", apellido: "Ramos" },
-  { ci: "4291234", pass: "112233", nombre: "Victor", apellido: "Urunaga" },
-  { ci: "2505303", pass: "arzamendia2026", nombre: "Carlos", apellido: "Arzamendia" },
+  { ci: "3641845", pass: "j.gomez", nombre: "José", apellido: "Gomez" },
 ];
 
 const App = () => {
