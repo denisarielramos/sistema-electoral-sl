@@ -930,10 +930,19 @@ const Dashboard = ({ currentUser, onLogout }) => {
   // ======================= PADRON: HELPERS INDEXEDDB =======================
   const openPadronDB = () =>
     new Promise((resolve, reject) => {
-      const req = indexedDB.open("PadronDB", 1);
+      // La versión optimizada del padrón ya utilizó la versión 2 en algunos
+      // dispositivos. Abrirla nuevamente como versión 1 provoca VersionError.
+      // La versión 3 migra ambos formatos a la estructura que usa esta rama.
+      const req = indexedDB.open("PadronDB", 3);
       req.onupgradeneeded = (e) => {
         const db = e.target.result;
-        if (!db.objectStoreNames.contains("padron")) {
+        if (db.objectStoreNames.contains("padron")) {
+          const store = e.target.transaction.objectStore("padron");
+          if (store.keyPath !== "ci") {
+            db.deleteObjectStore("padron");
+            db.createObjectStore("padron", { keyPath: "ci" });
+          }
+        } else {
           db.createObjectStore("padron", { keyPath: "ci" });
         }
       };
