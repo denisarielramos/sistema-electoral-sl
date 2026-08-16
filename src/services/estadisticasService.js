@@ -8,7 +8,7 @@ import {
   getSubsDeDigente,
   getTodosVotantesDirigente,
   getVotantesDirectosDirigente,
-} from "../utils/estructuraHelpers";
+} from "../utils/estructuraHelpers.js";
 
 export const getEstadisticas = (estructura, currentUser) => {
   if (!currentUser) return {};
@@ -30,6 +30,16 @@ export const getEstadisticas = (estructura, currentUser) => {
       (v) => v.voto_confirmado === true
     ).length;
 
+    // Tercera edad (solo superadmin ve este dato, ver Dashboard.jsx/PersonCard).
+    // Deduplicado por CI: si el mismo votante llegara a aparecer más de una vez en
+    // datos derivados, no debe contarse dos veces. null/undefined/false no cuentan.
+    const ciTerceraEdad = new Set(
+      estructura.votantes
+        .filter((v) => v.tercera_edad === true)
+        .map((v) => normalizeCI(v.ci))
+    );
+    const terceraEdad = ciTerceraEdad.size;
+
     // Coordinadores are always counted as 1 confirmed vote each (automatic).
     // Total confirmable = dirigentes + coordinadores + subs + voters
     // Total confirmed  = dirigentes (auto) + coordinadores (auto) + confirmedSubs + confirmedVoters
@@ -44,6 +54,7 @@ export const getEstadisticas = (estructura, currentUser) => {
       subcoordinadores,
       subsConfirmados,
       votantes,
+      terceraEdad,
       totalRed: dirigentes + coordinadores + subcoordinadores + votantes,
       totalVotantes: votantes,
       totalConfirmable,
