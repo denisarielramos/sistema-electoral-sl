@@ -263,6 +263,7 @@ const PadronSearch = ({
                 {bloqueado && (
                   <p className="text-xs text-brand-600 mt-1 font-medium truncate">
                     Ya asignado ({asignadoInfo.asignadoRol})
+                    {asignadoInfo.asignadoPorNombre && ` — agregado por ${asignadoInfo.asignadoPorNombre}`}
                   </p>
                 )}
               </div>
