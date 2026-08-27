@@ -252,7 +252,6 @@ const PadronSearch = ({
                 <div className="text-xs text-slate-500 mt-0.5 space-y-0.5">
                   <p>CI: {persona.ci}</p>
                   <div className="flex flex-wrap gap-x-3">
-                    {persona.seccional && <span>Seccional: {persona.seccional}</span>}
                     {persona.local_votacion && (
                       <span className="truncate">Local: {persona.local_votacion}</span>
                     )}
