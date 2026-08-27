@@ -402,6 +402,7 @@ const PersonCard = ({
   onAnular,
   onAsignarUbicacion,
   onEliminar,
+  esCoincidencia = false, // true si esta tarjeta es la que matcheó la búsqueda interna (no un ancestro mostrado por contexto)
   expandible = false,
   isExpanded = false,
   wrapped = false,
@@ -529,7 +530,11 @@ const PersonCard = ({
   if (!wrapped) return row;
 
   return (
-    <div className="bg-white border border-slate-200 rounded-xl p-3 shadow-card hover:border-slate-300 transition-colors">
+    <div
+      className={`bg-white border rounded-xl p-3 shadow-card hover:border-slate-300 transition-colors ${
+        esCoincidencia ? "border-brand-500 ring-2 ring-brand-200" : "border-slate-200"
+      }`}
+    >
       {row}
     </div>
   );
@@ -1369,6 +1374,9 @@ const Dashboard = ({ currentUser, onLogout }) => {
   // Recibe { persona, dirigenteCI } desde ModalAgregarCoordinador
   const handleAddCoordinadorSuperadmin = useCallback(async ({ persona, dirigenteCI }) => {
     if (!dirigenteCI) { alert("Debe seleccionar un dirigente."); return; }
+    const telResult = validateParaguayPhone(persona.telefono);
+    if (!telResult.valid) { alert(telResult.error); return; }
+    const tel = telResult.normalized;
     const ciCoord = normalizeCI(persona.ci);
     const chequeo = await verificarCIDisponible(ciCoord);
     if (!chequeo.disponible) { alert(chequeo.mensaje); return; }
@@ -1377,6 +1385,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
     catch (err) { alert(err.message); return; }
     const payload = {
       ci: ciCoord,
+      telefono: tel,
       dirigente_ci: normalizeCI(dirigenteCI),
       asignado_por_ci: null,
       asignado_por_rol: "superadmin",
@@ -1394,6 +1403,9 @@ const Dashboard = ({ currentUser, onLogout }) => {
 
   // ======================= AGREGAR COORDINADOR (DIRIGENTE vía ModalAgregarCoordinador) =======================
   const handleAddCoordinadorDesdeModal = useCallback(async ({ persona, dirigenteCI }) => {
+    const telResult = validateParaguayPhone(persona.telefono);
+    if (!telResult.valid) { alert(telResult.error); return; }
+    const tel = telResult.normalized;
     const ciCoord = normalizeCI(persona.ci);
     const chequeo = await verificarCIDisponible(ciCoord);
     if (!chequeo.disponible) { alert(chequeo.mensaje); return; }
@@ -1402,6 +1414,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
     catch (err) { alert(err.message); return; }
     const payload = {
       ci: ciCoord,
+      telefono: tel,
       dirigente_ci: normalizeCI(dirigenteCI || currentUser.ci),
       asignado_por_ci: normalizeCI(currentUser.ci),
       asignado_por_rol: "dirigente",
@@ -1419,6 +1432,9 @@ const Dashboard = ({ currentUser, onLogout }) => {
 
   // ======================= AGREGAR SUBCOORDINADOR (SUPERADMIN/COORDINADOR) =======================
   const handleAddSubcoordinador = useCallback(async (persona) => {
+    const telResult = validateParaguayPhone(persona.telefono);
+    if (!telResult.valid) { alert(telResult.error); return; }
+    const tel = telResult.normalized;
     const ciSub = normalizeCI(persona.ci);
     const coordinadorCI = normalizeCI(currentUser.ci);
 
@@ -1448,6 +1464,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
     catch (err) { alert(err.message); return; }
     const payload = {
       ci: ciSub,
+      telefono: tel,
       coordinador_ci: coordinadorCI,
       asignado_por_ci: coordinadorCI,
       asignado_por_rol: "coordinador",
@@ -1909,7 +1926,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
             const isExpandedDir = expandedDirs[dirCI] || dirDescendantMatch;
 
             return (
-              <div key={dirCI} className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-card">
+              <div key={dirCI} className={`bg-white border rounded-xl overflow-hidden shadow-card ${matchCI && matchCI.has(dirCI) ? "border-brand-500 ring-2 ring-brand-200" : "border-slate-200"}`}>
                 {/* Cabecera dirigente */}
                 <div
                   className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-slate-50 transition-colors"
@@ -1957,7 +1974,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                           const isExpandedCoord = expandedCoords[coordCI] || coordDescendantMatch;
 
                           return (
-                            <div key={coordCI} className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+                            <div key={coordCI} className={`bg-white border rounded-xl overflow-hidden ${matchCI && matchCI.has(coordCI) ? "border-brand-500 ring-2 ring-brand-200" : "border-slate-200"}`}>
                               <div
                                 className="flex items-center justify-between px-3 py-2.5 cursor-pointer hover:bg-slate-50"
                                 onClick={() => toggleCoord(coordCI)}
@@ -1995,7 +2012,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                                     if (!subVisible) return null;
                                     const isExpandedSub = expandedSubs[subCI] || subDescendantMatch;
                                     return (
-                                      <div key={subCI} className="bg-white border border-slate-200 rounded-lg overflow-hidden">
+                                      <div key={subCI} className={`bg-white border rounded-lg overflow-hidden ${matchCI && matchCI.has(subCI) ? "border-brand-500 ring-2 ring-brand-200" : "border-slate-200"}`}>
                                         <div
                                           className="flex items-center justify-between px-3 py-2 cursor-pointer hover:bg-slate-50"
                                           onClick={() => toggleSub(subCI)}
@@ -2032,7 +2049,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                                                 onEliminar={handleEliminarPersona}
                                                 onTelefono={handleOpenTelefono}
                                                 onDireccion={handleOpenDireccion}
-                                                onConfirmar={handleConfirmar}
+                                                onConfirmar={handleConfirmar} esCoincidencia={!!matchCI}
                                                 onAnular={handleAnular}
                                                 canConfirmar={canConfirmar}
                                                 canAnular={canAnular}
@@ -2054,7 +2071,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                                       onEliminar={handleEliminarPersona}
                                       onTelefono={handleOpenTelefono}
                                       onDireccion={handleOpenDireccion}
-                                      onConfirmar={handleConfirmar}
+                                      onConfirmar={handleConfirmar} esCoincidencia={!!matchCI}
                                       onAnular={handleAnular}
                                       canConfirmar={canConfirmar}
                                       canAnular={canAnular}
@@ -2085,7 +2102,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                             onEliminar={handleEliminarPersona}
                             onTelefono={handleOpenTelefono}
                             onDireccion={handleOpenDireccion}
-                            onConfirmar={handleConfirmar}
+                            onConfirmar={handleConfirmar} esCoincidencia={!!matchCI}
                             onAnular={handleAnular}
                             canConfirmar={canConfirmar}
                             canAnular={canAnular}
@@ -2122,7 +2139,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                   const isExpandedCoord = expandedCoords[coordCI] || coordDescendantMatch;
 
                   return (
-                    <div key={coordCI} className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-card">
+                    <div key={coordCI} className={`bg-white border rounded-xl overflow-hidden shadow-card ${matchCI && matchCI.has(coordCI) ? "border-brand-500 ring-2 ring-brand-200" : "border-slate-200"}`}>
                       <div
                         className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-slate-50"
                         onClick={() => toggleCoord(coordCI)}
@@ -2159,7 +2176,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                             if (!subVisible) return null;
                             const isExpandedSub = expandedSubs[subCI] || subDescendantMatch;
                             return (
-                              <div key={subCI} className="bg-white border border-slate-200 rounded-lg overflow-hidden">
+                              <div key={subCI} className={`bg-white border rounded-lg overflow-hidden ${matchCI && matchCI.has(subCI) ? "border-brand-500 ring-2 ring-brand-200" : "border-slate-200"}`}>
                                 <div
                                   className="flex items-center justify-between px-3 py-2 cursor-pointer hover:bg-slate-50"
                                   onClick={() => toggleSub(subCI)}
@@ -2196,7 +2213,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                                         onEliminar={handleEliminarPersona}
                                         onTelefono={handleOpenTelefono}
                                         onDireccion={handleOpenDireccion}
-                                        onConfirmar={handleConfirmar}
+                                        onConfirmar={handleConfirmar} esCoincidencia={!!matchCI}
                                         onAnular={handleAnular}
                                         canConfirmar={canConfirmar}
                                         canAnular={canAnular}
@@ -2217,7 +2234,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                               onEliminar={handleEliminarPersona}
                               onTelefono={handleOpenTelefono}
                               onDireccion={handleOpenDireccion}
-                              onConfirmar={handleConfirmar}
+                              onConfirmar={handleConfirmar} esCoincidencia={!!matchCI}
                               onAnular={handleAnular}
                               canConfirmar={canConfirmar}
                               canAnular={canAnular}
@@ -2325,7 +2342,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
             const isExpandedCoord = expandedCoords[coordCI] || coordDescendantMatch;
 
             return (
-              <div key={coordCI} className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-card">
+              <div key={coordCI} className={`bg-white border rounded-xl overflow-hidden shadow-card ${matchCI && matchCI.has(coordCI) ? "border-brand-500 ring-2 ring-brand-200" : "border-slate-200"}`}>
                 <div
                   className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-slate-50"
                   onClick={() => toggleCoord(coordCI)}
@@ -2359,7 +2376,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                       if (!subVisible) return null;
                       const isExpandedSub = expandedSubs[subCI] || subDescendantMatch;
                       return (
-                        <div key={subCI} className="bg-white border border-slate-200 rounded-lg overflow-hidden">
+                        <div key={subCI} className={`bg-white border rounded-lg overflow-hidden ${matchCI && matchCI.has(subCI) ? "border-brand-500 ring-2 ring-brand-200" : "border-slate-200"}`}>
                           <div
                             className="flex items-center justify-between px-3 py-2 cursor-pointer hover:bg-slate-50"
                             onClick={() => toggleSub(subCI)}
@@ -2393,7 +2410,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                                   onEliminar={handleEliminarPersona}
                                   onTelefono={handleOpenTelefono}
                                   onDireccion={handleOpenDireccion}
-                                  onConfirmar={handleConfirmar}
+                                  onConfirmar={handleConfirmar} esCoincidencia={!!matchCI}
                                   onAnular={handleAnular}
                                   canConfirmar={canConfirmar}
                                   canAnular={canAnular}
@@ -2414,7 +2431,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                         onEliminar={handleEliminarPersona}
                         onTelefono={handleOpenTelefono}
                         onDireccion={handleOpenDireccion}
-                        onConfirmar={handleConfirmar}
+                        onConfirmar={handleConfirmar} esCoincidencia={!!matchCI}
                         onAnular={handleAnular}
                         canConfirmar={canConfirmar}
                         canAnular={canAnular}
@@ -2444,7 +2461,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                 onEliminar={handleEliminarPersona}
                 onTelefono={handleOpenTelefono}
                 onDireccion={handleOpenDireccion}
-                onConfirmar={handleConfirmar}
+                onConfirmar={handleConfirmar} esCoincidencia={!!matchCI}
                 onAnular={handleAnular}
                 canConfirmar={canConfirmar}
                 canAnular={canAnular}
@@ -2551,7 +2568,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
             const isExpandedSub = expandedSubs[subCI] || subDescendantMatch;
 
             return (
-              <div key={subCI} className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-card">
+              <div key={subCI} className={`bg-white border rounded-xl overflow-hidden shadow-card ${matchCI && matchCI.has(subCI) ? "border-brand-500 ring-2 ring-brand-200" : "border-slate-200"}`}>
                 <div
                   className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-slate-50"
                   onClick={() => toggleSub(subCI)}
@@ -2592,7 +2609,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                             onEliminar={handleEliminarPersona}
                             onTelefono={handleOpenTelefono}
                             onDireccion={handleOpenDireccion}
-                            onConfirmar={handleConfirmar}
+                            onConfirmar={handleConfirmar} esCoincidencia={!!matchCI}
                             onAnular={handleAnular}
                             canConfirmar={canConfirmar}
                             canAnular={canAnular}
@@ -2627,7 +2644,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                 onEliminar={handleEliminarPersona}
                 onTelefono={handleOpenTelefono}
                 onDireccion={handleOpenDireccion}
-                onConfirmar={handleConfirmar}
+                onConfirmar={handleConfirmar} esCoincidencia={!!matchCI}
                 onAnular={handleAnular}
                 canConfirmar={canConfirmar}
                 canAnular={canAnular}
@@ -2711,7 +2728,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                 onEliminar={handleEliminarPersona}
                 onTelefono={handleOpenTelefono}
                 onDireccion={handleOpenDireccion}
-                onConfirmar={handleConfirmar}
+                onConfirmar={handleConfirmar} esCoincidencia={!!matchCI}
                 onAnular={handleAnular}
                 canConfirmar={canConfirmar}
                 canAnular={canAnular}

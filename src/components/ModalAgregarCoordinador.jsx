@@ -1,20 +1,23 @@
 import React, { useState, useEffect } from "react";
-import { X, UserPlus, ChevronLeft, Check, Shield } from "lucide-react";
+import { X, UserPlus, ChevronLeft, Check, Shield, Phone } from "lucide-react";
 import PadronSearch from "./PadronSearch";
+import { sanitizeParaguayPhoneInput, validateParaguayPhone } from "../utils/phoneValidation";
 
 // ======================= MODAL AGREGAR COORDINADOR =======================
-// Flujo superadmin (2 pasos):
+// Flujo superadmin (3 pasos):
 //   Paso 1: Seleccionar dirigente al que pertenecerá el coordinador.
 //   Paso 2: PadronSearch para seleccionar la persona coordinadora.
+//   Paso 3: Teléfono celular (obligatorio, mismo criterio que votantes/subcoordinadores).
 //
-// Flujo dirigente (1 paso):
-//   Paso 1 omitido — el dirigente ya está determinado (currentUser).
-//   Paso 2: PadronSearch directamente.
+// Flujo dirigente (2 pasos):
+//   Paso 1 (selección de dirigente) omitido — el dirigente ya está determinado (currentUser).
+//   Paso 1: PadronSearch directamente.
+//   Paso 2: Teléfono celular (obligatorio).
 //
 // Props:
 //   show          - boolean
 //   onClose       - fn
-//   onAdd         - fn({ persona, dirigenteCI }) — llamado al confirmar
+//   onAdd         - fn({ persona, dirigenteCI }) — llamado al confirmar (persona ya incluye telefono)
 //   disponibles   - array personas padrón enriquecido
 //   dirigentes    - array de dirigentes (solo para superadmin)
 //   rolActual     - "superadmin" | "dirigente"
@@ -33,13 +36,16 @@ const ModalAgregarCoordinador = ({
   rolActual,
   dirigenteCI,
 }) => {
-  // Paso actual: "seleccionar-dirigente" | "buscar-persona"
+  // Paso actual: "seleccionar-dirigente" | "buscar-persona" | "datos-contacto"
   const [paso, setPaso] = useState(
     rolActual === "dirigente" ? "buscar-persona" : "seleccionar-dirigente"
   );
   const [dirigenteSeleccionado, setDirigenteSeleccionado] = useState(
     rolActual === "dirigente" ? dirigenteCI : null
   );
+  const [personaSeleccionada, setPersonaSeleccionada] = useState(null);
+  const [telefono, setTelefono] = useState("+595");
+  const [telefonoError, setTelefonoError] = useState(null);
   const [saving, setSaving] = useState(false);
   const [confirmada, setConfirmada] = useState(null); // persona confirmada al final
 
@@ -52,6 +58,9 @@ const ModalAgregarCoordinador = ({
       setDirigenteSeleccionado(
         rolActual === "dirigente" ? dirigenteCI : null
       );
+      setPersonaSeleccionada(null);
+      setTelefono("+595");
+      setTelefonoError(null);
       setSaving(false);
       setConfirmada(null);
     }
@@ -68,12 +77,36 @@ const ModalAgregarCoordinador = ({
     setPaso("buscar-persona");
   };
 
-  const handleSelectPersona = async (persona) => {
+  // Ya no se agrega directamente al seleccionar: se pasa al paso de teléfono
+  // (obligatorio), igual que votantes y subcoordinadores.
+  const handleSelectPersona = (persona) => {
+    setPersonaSeleccionada(persona);
+    setTelefono("+595");
+    setTelefonoError(null);
+    setPaso("datos-contacto");
+  };
+
+  const handleVolverABuscar = () => {
+    setPersonaSeleccionada(null);
+    setTelefono("+595");
+    setTelefonoError(null);
+    setPaso("buscar-persona");
+  };
+
+  const handleConfirmarTelefono = async () => {
+    const result = validateParaguayPhone(telefono);
+    if (!result.valid) {
+      setTelefonoError(result.error);
+      return;
+    }
     if (saving) return;
     setSaving(true);
-    await onAdd({ persona, dirigenteCI: dirigenteSeleccionado });
+    await onAdd({
+      persona: { ...personaSeleccionada, telefono: result.normalized },
+      dirigenteCI: dirigenteSeleccionado,
+    });
     setSaving(false);
-    setConfirmada(persona);
+    setConfirmada(personaSeleccionada);
   };
 
   // --- Vista: éxito ---
@@ -123,7 +156,7 @@ const ModalAgregarCoordinador = ({
               </div>
               <div>
                 <h3 className="text-base font-bold text-slate-800">Agregar Coordinador</h3>
-                <p className="text-xs text-slate-500">Paso 1 de 2 — Seleccionar dirigente</p>
+                <p className="text-xs text-slate-500">Paso 1 de 3 — Seleccionar dirigente</p>
               </div>
             </div>
             <button
@@ -184,7 +217,105 @@ const ModalAgregarCoordinador = ({
     );
   }
 
-  // --- Paso 2: Buscar persona (PadronSearch) ---
+  // --- Paso: Teléfono (obligatorio, mismo criterio que votantes/subcoordinadores) ---
+  if (paso === "datos-contacto" && personaSeleccionada) {
+    return (
+      <div
+        className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-3 sm:p-4"
+        onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      >
+        <div className="bg-white rounded-2xl w-full max-w-md shadow-modal overflow-hidden flex flex-col animate-fade-in">
+          {/* Header */}
+          <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 bg-slate-50 shrink-0">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleVolverABuscar}
+                className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg border-0 bg-transparent shadow-none"
+                aria-label="Volver a la búsqueda"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <div className="p-1.5 bg-brand-100 rounded-lg">
+                <UserPlus className="w-4 h-4 text-brand-600" />
+              </div>
+              <h3 className="text-base font-bold text-slate-800">Datos del Coordinador</h3>
+            </div>
+            <button
+              onClick={onClose}
+              className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg border-0 bg-transparent shadow-none"
+              aria-label="Cerrar"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          {/* Persona seleccionada */}
+          <div className="px-5 py-3 border-b border-slate-100 bg-brand-50">
+            <p className="text-xs text-slate-500 mb-0.5">Persona seleccionada</p>
+            <p className="font-semibold text-sm text-slate-800">
+              {(personaSeleccionada.nombre || "").toUpperCase()}{" "}
+              {(personaSeleccionada.apellido || "").toUpperCase()}
+            </p>
+            <p className="text-xs text-slate-500">CI: {personaSeleccionada.ci}</p>
+          </div>
+
+          {/* Formulario */}
+          <div className="px-5 py-5 space-y-5">
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-1.5">
+                <span className="flex items-center gap-1.5">
+                  <Phone className="w-3.5 h-3.5" />
+                  Telefono
+                  <span className="text-red-500">*</span>
+                </span>
+              </label>
+              <input
+                type="tel"
+                inputMode="numeric"
+                autoComplete="tel"
+                maxLength={16}
+                value={telefono}
+                onChange={(e) => {
+                  setTelefono(sanitizeParaguayPhoneInput(e.target.value));
+                  setTelefonoError(null);
+                }}
+                placeholder="+595 9XX XXX XXX"
+                className={`w-full px-4 py-2.5 text-sm border rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent bg-slate-50 ${
+                  telefonoError ? "border-red-400" : "border-slate-200"
+                }`}
+                autoFocus
+              />
+              {telefonoError ? (
+                <p className="text-xs text-red-500 mt-1">{telefonoError}</p>
+              ) : (
+                <p className="text-xs text-slate-400 mt-1">Ej: 0981 123 456 o +595 981 123 456</p>
+              )}
+            </div>
+          </div>
+
+          {/* Acciones */}
+          <div className="px-5 pb-5 flex flex-col gap-2">
+            <button
+              onClick={handleConfirmarTelefono}
+              disabled={saving}
+              className="w-full h-10 bg-brand-600 hover:bg-brand-700 text-white rounded-xl text-sm font-semibold transition-colors border-0 disabled:opacity-60"
+            >
+              {saving ? "Guardando..." : "Confirmar y Agregar Coordinador"}
+            </button>
+            <button
+              onClick={handleVolverABuscar}
+              disabled={saving}
+              className="w-full h-10 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-sm font-medium transition-colors border-0 disabled:opacity-60"
+            >
+              Volver a la busqueda
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // --- Paso: Buscar persona (PadronSearch) ---
   return (
     <div
       className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-3 sm:p-4"
@@ -206,7 +337,7 @@ const ModalAgregarCoordinador = ({
             <p className="text-xs text-brand-700 font-medium truncate">
               Dirigente: {dirigenteObj.nombre} {dirigenteObj.apellido || ""}
             </p>
-            <span className="text-xs text-brand-400 ml-auto shrink-0">Paso 2 de 2</span>
+            <span className="text-xs text-brand-400 ml-auto shrink-0">Paso 2 de 3</span>
           </div>
         )}
 
