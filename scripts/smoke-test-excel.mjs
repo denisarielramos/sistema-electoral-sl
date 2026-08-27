@@ -118,6 +118,7 @@ await generarExcelEstructura({
   subcoordinadores,
   votantes,
   padronMap,
+  incluirTerceraEdad: true, // este export simula la descarga de superadmin (ver TEST 11 para el caso contrario)
 });
 
 assert.ok(capturedBuffer, "generarExcelEstructura debe producir un buffer descargable");
@@ -266,6 +267,54 @@ const col = { nivel: 1, nombre: 2, apellido: 3, ci: 4, telefono: 5, seccional: 6
     "estructura-dirigente-carla-nunez-292951.xlsx"
   );
   console.log("OK 10: nombres de archivo seguros y consistentes con el alcance exportado");
+}
+
+// ======================= TEST 11: columna "Tercera edad" exclusiva de superadmin =======================
+// incluirTerceraEdad=false (dirigente/coordinador/subcoordinador descargando su
+// propio Excel) no debe incluir la columna en absoluto, ni siquiera vacía.
+{
+  await generarExcelEstructura({
+    prefix: "estructura-dirigente",
+    persona: { ci: "292951", nombre: "Carla", apellido: "Nunez" },
+    roles: ["votante"],
+    dirigentes: [{ ci: "292951", nombre: "Carla", apellido: "Nunez" }],
+    votantes,
+    padronMap,
+    incluirTerceraEdad: false,
+  });
+  const filePathSinTercera = join(tmpDir, "smoke-sin-tercera-edad.xlsx");
+  writeFileSync(filePathSinTercera, capturedBuffer);
+
+  const wbSinTercera = new ExcelJS.Workbook();
+  await wbSinTercera.xlsx.readFile(filePathSinTercera);
+  const estructuraSinTercera = wbSinTercera.getWorksheet("Estructura");
+  const encabezados = estructuraSinTercera.getRow(1).values.filter(Boolean);
+  assert.ok(
+    !encabezados.includes("Tercera edad"),
+    `la columna "Tercera edad" no debe existir cuando incluirTerceraEdad=false (encabezados: ${JSON.stringify(encabezados)})`
+  );
+  console.log('OK 11a: incluirTerceraEdad=false omite la columna "Tercera edad" por completo');
+
+  // La misma llamada omitiendo el parámetro (default false) debe comportarse igual,
+  // por si algún llamador futuro olvida pasarlo explícitamente.
+  await generarExcelEstructura({
+    prefix: "estructura-coordinador",
+    persona: { ci: "1544603", nombre: "Ruben", apellido: "Ayala" },
+    roles: ["votante"],
+    coordinadores: [{ ci: "1544603", nombre: "Ruben", apellido: "Ayala" }],
+    votantes,
+    padronMap,
+  });
+  const filePathDefault = join(tmpDir, "smoke-default-sin-tercera-edad.xlsx");
+  writeFileSync(filePathDefault, capturedBuffer);
+  const wbDefault = new ExcelJS.Workbook();
+  await wbDefault.xlsx.readFile(filePathDefault);
+  const encabezadosDefault = wbDefault.getWorksheet("Estructura").getRow(1).values.filter(Boolean);
+  assert.ok(
+    !encabezadosDefault.includes("Tercera edad"),
+    "sin pasar incluirTerceraEdad, el valor por defecto (false) debe omitir la columna"
+  );
+  console.log('OK 11b: el valor por defecto de incluirTerceraEdad (false) también omite la columna');
 }
 
 console.log("\nTodas las pruebas de humo de excelService.js pasaron correctamente.");

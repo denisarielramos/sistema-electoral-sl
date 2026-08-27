@@ -40,6 +40,7 @@ import ModalAgregarCoordinador from "./ModalAgregarCoordinador";
 import PadronSearch from "./PadronSearch";
 import ModalTelefono from "./ModalTelefono";
 import ModalDireccion from "./ModalDireccion";
+import ModalTerceraEdad from "./ModalTerceraEdad";
 import ConfirmVotoModal from "./ConfirmVotoModal";
 import VistaSeccional from "./VistaSeccional";
 import MapeoTerritorial from "./mapeo/MapeoTerritorial";
@@ -98,6 +99,7 @@ const ActionBtn = ({ onClick, title, variant = "default", ariaLabel, children })
     default: "border border-slate-200 text-slate-600 hover:bg-slate-50",
     green: "border border-emerald-200 text-emerald-700 hover:bg-emerald-50",
     blue: "border border-blue-200 text-blue-700 hover:bg-blue-50",
+    amber: "border border-amber-200 text-amber-700 hover:bg-amber-50",
     danger: "border border-red-200 text-red-600 hover:bg-red-50",
     "danger-solid": "bg-red-600 text-white hover:bg-red-700",
     "success-solid": "bg-emerald-600 text-white hover:bg-emerald-700",
@@ -250,6 +252,52 @@ const BuscadorInterno = ({ searchQuery, onChange, onClear }) => (
   </div>
 );
 
+// ======================= FILTRO DE TERCERA EDAD (exclusivo superadmin) =======================
+// Solo se renderiza desde renderSuperadmin — no existe control para ningún otro rol
+// (nunca controles deshabilitados: directamente no se monta este componente).
+// Se combina con el buscador de arriba mediante AND (ver matchTercera/votanteVisible).
+const OPCIONES_TERCERA_EDAD = [
+  { value: "todos", label: "Todos los votantes" },
+  { value: "tercera", label: "Tercera edad" },
+  { value: "no_tercera", label: "No tercera edad" },
+];
+// onDescargar/descargando: exclusivo superadmin también (mismo componente, pero
+// Dashboard.jsx solo lo monta desde renderSuperadmin) — exporta exactamente los
+// votantes visibles con el filtro + búsqueda actuales (ver
+// buildEstructuraFiltradaExcelPayload).
+const FiltroTerceraEdad = ({ value, onChange, onDescargar, descargando }) => (
+  <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-card">
+    <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
+      <label className="block text-sm font-semibold text-slate-700">
+        Filtrar por tercera edad
+      </label>
+      <button
+        onClick={onDescargar}
+        disabled={descargando}
+        className="inline-flex items-center gap-1.5 px-3 h-8 rounded-lg text-xs font-medium border border-emerald-200 text-emerald-700 hover:bg-emerald-50 bg-white disabled:opacity-50 shrink-0"
+      >
+        <FileSpreadsheet className="w-3.5 h-3.5" />
+        {descargando ? "Generando..." : "Descargar Excel filtrado"}
+      </button>
+    </div>
+    <div className="flex flex-wrap gap-2">
+      {OPCIONES_TERCERA_EDAD.map((opt) => (
+        <button
+          key={opt.value}
+          onClick={() => onChange(opt.value)}
+          className={`px-3 h-9 rounded-lg text-sm font-medium border transition-colors ${
+            value === opt.value
+              ? "bg-amber-600 border-amber-600 text-white"
+              : "bg-white border-slate-200 text-slate-700 hover:bg-slate-50"
+          }`}
+        >
+          {opt.label}
+        </button>
+      ))}
+    </div>
+  </div>
+);
+
 // ======================= AVISO DE BÚSQUEDA (dentro del árbol, sin reemplazarlo) =======================
 const BusquedaAviso = ({ matchCI, query }) => {
   if (!matchCI) return null;
@@ -387,6 +435,7 @@ const PersonCard = ({
   counter,
   onTelefono,
   onDireccion,
+  onEditarTerceraEdad, // (persona) => void — exclusivo superadmin, solo tipo="votante"
   onCopy,
   copiedCode,
   tablaAcceso,
@@ -473,7 +522,7 @@ const PersonCard = ({
             </Badge>
           )}
           {subPendiente && <Badge variant="amber">Pendiente</Badge>}
-          {persona.tercera_edad === true && <TerceraEdadBadge />}
+          {esVotante && persona.tercera_edad === true && esSuperadmin && <TerceraEdadBadge />}
         </div>
       </div>
 
@@ -484,6 +533,11 @@ const PersonCard = ({
         <ActionBtn onClick={() => onDireccion(tipo, persona)} title="Editar dirección" variant="blue">
           <MapPin className="w-3.5 h-3.5" />
         </ActionBtn>
+        {esVotante && esSuperadmin && onEditarTerceraEdad && (
+          <ActionBtn onClick={() => onEditarTerceraEdad(persona)} title="Editar tercera edad" variant="amber">
+            <AlertCircle className="w-3.5 h-3.5" />
+          </ActionBtn>
+        )}
         {direccionMostrar && (
           <ActionBtn onClick={() => abrirUbicacion(direccionMostrar)} title="Abrir ubicación">
             <ExternalLink className="w-3.5 h-3.5" />
@@ -851,6 +905,8 @@ const Dashboard = ({ currentUser, onLogout }) => {
   const [showAgregarCoord, setShowAgregarCoord] = useState(false);
   const [modalTelefonoState, setModalTelefonoState] = useState({ show: false, tipo: null, persona: null });
   const [modalDireccionState, setModalDireccionState] = useState({ show: false, tipo: null, persona: null });
+  // Exclusivo superadmin editando un votante (ver handleOpenTerceraEdad/PersonCard).
+  const [modalTerceraEdadState, setModalTerceraEdadState] = useState({ show: false, persona: null });
   const [confirmVotoState, setConfirmVotoState] = useState({ show: false, votante: null, accion: null });
 
   // Expand states
@@ -860,6 +916,12 @@ const Dashboard = ({ currentUser, onLogout }) => {
 
   // Search
   const [searchQuery, setSearchQuery] = useState("");
+
+  // Filtro de tercera edad (exclusivo superadmin, ver matchTercera más abajo):
+  // "todos" | "tercera" | "no_tercera". Se ignora para cualquier otro rol aunque el
+  // estado exista (nadie más puede cambiarlo: el control solo se renderiza para
+  // superadmin), pero además matchTercera vuelve a comprobar el rol explícitamente.
+  const [terceraEdadFiltro, setTerceraEdadFiltro] = useState("todos");
 
   // Copy feedback
   const [copiedCode, setCopiedCode] = useState(null);
@@ -1297,6 +1359,22 @@ const Dashboard = ({ currentUser, onLogout }) => {
     await cargarEstructura();
   }, [cargarEstructura]);
 
+  // ======================= MODAL TERCERA EDAD (exclusivo superadmin, solo votantes) =======================
+  // Update de un único campo — igual que handleSaveTelefono/handleSaveDireccion —
+  // nunca toca telefono/direccion_override/voto_confirmado ni ningún otro dato.
+  const handleOpenTerceraEdad = useCallback((persona) => {
+    setModalTerceraEdadState({ show: true, persona });
+  }, []);
+
+  const handleSaveTerceraEdad = useCallback(async (nuevoValor) => {
+    const persona = modalTerceraEdadState.persona;
+    if (!persona) return;
+    const { error } = await supabase.from("votantes").update({ tercera_edad: nuevoValor }).eq("ci", persona.ci);
+    if (error) { alert("Error al guardar tercera edad: " + error.message); throw error; }
+    setModalTerceraEdadState({ show: false, persona: null });
+    await cargarEstructura();
+  }, [modalTerceraEdadState, cargarEstructura]);
+
   // ======================= AGREGAR VOTANTE (TODOS LOS ROLES) =======================
   const handleAddVotante = useCallback(async (persona) => {
     const role = currentUser.role;
@@ -1688,15 +1766,64 @@ const Dashboard = ({ currentUser, onLogout }) => {
     return set;
   }, [searchQuery, currentUser, estructura]);
 
-  // Helpers reutilizados en todo el arbol para respetar matchCI sin repetir logica.
+  // ======================= FILTRO DE TERCERA EDAD (exclusivo superadmin) =======================
+  // Mismo mecanismo que matchCI (Set<ci> o null = sin restricción), para combinarse
+  // con la búsqueda por AND reutilizando exactamente la misma lógica de "padres
+  // visibles si algún descendiente coincide" ya usada por matchCI/algunaCoincide —
+  // ver algunaCoincideVotantes más abajo. Solo los votantes tienen tercera_edad, así
+  // que este Set solo se evalúa contra CIs de votantes; dirigentes/coordinadores/
+  // subcoordinadores nunca se filtran por esto directamente (solo permanecen
+  // visibles como ruta hacia un votante que sí coincide).
+  const matchTercera = useMemo(() => {
+    if (currentUser.role !== "superadmin" || terceraEdadFiltro === "todos") return null;
+    const set = new Set();
+    estructura.votantes.forEach((v) => {
+      const esTerceraEdad = v.tercera_edad === true; // null/undefined/false nunca cuentan
+      const pasa = terceraEdadFiltro === "tercera" ? esTerceraEdad : !esTerceraEdad;
+      if (pasa) set.add(normalizeCI(v.ci));
+    });
+    return set;
+  }, [currentUser, terceraEdadFiltro, estructura]);
+
+  // ¿Este votante pasa AMBOS filtros activos (búsqueda AND tercera edad)? Cada Set
+  // en null equivale a "sin restricción" para ese filtro, igual que matchCI solo.
+  const votanteVisible = useCallback(
+    (persona) => {
+      const ci = normalizeCI(persona.ci);
+      const pasaBusqueda = !matchCI || matchCI.has(ci);
+      const pasaTercera = !matchTercera || matchTercera.has(ci);
+      return pasaBusqueda && pasaTercera;
+    },
+    [matchCI, matchTercera]
+  );
+
+  // Helpers reutilizados en todo el arbol para respetar matchCI (y, para listas de
+  // votantes, también matchTercera) sin repetir logica.
   const filtrarPorBusqueda = useCallback(
-    (lista) => (matchCI ? lista.filter((p) => matchCI.has(normalizeCI(p.ci))) : lista),
-    [matchCI]
+    (lista) => lista.filter(votanteVisible),
+    [votanteVisible]
   );
   const algunaCoincide = useCallback(
     (lista) => !!matchCI && lista.some((p) => matchCI.has(normalizeCI(p.ci))),
     [matchCI]
   );
+  // Variante de algunaCoincide para listas de VOTANTES exclusivamente (nunca para
+  // dirigentes/coordinadores/subcoordinadores, que no tienen tercera_edad): además
+  // de la búsqueda, exige que el descendiente pase el filtro de tercera edad. Si
+  // ningún filtro está activo, se comporta exactamente igual que antes (false, sin
+  // forzar auto-expansión).
+  const algunaCoincideVotantes = useCallback(
+    (lista) => (!!matchCI || !!matchTercera) && lista.some(votanteVisible),
+    [matchCI, matchTercera, votanteVisible]
+  );
+  // Antes, "sin búsqueda activa" (!matchCI) bastaba para mostrar todo el árbol tal
+  // cual. Ahora hay un segundo filtro independiente (matchTercera): un dirigente/
+  // coordinador/subcoordinador solo debe mostrarse sin restricción cuando NINGÚN
+  // filtro está activo — si el de tercera edad está activo (aunque no haya texto de
+  // búsqueda), debe seguir dependiendo de si tiene algún descendiente que coincida
+  // (dirDescendantMatch/coordDescendantMatch/subDescendantMatch, ya actualizados
+  // arriba para considerar matchTercera vía algunaCoincideVotantes).
+  const hayFiltroActivo = !!matchCI || !!matchTercera;
 
   // ======================= PDF =======================
   const handlePDF = useCallback(async () => {
@@ -1721,16 +1848,32 @@ const Dashboard = ({ currentUser, onLogout }) => {
   // ======================= EXCEL: ARMADO DE PAYLOAD POR ALCANCE =======================
   // Reutilizan los mismos helpers de utils/estructuraHelpers.js que ya filtran la
   // jerarquía en el resto del dashboard — no se agrega ninguna relación nueva.
-  const buildEstructuraCompletaExcelPayload = useCallback(() => ({
-    prefix: "estructura-electoral-completa",
-    persona: null,
-    roles: ["dirigente", "coordinador", "subcoordinador", "votante"],
-    dirigentes: estructura.dirigentes,
-    coordinadores: estructura.coordinadores,
-    subcoordinadores: estructura.subcoordinadores,
-    votantes: estructura.votantes,
-    padronMap,
-  }), [estructura, padronMap]);
+  // incluirTerceraEdad: la columna "Tercera edad" del Excel solo debe verla
+  // superadmin (ver excelService.js) — se decide acá, en el único lugar donde
+  // currentUser está disponible, nunca dentro de excelService (que no conoce roles).
+  const esSuperadminExcel = currentUser.role === "superadmin";
+
+  const buildEstructuraCompletaExcelPayload = useCallback(() => {
+    // Si el filtro de tercera edad está activo, la descarga general usa el mismo
+    // conjunto ya filtrado que se ve en pantalla — nunca incluye votantes ocultos
+    // por el filtro. matchTercera es null cuando el filtro está en "todos" (o para
+    // cualquier rol que no sea superadmin), en cuyo caso se exporta todo, igual que
+    // siempre.
+    const votantesFiltrados = matchTercera
+      ? estructura.votantes.filter((v) => matchTercera.has(normalizeCI(v.ci)))
+      : estructura.votantes;
+    return {
+      prefix: "estructura-electoral-completa",
+      persona: null,
+      roles: ["dirigente", "coordinador", "subcoordinador", "votante"],
+      dirigentes: estructura.dirigentes,
+      coordinadores: estructura.coordinadores,
+      subcoordinadores: estructura.subcoordinadores,
+      votantes: votantesFiltrados,
+      padronMap,
+      incluirTerceraEdad: esSuperadminExcel,
+    };
+  }, [estructura, padronMap, matchTercera, esSuperadminExcel]);
 
   const buildDirigenteExcelPayload = useCallback((dir) => {
     const dirCI = normalizeCI(dir.ci);
@@ -1743,8 +1886,9 @@ const Dashboard = ({ currentUser, onLogout }) => {
       subcoordinadores: getSubsDeDigente(estructura, dirCI),
       votantes: getTodosVotantesDirigente(estructura, dirCI),
       padronMap,
+      incluirTerceraEdad: esSuperadminExcel,
     };
-  }, [estructura, padronMap]);
+  }, [estructura, padronMap, esSuperadminExcel]);
 
   const buildCoordExcelPayload = useCallback((coord) => {
     const coordCI = normalizeCI(coord.ci);
@@ -1760,8 +1904,9 @@ const Dashboard = ({ currentUser, onLogout }) => {
       // siempre coincidan en totales y personas.
       votantes: getTodosVotantesCoord(estructura, coordCI),
       padronMap,
+      incluirTerceraEdad: esSuperadminExcel,
     };
-  }, [estructura, padronMap]);
+  }, [estructura, padronMap, esSuperadminExcel]);
 
   const buildSubExcelPayload = useCallback((sub) => {
     const subCI = normalizeCI(sub.ci);
@@ -1772,8 +1917,56 @@ const Dashboard = ({ currentUser, onLogout }) => {
       subcoordinadores: [sub],
       votantes: getVotantesDeSubcoord(estructura, subCI),
       padronMap,
+      incluirTerceraEdad: esSuperadminExcel,
     };
-  }, [estructura, padronMap]);
+  }, [estructura, padronMap, esSuperadminExcel]);
+
+  // Botón "Descargar Excel filtrado" del bloque FiltroTerceraEdad (exclusivo
+  // superadmin): exporta EXACTAMENTE los votantes visibles con el filtro de
+  // tercera edad + la búsqueda interna actuales (votanteVisible, la misma función
+  // que ya decide qué votante se muestra en el árbol), y mantiene la estructura
+  // jerárquica correspondiente — un dirigente/coordinador/subcoordinador se
+  // incluye si él mismo coincide con la búsqueda o si tiene al menos un votante
+  // visible en su rama, exactamente el mismo criterio "ocultar ramas sin
+  // coincidencias" que ya aplica el árbol en pantalla (dirVisible/coordVisible/
+  // subVisible). Sin ningún filtro activo, incluye todo — igual que el árbol.
+  const buildEstructuraFiltradaExcelPayload = useCallback(() => {
+    const votantesFiltrados = estructura.votantes.filter(votanteVisible);
+    const ciVotantesFiltrados = new Set(votantesFiltrados.map((v) => normalizeCI(v.ci)));
+    const tieneDescendienteVisible = (votantesDeRama) =>
+      votantesDeRama.some((v) => ciVotantesFiltrados.has(normalizeCI(v.ci)));
+
+    const dirigentesFiltrados = estructura.dirigentes.filter((d) => {
+      const ci = normalizeCI(d.ci);
+      if (!hayFiltroActivo) return true;
+      if (matchCI && matchCI.has(ci)) return true;
+      return tieneDescendienteVisible(getTodosVotantesDirigente(estructura, ci));
+    });
+    const coordinadoresFiltrados = estructura.coordinadores.filter((c) => {
+      const ci = normalizeCI(c.ci);
+      if (!hayFiltroActivo) return true;
+      if (matchCI && matchCI.has(ci)) return true;
+      return tieneDescendienteVisible(getTodosVotantesCoord(estructura, ci));
+    });
+    const subcoordinadoresFiltrados = estructura.subcoordinadores.filter((s) => {
+      const ci = normalizeCI(s.ci);
+      if (!hayFiltroActivo) return true;
+      if (matchCI && matchCI.has(ci)) return true;
+      return tieneDescendienteVisible(getVotantesDeSubcoord(estructura, ci));
+    });
+
+    return {
+      prefix: "estructura-tercera-edad-filtrada",
+      persona: null,
+      roles: ["dirigente", "coordinador", "subcoordinador", "votante"],
+      dirigentes: dirigentesFiltrados,
+      coordinadores: coordinadoresFiltrados,
+      subcoordinadores: subcoordinadoresFiltrados,
+      votantes: votantesFiltrados,
+      padronMap,
+      incluirTerceraEdad: esSuperadminExcel,
+    };
+  }, [estructura, padronMap, matchCI, hayFiltroActivo, votanteVisible, esSuperadminExcel]);
 
   // key identifica al botón que disparó la descarga (para el estado "Generando..." y
   // para impedir clics repetidos). payload son los argumentos de generarExcelEstructura.
@@ -1789,6 +1982,18 @@ const Dashboard = ({ currentUser, onLogout }) => {
       setExcelBusy(null);
     }
   }, [excelBusy]);
+
+  // Botón "Descargar Excel filtrado" (bloque FiltroTerceraEdad, exclusivo
+  // superadmin): si el filtro + búsqueda actuales no dejan ningún votante visible,
+  // avisa en vez de generar un Excel vacío.
+  const handleDescargarExcelFiltrado = useCallback(async () => {
+    const payload = buildEstructuraFiltradaExcelPayload();
+    if (payload.votantes.length === 0) {
+      alert("No hay votantes para exportar con el filtro y la búsqueda actuales.");
+      return;
+    }
+    await handleDescargarExcel("tercera-edad-filtrado", payload);
+  }, [buildEstructuraFiltradaExcelPayload, handleDescargarExcel]);
 
   // ======================= EXPAND TOGGLE =======================
   const toggleDir = (ci) => setExpandedDirs((prev) => ({ ...prev, [ci]: !prev[ci] }));
@@ -1809,11 +2014,15 @@ const Dashboard = ({ currentUser, onLogout }) => {
     return (
       <div className="space-y-6">
         {/* Stats */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
           <StatCard label="Dirigentes" value={stats.dirigentes} icon={Shield} accent />
           <StatCard label="Coordinadores" value={stats.coordinadores} icon={Users} />
           <StatCard label="Subcoords" value={stats.subcoordinadores} icon={Users} />
           <StatCard label="Votantes" value={stats.votantes} icon={CheckCircle2} />
+          {/* Solo superadmin ve este dato — ver nota de seguridad visual al final del
+              archivo (mismo modelo de permisos de interfaz que ya usa el resto del
+              Dashboard: currentUser.role === "superadmin", sin tocar Auth/RLS). */}
+          <StatCard label="Tercera edad" value={stats.terceraEdad} icon={AlertCircle} />
           <VoteProgressCard
             confirmed={stats.totalConfirmados}
             total={stats.totalConfirmable}
@@ -1887,6 +2096,12 @@ const Dashboard = ({ currentUser, onLogout }) => {
           onChange={setSearchQuery}
           onClear={() => setSearchQuery("")}
         />
+        <FiltroTerceraEdad
+          value={terceraEdadFiltro}
+          onChange={setTerceraEdadFiltro}
+          onDescargar={handleDescargarExcelFiltrado}
+          descargando={excelBusy === "tercera-edad-filtrado"}
+        />
 
         <BusquedaAviso matchCI={matchCI} query={searchQuery} />
 
@@ -1905,8 +2120,8 @@ const Dashboard = ({ currentUser, onLogout }) => {
 
             // Búsqueda: visible si matchea directamente o si algún hijo (coord/sub/votante) matchea.
             const dirDescendantMatch =
-              algunaCoincide(coordsDir) || algunaCoincide(subsDir) || algunaCoincide(votantesDirTotal);
-            const dirVisible = !matchCI || matchCI.has(dirCI) || dirDescendantMatch;
+              algunaCoincide(coordsDir) || algunaCoincide(subsDir) || algunaCoincideVotantes(votantesDirTotal);
+            const dirVisible = !hayFiltroActivo || (!!matchCI && matchCI.has(dirCI)) || dirDescendantMatch;
             if (!dirVisible) return null;
             const isExpandedDir = expandedDirs[dirCI] || dirDescendantMatch;
 
@@ -1953,8 +2168,8 @@ const Dashboard = ({ currentUser, onLogout }) => {
                           const misVots = getMisVotantes(estructura, coordCI);
 
                           const votantesDeMisSubs = misSubs.flatMap((s) => getVotantesDeSubcoord(estructura, normalizeCI(s.ci)));
-                          const coordDescendantMatch = algunaCoincide(misSubs) || algunaCoincide(misVots) || algunaCoincide(votantesDeMisSubs);
-                          const coordVisible = !matchCI || matchCI.has(coordCI) || coordDescendantMatch;
+                          const coordDescendantMatch = algunaCoincide(misSubs) || algunaCoincideVotantes(misVots) || algunaCoincideVotantes(votantesDeMisSubs);
+                          const coordVisible = !hayFiltroActivo || (!!matchCI && matchCI.has(coordCI)) || coordDescendantMatch;
                           if (!coordVisible) return null;
                           const isExpandedCoord = expandedCoords[coordCI] || coordDescendantMatch;
 
@@ -1992,8 +2207,8 @@ const Dashboard = ({ currentUser, onLogout }) => {
                                   {misSubs.map((sub) => {
                                     const subCI = normalizeCI(sub.ci);
                                     const votsDeEste = getVotantesDeSubcoord(estructura, subCI);
-                                    const subDescendantMatch = algunaCoincide(votsDeEste);
-                                    const subVisible = !matchCI || matchCI.has(subCI) || subDescendantMatch;
+                                    const subDescendantMatch = algunaCoincideVotantes(votsDeEste);
+                                    const subVisible = !hayFiltroActivo || (!!matchCI && matchCI.has(subCI)) || subDescendantMatch;
                                     if (!subVisible) return null;
                                     const isExpandedSub = expandedSubs[subCI] || subDescendantMatch;
                                     return (
@@ -2034,7 +2249,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                                                 onEliminar={handleEliminarPersona}
                                                 onTelefono={handleOpenTelefono}
                                                 onDireccion={handleOpenDireccion}
-                                                onConfirmar={handleConfirmar}
+                                                onConfirmar={handleConfirmar} esSuperadmin={currentUser.role === "superadmin"} onEditarTerceraEdad={handleOpenTerceraEdad}
                                                 onAnular={handleAnular}
                                                 canConfirmar={canConfirmar}
                                                 canAnular={canAnular}
@@ -2056,7 +2271,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                                       onEliminar={handleEliminarPersona}
                                       onTelefono={handleOpenTelefono}
                                       onDireccion={handleOpenDireccion}
-                                      onConfirmar={handleConfirmar}
+                                      onConfirmar={handleConfirmar} esSuperadmin={currentUser.role === "superadmin"} onEditarTerceraEdad={handleOpenTerceraEdad}
                                       onAnular={handleAnular}
                                       canConfirmar={canConfirmar}
                                       canAnular={canAnular}
@@ -2087,7 +2302,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                             onEliminar={handleEliminarPersona}
                             onTelefono={handleOpenTelefono}
                             onDireccion={handleOpenDireccion}
-                            onConfirmar={handleConfirmar}
+                            onConfirmar={handleConfirmar} esSuperadmin={currentUser.role === "superadmin"} onEditarTerceraEdad={handleOpenTerceraEdad}
                             onAnular={handleAnular}
                             canConfirmar={canConfirmar}
                             canAnular={canAnular}
@@ -2118,8 +2333,8 @@ const Dashboard = ({ currentUser, onLogout }) => {
                   const misVots = getMisVotantes(estructura, coordCI);
 
                   const votantesDeMisSubs = misSubs.flatMap((s) => getVotantesDeSubcoord(estructura, normalizeCI(s.ci)));
-                  const coordDescendantMatch = algunaCoincide(misSubs) || algunaCoincide(misVots) || algunaCoincide(votantesDeMisSubs);
-                  const coordVisible = !matchCI || matchCI.has(coordCI) || coordDescendantMatch;
+                  const coordDescendantMatch = algunaCoincide(misSubs) || algunaCoincideVotantes(misVots) || algunaCoincideVotantes(votantesDeMisSubs);
+                  const coordVisible = !hayFiltroActivo || (!!matchCI && matchCI.has(coordCI)) || coordDescendantMatch;
                   if (!coordVisible) return null;
                   const isExpandedCoord = expandedCoords[coordCI] || coordDescendantMatch;
 
@@ -2156,8 +2371,8 @@ const Dashboard = ({ currentUser, onLogout }) => {
                           {misSubs.map((sub) => {
                             const subCI = normalizeCI(sub.ci);
                             const votsDeEste = getVotantesDeSubcoord(estructura, subCI);
-                            const subDescendantMatch = algunaCoincide(votsDeEste);
-                            const subVisible = !matchCI || matchCI.has(subCI) || subDescendantMatch;
+                            const subDescendantMatch = algunaCoincideVotantes(votsDeEste);
+                            const subVisible = !hayFiltroActivo || (!!matchCI && matchCI.has(subCI)) || subDescendantMatch;
                             if (!subVisible) return null;
                             const isExpandedSub = expandedSubs[subCI] || subDescendantMatch;
                             return (
@@ -2198,7 +2413,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                                         onEliminar={handleEliminarPersona}
                                         onTelefono={handleOpenTelefono}
                                         onDireccion={handleOpenDireccion}
-                                        onConfirmar={handleConfirmar}
+                                        onConfirmar={handleConfirmar} esSuperadmin={currentUser.role === "superadmin"} onEditarTerceraEdad={handleOpenTerceraEdad}
                                         onAnular={handleAnular}
                                         canConfirmar={canConfirmar}
                                         canAnular={canAnular}
@@ -2219,7 +2434,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                               onEliminar={handleEliminarPersona}
                               onTelefono={handleOpenTelefono}
                               onDireccion={handleOpenDireccion}
-                              onConfirmar={handleConfirmar}
+                              onConfirmar={handleConfirmar} esSuperadmin={currentUser.role === "superadmin"} onEditarTerceraEdad={handleOpenTerceraEdad}
                               onAnular={handleAnular}
                               canConfirmar={canConfirmar}
                               canAnular={canAnular}
@@ -2321,8 +2536,8 @@ const Dashboard = ({ currentUser, onLogout }) => {
             const misVots = getMisVotantes(estructura, coordCI);
 
             const votantesDeMisSubs = misSubs.flatMap((s) => getVotantesDeSubcoord(estructura, normalizeCI(s.ci)));
-            const coordDescendantMatch = algunaCoincide(misSubs) || algunaCoincide(misVots) || algunaCoincide(votantesDeMisSubs);
-            const coordVisible = !matchCI || matchCI.has(coordCI) || coordDescendantMatch;
+            const coordDescendantMatch = algunaCoincide(misSubs) || algunaCoincideVotantes(misVots) || algunaCoincideVotantes(votantesDeMisSubs);
+            const coordVisible = !hayFiltroActivo || (!!matchCI && matchCI.has(coordCI)) || coordDescendantMatch;
             if (!coordVisible) return null;
             const isExpandedCoord = expandedCoords[coordCI] || coordDescendantMatch;
 
@@ -2356,8 +2571,8 @@ const Dashboard = ({ currentUser, onLogout }) => {
                     {misSubs.map((sub) => {
                       const subCI = normalizeCI(sub.ci);
                       const votsDeEste = getVotantesDeSubcoord(estructura, subCI);
-                      const subDescendantMatch = algunaCoincide(votsDeEste);
-                      const subVisible = !matchCI || matchCI.has(subCI) || subDescendantMatch;
+                      const subDescendantMatch = algunaCoincideVotantes(votsDeEste);
+                      const subVisible = !hayFiltroActivo || (!!matchCI && matchCI.has(subCI)) || subDescendantMatch;
                       if (!subVisible) return null;
                       const isExpandedSub = expandedSubs[subCI] || subDescendantMatch;
                       return (
@@ -2395,7 +2610,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                                   onEliminar={handleEliminarPersona}
                                   onTelefono={handleOpenTelefono}
                                   onDireccion={handleOpenDireccion}
-                                  onConfirmar={handleConfirmar}
+                                  onConfirmar={handleConfirmar} esSuperadmin={currentUser.role === "superadmin"} onEditarTerceraEdad={handleOpenTerceraEdad}
                                   onAnular={handleAnular}
                                   canConfirmar={canConfirmar}
                                   canAnular={canAnular}
@@ -2416,7 +2631,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                         onEliminar={handleEliminarPersona}
                         onTelefono={handleOpenTelefono}
                         onDireccion={handleOpenDireccion}
-                        onConfirmar={handleConfirmar}
+                        onConfirmar={handleConfirmar} esSuperadmin={currentUser.role === "superadmin"} onEditarTerceraEdad={handleOpenTerceraEdad}
                         onAnular={handleAnular}
                         canConfirmar={canConfirmar}
                         canAnular={canAnular}
@@ -2446,7 +2661,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                 onEliminar={handleEliminarPersona}
                 onTelefono={handleOpenTelefono}
                 onDireccion={handleOpenDireccion}
-                onConfirmar={handleConfirmar}
+                onConfirmar={handleConfirmar} esSuperadmin={currentUser.role === "superadmin"} onEditarTerceraEdad={handleOpenTerceraEdad}
                 onAnular={handleAnular}
                 canConfirmar={canConfirmar}
                 canAnular={canAnular}
@@ -2547,8 +2762,8 @@ const Dashboard = ({ currentUser, onLogout }) => {
           {misSubs.map((sub) => {
             const subCI = normalizeCI(sub.ci);
             const votsDeEste = getVotantesDeSubcoord(estructura, subCI);
-            const subDescendantMatch = algunaCoincide(votsDeEste);
-            const subVisible = !matchCI || matchCI.has(subCI) || subDescendantMatch;
+            const subDescendantMatch = algunaCoincideVotantes(votsDeEste);
+            const subVisible = !hayFiltroActivo || (!!matchCI && matchCI.has(subCI)) || subDescendantMatch;
             if (!subVisible) return null;
             const isExpandedSub = expandedSubs[subCI] || subDescendantMatch;
 
@@ -2594,7 +2809,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                             onEliminar={handleEliminarPersona}
                             onTelefono={handleOpenTelefono}
                             onDireccion={handleOpenDireccion}
-                            onConfirmar={handleConfirmar}
+                            onConfirmar={handleConfirmar} esSuperadmin={currentUser.role === "superadmin"} onEditarTerceraEdad={handleOpenTerceraEdad}
                             onAnular={handleAnular}
                             canConfirmar={canConfirmar}
                             canAnular={canAnular}
@@ -2629,7 +2844,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                 onEliminar={handleEliminarPersona}
                 onTelefono={handleOpenTelefono}
                 onDireccion={handleOpenDireccion}
-                onConfirmar={handleConfirmar}
+                onConfirmar={handleConfirmar} esSuperadmin={currentUser.role === "superadmin"} onEditarTerceraEdad={handleOpenTerceraEdad}
                 onAnular={handleAnular}
                 canConfirmar={canConfirmar}
                 canAnular={canAnular}
@@ -2713,7 +2928,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                 onEliminar={handleEliminarPersona}
                 onTelefono={handleOpenTelefono}
                 onDireccion={handleOpenDireccion}
-                onConfirmar={handleConfirmar}
+                onConfirmar={handleConfirmar} esSuperadmin={currentUser.role === "superadmin"} onEditarTerceraEdad={handleOpenTerceraEdad}
                 onAnular={handleAnular}
                 canConfirmar={canConfirmar}
                 canAnular={canAnular}
@@ -2823,6 +3038,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
         padronError={padronError}
         onRetryPadron={cargarPadron}
         disponibles={personasDisponibles}
+        esSuperadmin={currentUser.role === "superadmin"}
       />
 
       <ModalAgregarDirigente
@@ -2882,6 +3098,14 @@ const Dashboard = ({ currentUser, onLogout }) => {
             )
           }
           onClose={() => setModalDireccionState({ show: false, tipo: null, persona: null })}
+        />
+      )}
+
+      {modalTerceraEdadState.show && (
+        <ModalTerceraEdad
+          persona={modalTerceraEdadState.persona}
+          onSave={handleSaveTerceraEdad}
+          onClose={() => setModalTerceraEdadState({ show: false, persona: null })}
         />
       )}
 
