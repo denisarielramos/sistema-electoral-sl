@@ -25,8 +25,6 @@ const COLOR_LINE       = [220, 38, 38];    // brand-600 for separator
 const COLOR_HEADER_BG  = [185, 28, 28];    // brand-700 for table headers
 const COLOR_HEADER_TXT = [255, 255, 255];
 const COLOR_ALT_ROW    = [254, 242, 242];  // brand-50 #fef2f2
-const COLOR_GREEN_TXT  = [22, 163, 74];    // green-600 (app success)
-const COLOR_RED_TXT    = [220, 38, 38];    // brand-600 (app danger)
 const COLOR_SECTION_BG = [254, 226, 226];  // brand-100 #fee2e2
 
 // ======================= HELPERS =======================
@@ -171,7 +169,6 @@ const VOTER_COLUMNS = [
   { header: "Mesa", dataKey: "mesa" },
   { header: "Orden", dataKey: "orden" },
   { header: "Local de votacion", dataKey: "local" },
-  { header: "Confirmado", dataKey: "confirmado" },
 ];
 
 function addVoterTable(doc, startY, voters) {
@@ -182,7 +179,6 @@ function addVoterTable(doc, startY, voters) {
     mesa: str(v.mesa) || "—",
     orden: str(v.orden) || "—",
     local: str(v.local_votacion) || "—",
-    confirmado: v.voto_confirmado ? "Si" : "No",
   }));
 
   autoTable(doc, {
@@ -210,22 +206,9 @@ function addVoterTable(doc, startY, voters) {
       mesa: { cellWidth: 12, halign: "center" },
       orden: { cellWidth: 14, halign: "center" },
       local: { cellWidth: 34 },
-      confirmado: { cellWidth: 20, halign: "center" },
     },
     alternateRowStyles: { fillColor: COLOR_ALT_ROW },
     rowPageBreak: "avoid",
-    didParseCell: (data) => {
-      if (data.column.dataKey === "confirmado" && data.section === "body") {
-        const val = data.cell.raw;
-        if (val === "Si") {
-          data.cell.styles.textColor = COLOR_GREEN_TXT;
-          data.cell.styles.fontStyle = "bold";
-        } else {
-          data.cell.styles.textColor = COLOR_RED_TXT;
-          data.cell.styles.fontStyle = "bold";
-        }
-      }
-    },
   });
 
   return doc.lastAutoTable.finalY;
@@ -238,12 +221,9 @@ function addSubTable(doc, startY, subs, estructura) {
     const voters = (estructura.votantes || []).filter(
       (v) => normalizeCI(v.asignado_por) === subCI
     );
-    const confirmed = voters.filter((v) => v.voto_confirmado === true).length;
     return {
       nombre: name(s),
-      confirmado: s.confirmado ? "Si" : "No",
       totalVotantes: String(voters.length),
-      confirmados: String(confirmed),
     };
   });
 
@@ -251,9 +231,7 @@ function addSubTable(doc, startY, subs, estructura) {
     startY,
     columns: [
       { header: "Subcoordinador", dataKey: "nombre" },
-      { header: "Confirmado", dataKey: "confirmado" },
       { header: "Total Votantes", dataKey: "totalVotantes" },
-      { header: "Confirmados", dataKey: "confirmados" },
     ],
     body,
     margin: { left: M.left, right: M.right },
@@ -272,23 +250,9 @@ function addSubTable(doc, startY, subs, estructura) {
     },
     columnStyles: {
       nombre: { cellWidth: "auto" },
-      confirmado: { cellWidth: 22, halign: "center" },
       totalVotantes: { cellWidth: 25, halign: "center" },
-      confirmados: { cellWidth: 25, halign: "center" },
     },
     alternateRowStyles: { fillColor: COLOR_ALT_ROW },
-    didParseCell: (data) => {
-      if (data.column.dataKey === "confirmado" && data.section === "body") {
-        const val = data.cell.raw;
-        if (val === "Si") {
-          data.cell.styles.textColor = COLOR_GREEN_TXT;
-          data.cell.styles.fontStyle = "bold";
-        } else {
-          data.cell.styles.textColor = COLOR_RED_TXT;
-          data.cell.styles.fontStyle = "bold";
-        }
-      }
-    },
   });
 
   return doc.lastAutoTable.finalY;
@@ -315,24 +279,17 @@ export const generateSuperadminPDF = async ({ estructura, currentUser }) => {
   const { coordinadores = [], subcoordinadores = [], votantes = [] } = estructura;
 
   // Global counts
-  const subsConfirmados = subcoordinadores.filter((s) => s.confirmado === true).length;
-  const votosConfirmados = votantes.filter((v) => v.voto_confirmado === true).length;
-  const totalConfirmable = coordinadores.length + subcoordinadores.length + votantes.length;
-  const totalConfirmados = coordinadores.length + subsConfirmados + votosConfirmados;
-  const pct = totalConfirmable > 0 ? Math.round((totalConfirmados / totalConfirmable) * 100) : 0;
+  const totalRed = coordinadores.length + subcoordinadores.length + votantes.length;
 
   // ---- Page 1: Global Summary ----
   let y = addHeader(doc, "Reporte Superadmin", userName, logoImg);
 
   y = sectionTitle(doc, "Resumen Global", y);
   y = addSummaryBox(doc, y, [
-    ["Total Red", String(totalConfirmable)],
+    ["Total Red", String(totalRed)],
     ["Coordinadores", String(coordinadores.length)],
     ["Subcoordinadores", String(subcoordinadores.length)],
     ["Votantes", String(votantes.length)],
-    ["Total Confirmados", String(totalConfirmados)],
-    ["Pendientes", String(totalConfirmable - totalConfirmados)],
-    ["Porcentaje Confirmado", `${pct}%`],
   ]);
 
   // ---- Per Coordinator Sections ----
@@ -342,11 +299,7 @@ export const generateSuperadminPDF = async ({ estructura, currentUser }) => {
     const allVoters = votantes.filter((v) => normalizeCI(v.coordinador_ci) === coordCI);
     const directVoters = allVoters.filter((v) => normalizeCI(v.asignado_por) === coordCI);
 
-    const subsConf = subs.filter((s) => s.confirmado === true).length;
-    const votersConf = allVoters.filter((v) => v.voto_confirmado === true).length;
     const coordTotal = 1 + subs.length + allVoters.length;
-    const coordConfirmed = 1 + subsConf + votersConf;
-    const coordPct = coordTotal > 0 ? Math.round((coordConfirmed / coordTotal) * 100) : 0;
 
     // Always start a new page per coordinator
     doc.addPage();
@@ -356,8 +309,6 @@ export const generateSuperadminPDF = async ({ estructura, currentUser }) => {
     y = sectionTitle(doc, `Coordinador: ${name(coord)}`, y);
     y = addSummaryBox(doc, y, [
       ["Total Red", String(coordTotal)],
-      ["Confirmados", String(coordConfirmed)],
-      ["Porcentaje", `${coordPct}%`],
     ]);
     y += 6;
 
@@ -390,15 +341,12 @@ export const generateSuperadminPDF = async ({ estructura, currentUser }) => {
     }
   });
 
-  // Grand totals on last page
+  // Grand total on last page
   doc.addPage();
   y = addHeader(doc, "Reporte Superadmin", userName);
   y = sectionTitle(doc, "Totales Generales", y);
   addSummaryBox(doc, y, [
-    ["Total Red", String(totalConfirmable)],
-    ["Total Confirmados", String(totalConfirmados)],
-    ["Total Pendientes", String(totalConfirmable - totalConfirmados)],
-    ["Porcentaje General", `${pct}%`],
+    ["Total Red", String(totalRed)],
   ]);
 
   addFooterToAllPages(doc);
@@ -426,23 +374,16 @@ export const generateCoordinadorPDF = async ({ estructura, currentUser, targetPe
   const directVoters = getVotantesDirectosCoord(estructura, miCI);
   const allVoters = getTodosVotantesCoord(estructura, miCI);
 
-  const subsConf = subs.filter((s) => s.confirmado === true).length;
-  const votersConf = allVoters.filter((v) => v.voto_confirmado === true).length;
-  const totalConfirmable = 1 + subs.length + allVoters.length;
-  const totalConfirmados = 1 + subsConf + votersConf;
-  const pct = totalConfirmable > 0 ? Math.round((totalConfirmados / totalConfirmable) * 100) : 0;
+  const totalRed = 1 + subs.length + allVoters.length;
 
   // ---- Summary ----
   let y = addHeader(doc, "Reporte Coordinador", userName, logoImg);
   y = sectionTitle(doc, "Resumen de Mi Red", y);
   y = addSummaryBox(doc, y, [
-    ["Total Red", String(totalConfirmable)],
+    ["Total Red", String(totalRed)],
     ["Subcoordinadores", String(subs.length)],
     ["Votantes directos", String(directVoters.length)],
     ["Votantes indirectos", String(Math.max(0, allVoters.length - directVoters.length))],
-    ["Confirmados", String(totalConfirmados)],
-    ["Pendientes", String(totalConfirmable - totalConfirmados)],
-    ["Porcentaje", `${pct}%`],
   ]);
   y += 6;
 
@@ -491,20 +432,14 @@ export const generateSubcoordinadorPDF = async ({ estructura, currentUser, targe
 
   const { votantes = [] } = estructura;
   const misVotantes = votantes.filter((v) => normalizeCI(v.asignado_por) === miCI);
-  const confirmados = misVotantes.filter((v) => v.voto_confirmado === true).length;
-  const totalConfirmable = 1 + misVotantes.length;
-  const totalConfirmados = 1 + confirmados;
-  const pct = totalConfirmable > 0 ? Math.round((totalConfirmados / totalConfirmable) * 100) : 0;
+  const totalRed = 1 + misVotantes.length;
 
   // ---- Summary ----
   let y = addHeader(doc, "Reporte Subcoordinador", userName, logoImg);
   y = sectionTitle(doc, "Resumen", y);
   y = addSummaryBox(doc, y, [
-    ["Total Red", String(totalConfirmable)],
+    ["Total Red", String(totalRed)],
     ["Votantes asignados", String(misVotantes.length)],
-    ["Confirmados", String(totalConfirmados)],
-    ["Pendientes", String(totalConfirmable - totalConfirmados)],
-    ["Porcentaje", `${pct}%`],
   ]);
   y += 6;
 
@@ -542,23 +477,16 @@ export const generateDirigentePDF = async ({ estructura, currentUser, targetPers
   const votantesDirectosDirigente = getVotantesDirectosDirigente(estructura, dirCI);
   const todosVotantes = getTodosVotantesDirigente(estructura, dirCI);
 
-  const subsConf = misSubs.filter((s) => s.confirmado === true).length;
-  const votersConf = todosVotantes.filter((v) => v.voto_confirmado === true).length;
-  const totalConfirmable = misCoords.length + misSubs.length + todosVotantes.length;
-  const totalConfirmados = misCoords.length + subsConf + votersConf;
-  const pct = totalConfirmable > 0 ? Math.round((totalConfirmados / totalConfirmable) * 100) : 0;
+  const totalRed = misCoords.length + misSubs.length + todosVotantes.length;
 
   // ---- Summary ----
   let y = addHeader(doc, "Reporte Dirigente", userName, logoImg);
   y = sectionTitle(doc, "Resumen de Rama", y);
   y = addSummaryBox(doc, y, [
-    ["Total Red", String(totalConfirmable)],
+    ["Total Red", String(totalRed)],
     ["Coordinadores", String(misCoords.length)],
     ["Subcoordinadores", String(misSubs.length)],
     ["Votantes", String(todosVotantes.length)],
-    ["Confirmados", String(totalConfirmados)],
-    ["Pendientes", String(totalConfirmable - totalConfirmados)],
-    ["Porcentaje", `${pct}%`],
   ]);
   y += 6;
 

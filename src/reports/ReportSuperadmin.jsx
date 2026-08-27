@@ -1,11 +1,10 @@
 // src/reports/ReportSuperadmin.jsx
-export default function ReportSuperadmin({ estructura, currentUser }) {
+export default function ReportSuperadmin({ estructura }) {
   const { coordinadores = [], subcoordinadores = [], votantes = [] } = estructura;
 
   const totalCoordinadores = coordinadores.length;
   const totalSubs = subcoordinadores.length;
   const totalVotantes = votantes.length;
-  const totalConfirmados = votantes.filter((v) => v.voto_confirmado === true).length;
 
   // Mapa subcoordinadores por coordinador
   const subsPorCoord = new Map();
@@ -49,10 +48,6 @@ export default function ReportSuperadmin({ estructura, currentUser }) {
         <div class="summary-item">
           <span class="label">Total Votantes</span>
           <span class="value">${totalVotantes}</span>
-        </div>
-        <div class="summary-item">
-          <span class="label">Votos Confirmados</span>
-          <span class="value">${totalConfirmados}</span>
         </div>
       </div>
     </section>

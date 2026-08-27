@@ -29,7 +29,6 @@ const COLUMNS = [
   { header: "Mesa", key: "mesa", width: 10 },
   { header: "Orden", key: "orden", width: 10 },
   { header: "Tercera edad", key: "terceraEdad", width: 13 },
-  { header: "Voto confirmado", key: "votoConfirmado", width: 15 },
   { header: "Asignado por", key: "asignadoPor", width: 22 },
   { header: "Rol de quien lo asignó", key: "asignadoPorRol", width: 20 },
   { header: "Dirección o ubicación", key: "direccion", width: 32 },
@@ -99,8 +98,8 @@ const dedupeByCI = (list = []) => {
 //   externo, que no está en el padrón); si no existe, se completa con el padrón.
 // - seccional/local_votacion/mesa/orden: siempre provienen del padrón (ninguna tabla de
 //   rol los almacena); si la persona no está en el padrón, quedan vacíos.
-// - teléfono/dirección/tercera_edad/voto_confirmado/confirmado/asignado_por*: siempre
-//   provienen de la tabla de rol (el padrón no tiene estas columnas).
+// - teléfono/dirección/tercera_edad/asignado_por*: siempre provienen de la tabla de
+//   rol (el padrón no tiene estas columnas).
 // Se usa '??' en todos los casos para no descartar valores válidos como 0 o false.
 const enrichPersona = (persona, padronMap) => {
   const ci = normalizeCILocal(persona?.ci);
@@ -117,8 +116,6 @@ const enrichPersona = (persona, padronMap) => {
     telefono: persona?.telefono ?? "",
     direccion: persona?.direccion_override ?? padronPersona?.direccion ?? "",
     tercera_edad: persona?.tercera_edad ?? null,
-    voto_confirmado: persona?.voto_confirmado ?? null,
-    confirmado: persona?.confirmado ?? null,
     asignado_por_nombre: persona?.asignado_por_nombre ?? "",
     asignado_por_rol: persona?.asignado_por_rol ?? "",
   };
@@ -130,12 +127,6 @@ const buildRows = ({ dirigentes = [], coordinadores = [], subcoordinadores = [],
 
   const push = (role, rawPersona) => {
     const persona = enrichPersona(rawPersona, padronMap);
-    const votoConfirmado =
-      role === "votante"
-        ? boolLabel(persona.voto_confirmado)
-        : role === "subcoordinador"
-        ? boolLabel(persona.confirmado)
-        : "";
 
     rows.push({
       nivel: ROLE_LABELS[role],
@@ -148,7 +139,6 @@ const buildRows = ({ dirigentes = [], coordinadores = [], subcoordinadores = [],
       mesa: str(persona.mesa),
       orden: str(persona.orden),
       terceraEdad: boolLabel(persona.tercera_edad),
-      votoConfirmado,
       asignadoPor: str(persona.asignado_por_nombre),
       asignadoPorRol: str(persona.asignado_por_rol),
       direccion: str(persona.direccion),
@@ -164,18 +154,13 @@ const buildRows = ({ dirigentes = [], coordinadores = [], subcoordinadores = [],
 };
 
 // ======================= TOTALES =======================
-// "Voto confirmado" se refiere exclusivamente a votantes (voto_confirmado === true).
-// Dirigentes, coordinadores y subcoordinadores NO se cuentan como votos confirmados.
 const buildTotales = ({ dirigentes = [], coordinadores = [], subcoordinadores = [], votantes = [] }) => {
   const totalDirigentes = dirigentes.length;
   const totalCoordinadores = coordinadores.length;
   const totalSubcoordinadores = subcoordinadores.length;
   const totalVotantes = votantes.length;
 
-  const votosConfirmados = votantes.filter((v) => v?.voto_confirmado === true).length;
-  const porcentaje = totalVotantes > 0 ? Math.round((votosConfirmados / totalVotantes) * 100) : 0;
-
-  return { totalDirigentes, totalCoordinadores, totalSubcoordinadores, totalVotantes, votosConfirmados, porcentaje };
+  return { totalDirigentes, totalCoordinadores, totalSubcoordinadores, totalVotantes };
 };
 
 // ======================= ESTILOS =======================
@@ -241,8 +226,6 @@ export const generarExcelEstructura = async ({
   if (roles.includes("coordinador")) resumen.addRow({ metrica: "Total de coordinadores", valor: totales.totalCoordinadores });
   if (roles.includes("subcoordinador")) resumen.addRow({ metrica: "Total de subcoordinadores", valor: totales.totalSubcoordinadores });
   if (roles.includes("votante")) resumen.addRow({ metrica: "Total de votantes", valor: totales.totalVotantes });
-  resumen.addRow({ metrica: "Total de votos confirmados", valor: totales.votosConfirmados });
-  resumen.addRow({ metrica: "Porcentaje de confirmación", valor: `${totales.porcentaje}%` });
   resumen.addRow({ metrica: "Generado", valor: new Date().toLocaleString("es-PY") });
 
   styleHeaderRow(resumen.getRow(1));
