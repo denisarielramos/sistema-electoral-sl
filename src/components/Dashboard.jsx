@@ -301,14 +301,18 @@ const StatCard = ({ label, value, icon: Icon, accent = false }) => (
   </div>
 );
 
-// ======================= VOTE COUNTER BADGE =======================
-const VoteCounter = ({ confirmed, total }) => {
+// ======================= TOTAL DE PERSONAS EN LA ESTRUCTURA (BADGE) =======================
+// Muestra un único número: la cantidad total de personas por debajo (hijos +
+// nietos + ... en el árbol), sin ninguna noción de "confirmado/pendiente".
+const TotalEstructuraBadge = ({ total }) => {
   if (total === undefined || total === null) return null;
   return (
-    <span className="inline-flex items-center gap-0.5 text-xs font-medium shrink-0">
-      <span className="text-emerald-600 font-bold">{confirmed ?? 0}</span>
-      <span className="text-slate-400">/</span>
-      <span className="text-slate-500">{total}</span>
+    <span
+      className="inline-flex items-center gap-1 text-xs font-medium text-slate-500 shrink-0"
+      title="Total de personas en su estructura"
+    >
+      <Users className="w-3 h-3" />
+      {total}
     </span>
   );
 };
@@ -1789,7 +1793,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                     onGenerarAcceso={handleGenerarAcceso}
                     generandoAcceso={generandoAcceso}
                     esSuperadmin={currentUser.role === "superadmin"}
-                    counter={<VoteCounter confirmed={coordsDir.length} total={totalDir} />}
+                    counter={<TotalEstructuraBadge total={totalDir} />}
                     onDescargarExcel={() => handleDescargarExcel(`dirigente:${dirCI}`, buildDirigenteExcelPayload(dir))}
                     excelKey={`dirigente:${dirCI}`}
                     excelBusyKey={excelBusy}
@@ -1835,6 +1839,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                                   onGenerarAcceso={handleGenerarAcceso}
                                   generandoAcceso={generandoAcceso}
                                   esSuperadmin={currentUser.role === "superadmin"}
+                                  counter={<TotalEstructuraBadge total={misSubs.length + misVots.length + votantesDeMisSubs.length} />}
                                   onDescargarExcel={() => handleDescargarExcel(`coordinador:${coordCI}`, buildCoordExcelPayload(coord))}
                                   excelKey={`coordinador:${coordCI}`}
                                   excelBusyKey={excelBusy}
@@ -1871,6 +1876,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                                             onGenerarAcceso={handleGenerarAcceso}
                                             generandoAcceso={generandoAcceso}
                                             esSuperadmin={currentUser.role === "superadmin"}
+                                            counter={<TotalEstructuraBadge total={votsDeEste.length} />}
                                             onDescargarExcel={() => handleDescargarExcel(`subcoordinador:${subCI}`, buildSubExcelPayload(sub))}
                                             excelKey={`subcoordinador:${subCI}`}
                                             excelBusyKey={excelBusy}
@@ -1984,6 +1990,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                           onGenerarAcceso={handleGenerarAcceso}
                           generandoAcceso={generandoAcceso}
                           esSuperadmin={currentUser.role === "superadmin"}
+                          counter={<TotalEstructuraBadge total={misSubs.length + misVots.length + votantesDeMisSubs.length} />}
                           onDescargarExcel={() => handleDescargarExcel(`coordinador:${coordCI}`, buildCoordExcelPayload(coord))}
                           excelKey={`coordinador:${coordCI}`}
                           excelBusyKey={excelBusy}
@@ -2019,6 +2026,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                                     onGenerarAcceso={handleGenerarAcceso}
                                     generandoAcceso={generandoAcceso}
                                     esSuperadmin={currentUser.role === "superadmin"}
+                                    counter={<TotalEstructuraBadge total={votsDeEste.length} />}
                                     onDescargarExcel={() => handleDescargarExcel(`subcoordinador:${subCI}`, buildSubExcelPayload(sub))}
                                     excelKey={`subcoordinador:${subCI}`}
                                     excelBusyKey={excelBusy}
@@ -2175,6 +2183,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                     onGenerarAcceso={handleGenerarAcceso}
                     generandoAcceso={generandoAcceso}
                     esSuperadmin={currentUser.role === "superadmin"}
+                    counter={<TotalEstructuraBadge total={misSubs.length + misVots.length + votantesDeMisSubs.length} />}
                     expandible
                     isExpanded={isExpandedCoord}
                     onAsignarUbicacion={setVotanteParaUbicacion}
@@ -2207,6 +2216,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                               onGenerarAcceso={handleGenerarAcceso}
                               generandoAcceso={generandoAcceso}
                               esSuperadmin={currentUser.role === "superadmin"}
+                              counter={<TotalEstructuraBadge total={votsDeEste.length} />}
                               expandible
                               isExpanded={isExpandedSub}
                               onAsignarUbicacion={setVotanteParaUbicacion}
@@ -2380,6 +2390,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                     onGenerarAcceso={handleGenerarAcceso}
                     generandoAcceso={generandoAcceso}
                     esSuperadmin={currentUser.role === "superadmin"}
+                    counter={<TotalEstructuraBadge total={votsDeEste.length} />}
                     expandible
                     isExpanded={isExpandedSub}
                     onAsignarUbicacion={setVotanteParaUbicacion}
