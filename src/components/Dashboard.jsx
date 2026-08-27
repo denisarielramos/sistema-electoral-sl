@@ -18,11 +18,9 @@ import {
   Trash2,
   Check,
   X,
-  MapPin,
   Users,
   Search,
   CheckCircle2,
-  Clock,
   TrendingUp,
   Shield,
   AlertCircle,
@@ -39,8 +37,6 @@ import AddPersonModal from "../AddPersonModal";
 import ModalAgregarCoordinador from "./ModalAgregarCoordinador";
 import PadronSearch from "./PadronSearch";
 import ModalTelefono from "./ModalTelefono";
-import ModalDireccion from "./ModalDireccion";
-import ConfirmVotoModal from "./ConfirmVotoModal";
 import VistaSeccional from "./VistaSeccional";
 import MapeoTerritorial from "./mapeo/MapeoTerritorial";
 import BitacoraVisitas from "./mapeo/BitacoraVisitas";
@@ -71,7 +67,6 @@ import {
   getTodosVotantesDirigente,
 } from "../utils/estructuraHelpers";
 import { personaCoincideConsulta } from "../utils/busquedaHelpers";
-import { getEstadoConfirmacionTarjeta } from "../utils/confirmacionHelpers";
 
 // ======================= SMALL REUSABLE COMPONENTS =======================
 
@@ -306,54 +301,6 @@ const StatCard = ({ label, value, icon: Icon, accent = false }) => (
   </div>
 );
 
-// ======================= VOTE PROGRESS CARD =======================
-const VoteProgressCard = ({ confirmed, total, percentage }) => (
-  <div className="bg-white border border-slate-200 rounded-xl p-4 flex flex-col gap-3 shadow-card">
-    <div className="flex items-center justify-between">
-      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-        Votos Confirmados
-      </p>
-      <div className="p-1.5 rounded-lg bg-emerald-50">
-        <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-      </div>
-    </div>
-    <div>
-      <p className="text-3xl font-bold text-slate-800 leading-none">
-        {confirmed ?? 0}
-        <span className="text-lg text-slate-400 font-normal">/{total ?? 0}</span>
-      </p>
-    </div>
-    <div>
-      <div className="flex items-center justify-between mb-1.5">
-        <span className="text-xs text-slate-500">Progreso</span>
-        <span
-          className={`text-xs font-bold ${
-            percentage >= 75
-              ? "text-emerald-600"
-              : percentage >= 50
-              ? "text-amber-600"
-              : "text-slate-600"
-          }`}
-        >
-          {percentage ?? 0}%
-        </span>
-      </div>
-      <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
-        <div
-          className={`h-2 rounded-full transition-all duration-500 ${
-            percentage >= 75
-              ? "bg-emerald-500"
-              : percentage >= 50
-              ? "bg-amber-500"
-              : "bg-brand-500"
-          }`}
-          style={{ width: `${percentage ?? 0}%` }}
-        />
-      </div>
-    </div>
-  </div>
-);
-
 // ======================= VOTE COUNTER BADGE =======================
 const VoteCounter = ({ confirmed, total }) => {
   if (total === undefined || total === null) return null;
@@ -386,7 +333,6 @@ const PersonCard = ({
   rolLabel,
   counter,
   onTelefono,
-  onDireccion,
   onCopy,
   copiedCode,
   tablaAcceso,
@@ -396,10 +342,6 @@ const PersonCard = ({
   onDescargarExcel,
   excelKey,
   excelBusyKey,
-  canConfirmar,
-  canAnular,
-  onConfirmar,
-  onAnular,
   onAsignarUbicacion,
   onEliminar,
   esCoincidencia = false, // true si esta tarjeta es la que matcheó la búsqueda interna (no un ancestro mostrado por contexto)
@@ -414,12 +356,6 @@ const PersonCard = ({
     : "Cargando...";
   const loginCode = persona.login_code;
   const tieneCode = loginCode && String(loginCode).trim() !== "";
-  const esVotante = tipo === "votante";
-  const confirmado = esVotante && persona.voto_confirmado === true;
-  const estadoConfirmacion = getEstadoConfirmacionTarjeta(persona, tipo);
-  const confirmadoPorRolAutomatico = estadoConfirmacion === "confirmado_por_rol";
-  const subConfirmado = estadoConfirmacion === "sub_confirmado";
-  const subPendiente = estadoConfirmacion === "sub_pendiente";
 
   const row = (
     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 flex-1 min-w-0">
@@ -453,26 +389,11 @@ const PersonCard = ({
         </p>
         <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-slate-500">
           <span className="truncate">Tel: {persona.telefono || "Sin teléfono"}</span>
-          <span className="truncate">Dir: {direccionMostrar || "Sin dirección"}</span>
           <span className="truncate">Local: {persona.local_votacion || "Sin dato"}</span>
           <span>Mesa: {persona.mesa || "Sin dato"}</span>
           <span>Orden: {persona.orden || "Sin dato"}</span>
         </div>
         <div className="flex flex-wrap gap-1.5 pt-0.5">
-          {esVotante && confirmado && (
-            <Badge variant="green">
-              <Check className="w-3 h-3 mr-1" />
-              Confirmado
-            </Badge>
-          )}
-          {confirmadoPorRolAutomatico && <Badge variant="blue">Confirmado por rol</Badge>}
-          {subConfirmado && (
-            <Badge variant="green">
-              <Check className="w-3 h-3 mr-1" />
-              Confirmado
-            </Badge>
-          )}
-          {subPendiente && <Badge variant="amber">Pendiente</Badge>}
           {persona.tercera_edad === true && <TerceraEdadBadge />}
         </div>
       </div>
@@ -480,9 +401,6 @@ const PersonCard = ({
       <div className="flex gap-1.5 shrink-0 flex-wrap items-center" onClick={(e) => e.stopPropagation()}>
         <ActionBtn onClick={() => onTelefono(tipo, persona)} title="Editar teléfono" variant="green">
           <Phone className="w-3.5 h-3.5" />
-        </ActionBtn>
-        <ActionBtn onClick={() => onDireccion(tipo, persona)} title="Editar dirección" variant="blue">
-          <MapPin className="w-3.5 h-3.5" />
         </ActionBtn>
         {direccionMostrar && (
           <ActionBtn onClick={() => abrirUbicacion(direccionMostrar)} title="Abrir ubicación">
@@ -499,16 +417,6 @@ const PersonCard = ({
             {generandoAcceso === persona.ci ? "Generando..." : "Generar acceso"}
           </button>
         ) : null}
-        {esVotante && !confirmado && canConfirmar?.(persona) && (
-          <ActionBtn onClick={() => onConfirmar(persona)} title="Confirmar voto" variant="success-solid">
-            <Check className="w-3.5 h-3.5" />
-          </ActionBtn>
-        )}
-        {esVotante && confirmado && canAnular?.(persona) && (
-          <ActionBtn onClick={() => onAnular(persona)} title="Anular confirmación" variant="danger">
-            <X className="w-3.5 h-3.5" />
-          </ActionBtn>
-        )}
         {onAsignarUbicacion && (
           <ActionBtn onClick={() => onAsignarUbicacion(persona)} title="Asignar ubicación / agregar a hogar">
             <Home className="w-3.5 h-3.5" />
@@ -853,8 +761,6 @@ const Dashboard = ({ currentUser, onLogout }) => {
   const [showAgregarDirigente, setShowAgregarDirigente] = useState(false);
   const [showAgregarCoord, setShowAgregarCoord] = useState(false);
   const [modalTelefonoState, setModalTelefonoState] = useState({ show: false, tipo: null, persona: null });
-  const [modalDireccionState, setModalDireccionState] = useState({ show: false, tipo: null, persona: null });
-  const [confirmVotoState, setConfirmVotoState] = useState({ show: false, votante: null, accion: null });
 
   // Expand states
   const [expandedCoords, setExpandedCoords] = useState({});
@@ -1221,57 +1127,9 @@ const Dashboard = ({ currentUser, onLogout }) => {
     [currentUser, estructura]
   );
 
-  // ======================= CONFIRMACIÓN DE VOTO =======================
-  const canConfirmar = useCallback(
-    (votante) => {
-      const role = currentUser.role;
-      if (role === "superadmin") return true;
-      if (role === "dirigente") {
-        return normalizeCI(votante.dirigente_ci) === normalizeCI(currentUser.ci);
-      }
-      if (role === "coordinador") {
-        return normalizeCI(votante.coordinador_ci) === normalizeCI(currentUser.ci);
-      }
-      if (role === "subcoordinador") {
-        return normalizeCI(votante.asignado_por) === normalizeCI(currentUser.ci);
-      }
-      return false;
-    },
-    [currentUser]
-  );
-
-  const canAnular = useCallback(
-    (votante) => canConfirmar(votante),
-    [canConfirmar]
-  );
-
-  const handleConfirmar = useCallback((votante) => {
-    setConfirmVotoState({ show: true, votante, accion: "confirmar" });
-  }, []);
-
-  const handleAnular = useCallback((votante) => {
-    setConfirmVotoState({ show: true, votante, accion: "anular" });
-  }, []);
-
-  const handleConfirmVoto = useCallback(async () => {
-    const { votante, accion } = confirmVotoState;
-    if (!votante) return;
-    const { error } = await supabase
-      .from("votantes")
-      .update({ voto_confirmado: accion === "confirmar" })
-      .eq("ci", votante.ci);
-    if (error) { alert("Error al actualizar voto: " + error.message); return; }
-    setConfirmVotoState({ show: false, votante: null, accion: null });
-    await cargarEstructura();
-  }, [confirmVotoState, cargarEstructura]);
-
-  // ======================= MODALES TELEFONO / DIRECCION =======================
+  // ======================= MODAL TELEFONO =======================
   const handleOpenTelefono = useCallback((tipo, persona) => {
     setModalTelefonoState({ show: true, tipo, persona });
-  }, []);
-
-  const handleOpenDireccion = useCallback((tipo, persona) => {
-    setModalDireccionState({ show: true, tipo, persona });
   }, []);
 
   // Mapa único de tipo → tabla. Nunca usar ternarios encadenados para esto.
@@ -1288,15 +1146,6 @@ const Dashboard = ({ currentUser, onLogout }) => {
     const { error } = await supabase.from(tabla).update({ telefono: nuevoTelefono }).eq("ci", persona.ci);
     if (error) { alert("Error al guardar teléfono: " + error.message); throw error; }
     setModalTelefonoState({ show: false, tipo: null, persona: null });
-    await cargarEstructura();
-  }, [cargarEstructura]);
-
-  const handleSaveDireccion = useCallback(async (tipo, persona, nuevaDireccion) => {
-    const tabla = TABLE_BY_TYPE[tipo];
-    if (!tabla) { alert("Tipo de persona desconocido: " + tipo); return; }
-    const { error } = await supabase.from(tabla).update({ direccion_override: nuevaDireccion }).eq("ci", persona.ci);
-    if (error) { alert("Error al guardar dirección: " + error.message); throw error; }
-    setModalDireccionState({ show: false, tipo: null, persona: null });
     await cargarEstructura();
   }, [cargarEstructura]);
 
@@ -1824,16 +1673,11 @@ const Dashboard = ({ currentUser, onLogout }) => {
     return (
       <div className="space-y-6">
         {/* Stats */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <StatCard label="Dirigentes" value={stats.dirigentes} icon={Shield} accent />
           <StatCard label="Coordinadores" value={stats.coordinadores} icon={Users} />
           <StatCard label="Subcoords" value={stats.subcoordinadores} icon={Users} />
           <StatCard label="Votantes" value={stats.votantes} icon={CheckCircle2} />
-          <VoteProgressCard
-            confirmed={stats.totalConfirmados}
-            total={stats.totalConfirmable}
-            percentage={stats.porcentajeConfirmados}
-          />
         </div>
 
         {/* Botones de accion */}
@@ -1938,7 +1782,6 @@ const Dashboard = ({ currentUser, onLogout }) => {
                     onEliminar={handleEliminarPersona}
                     rolLabel="Dirigente"
                     onTelefono={handleOpenTelefono}
-                    onDireccion={handleOpenDireccion}
                     onCopy={handleCopy}
                     copiedCode={copiedCode}
                     tablaAcceso="dirigentes"
@@ -1985,14 +1828,12 @@ const Dashboard = ({ currentUser, onLogout }) => {
                                   onEliminar={handleEliminarPersona}
                                   rolLabel="Coordinador"
                                   onTelefono={handleOpenTelefono}
-                                  onDireccion={handleOpenDireccion}
                                   onCopy={handleCopy}
                                   copiedCode={copiedCode}
                                   tablaAcceso="coordinadores"
                                   onGenerarAcceso={handleGenerarAcceso}
                                   generandoAcceso={generandoAcceso}
                                   esSuperadmin={currentUser.role === "superadmin"}
-                                  counter={<VoteCounter confirmed={misVots.filter((v) => v.voto_confirmado).length} total={misVots.length} />}
                                   onDescargarExcel={() => handleDescargarExcel(`coordinador:${coordCI}`, buildCoordExcelPayload(coord))}
                                   excelKey={`coordinador:${coordCI}`}
                                   excelBusyKey={excelBusy}
@@ -2023,14 +1864,12 @@ const Dashboard = ({ currentUser, onLogout }) => {
                                             onEliminar={handleEliminarPersona}
                                             rolLabel="Subcoord"
                                             onTelefono={handleOpenTelefono}
-                                            onDireccion={handleOpenDireccion}
                                             onCopy={handleCopy}
                                             copiedCode={copiedCode}
                                             tablaAcceso="subcoordinadores"
                                             onGenerarAcceso={handleGenerarAcceso}
                                             generandoAcceso={generandoAcceso}
                                             esSuperadmin={currentUser.role === "superadmin"}
-                                            counter={<VoteCounter confirmed={votsDeEste.filter((v) => v.voto_confirmado).length} total={votsDeEste.length} />}
                                             onDescargarExcel={() => handleDescargarExcel(`subcoordinador:${subCI}`, buildSubExcelPayload(sub))}
                                             excelKey={`subcoordinador:${subCI}`}
                                             excelBusyKey={excelBusy}
@@ -2048,11 +1887,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                                                 tipo="votante"
                                                 onEliminar={handleEliminarPersona}
                                                 onTelefono={handleOpenTelefono}
-                                                onDireccion={handleOpenDireccion}
-                                                onConfirmar={handleConfirmar} esCoincidencia={!!matchCI}
-                                                onAnular={handleAnular}
-                                                canConfirmar={canConfirmar}
-                                                canAnular={canAnular}
+                                                esCoincidencia={!!matchCI}
                                                 onAsignarUbicacion={setVotanteParaUbicacion}
                                                 wrapped
                                               />
@@ -2070,11 +1905,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                                       tipo="votante"
                                       onEliminar={handleEliminarPersona}
                                       onTelefono={handleOpenTelefono}
-                                      onDireccion={handleOpenDireccion}
-                                      onConfirmar={handleConfirmar} esCoincidencia={!!matchCI}
-                                      onAnular={handleAnular}
-                                      canConfirmar={canConfirmar}
-                                      canAnular={canAnular}
+                                      esCoincidencia={!!matchCI}
                                       onAsignarUbicacion={setVotanteParaUbicacion}
                                       wrapped
                                     />
@@ -2101,11 +1932,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                             tipo="votante"
                             onEliminar={handleEliminarPersona}
                             onTelefono={handleOpenTelefono}
-                            onDireccion={handleOpenDireccion}
-                            onConfirmar={handleConfirmar} esCoincidencia={!!matchCI}
-                            onAnular={handleAnular}
-                            canConfirmar={canConfirmar}
-                            canAnular={canAnular}
+                            esCoincidencia={!!matchCI}
                             onAsignarUbicacion={setVotanteParaUbicacion}
                             wrapped
                           />
@@ -2150,14 +1977,12 @@ const Dashboard = ({ currentUser, onLogout }) => {
                           onEliminar={handleEliminarPersona}
                           rolLabel="Coordinador"
                           onTelefono={handleOpenTelefono}
-                          onDireccion={handleOpenDireccion}
                           onCopy={handleCopy}
                           copiedCode={copiedCode}
                           tablaAcceso="coordinadores"
                           onGenerarAcceso={handleGenerarAcceso}
                           generandoAcceso={generandoAcceso}
                           esSuperadmin={currentUser.role === "superadmin"}
-                          counter={<VoteCounter confirmed={misVots.filter((v) => v.voto_confirmado).length} total={misVots.length} />}
                           onDescargarExcel={() => handleDescargarExcel(`coordinador:${coordCI}`, buildCoordExcelPayload(coord))}
                           excelKey={`coordinador:${coordCI}`}
                           excelBusyKey={excelBusy}
@@ -2187,14 +2012,12 @@ const Dashboard = ({ currentUser, onLogout }) => {
                                     onEliminar={handleEliminarPersona}
                                     rolLabel="Subcoord"
                                     onTelefono={handleOpenTelefono}
-                                    onDireccion={handleOpenDireccion}
                                     onCopy={handleCopy}
                                     copiedCode={copiedCode}
                                     tablaAcceso="subcoordinadores"
                                     onGenerarAcceso={handleGenerarAcceso}
                                     generandoAcceso={generandoAcceso}
                                     esSuperadmin={currentUser.role === "superadmin"}
-                                    counter={<VoteCounter confirmed={votsDeEste.filter((v) => v.voto_confirmado).length} total={votsDeEste.length} />}
                                     onDescargarExcel={() => handleDescargarExcel(`subcoordinador:${subCI}`, buildSubExcelPayload(sub))}
                                     excelKey={`subcoordinador:${subCI}`}
                                     excelBusyKey={excelBusy}
@@ -2212,11 +2035,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                                         tipo="votante"
                                         onEliminar={handleEliminarPersona}
                                         onTelefono={handleOpenTelefono}
-                                        onDireccion={handleOpenDireccion}
-                                        onConfirmar={handleConfirmar} esCoincidencia={!!matchCI}
-                                        onAnular={handleAnular}
-                                        canConfirmar={canConfirmar}
-                                        canAnular={canAnular}
+                                        esCoincidencia={!!matchCI}
                                         onAsignarUbicacion={setVotanteParaUbicacion}
                                         wrapped
                                       />
@@ -2233,11 +2052,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                               tipo="votante"
                               onEliminar={handleEliminarPersona}
                               onTelefono={handleOpenTelefono}
-                              onDireccion={handleOpenDireccion}
-                              onConfirmar={handleConfirmar} esCoincidencia={!!matchCI}
-                              onAnular={handleAnular}
-                              canConfirmar={canConfirmar}
-                              canAnular={canAnular}
+                              esCoincidencia={!!matchCI}
                               onAsignarUbicacion={setVotanteParaUbicacion}
                               wrapped
                             />
@@ -2353,14 +2168,12 @@ const Dashboard = ({ currentUser, onLogout }) => {
                     onEliminar={handleEliminarPersona}
                     rolLabel="Coordinador"
                     onTelefono={handleOpenTelefono}
-                    onDireccion={handleOpenDireccion}
                     onCopy={handleCopy}
                     copiedCode={copiedCode}
                     tablaAcceso="coordinadores"
                     onGenerarAcceso={handleGenerarAcceso}
                     generandoAcceso={generandoAcceso}
                     esSuperadmin={currentUser.role === "superadmin"}
-                    counter={<VoteCounter confirmed={misVots.filter((v) => v.voto_confirmado).length} total={misVots.length} />}
                     expandible
                     isExpanded={isExpandedCoord}
                     onAsignarUbicacion={setVotanteParaUbicacion}
@@ -2387,14 +2200,12 @@ const Dashboard = ({ currentUser, onLogout }) => {
                               onEliminar={handleEliminarPersona}
                               rolLabel="Subcoord"
                               onTelefono={handleOpenTelefono}
-                              onDireccion={handleOpenDireccion}
                               onCopy={handleCopy}
                               copiedCode={copiedCode}
                               tablaAcceso="subcoordinadores"
                               onGenerarAcceso={handleGenerarAcceso}
                               generandoAcceso={generandoAcceso}
                               esSuperadmin={currentUser.role === "superadmin"}
-                              counter={<VoteCounter confirmed={votsDeEste.filter((v) => v.voto_confirmado).length} total={votsDeEste.length} />}
                               expandible
                               isExpanded={isExpandedSub}
                               onAsignarUbicacion={setVotanteParaUbicacion}
@@ -2409,11 +2220,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                                   tipo="votante"
                                   onEliminar={handleEliminarPersona}
                                   onTelefono={handleOpenTelefono}
-                                  onDireccion={handleOpenDireccion}
-                                  onConfirmar={handleConfirmar} esCoincidencia={!!matchCI}
-                                  onAnular={handleAnular}
-                                  canConfirmar={canConfirmar}
-                                  canAnular={canAnular}
+                                  esCoincidencia={!!matchCI}
                                   onAsignarUbicacion={setVotanteParaUbicacion}
                                   wrapped
                                 />
@@ -2430,11 +2237,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                         tipo="votante"
                         onEliminar={handleEliminarPersona}
                         onTelefono={handleOpenTelefono}
-                        onDireccion={handleOpenDireccion}
-                        onConfirmar={handleConfirmar} esCoincidencia={!!matchCI}
-                        onAnular={handleAnular}
-                        canConfirmar={canConfirmar}
-                        canAnular={canAnular}
+                        esCoincidencia={!!matchCI}
                         onAsignarUbicacion={setVotanteParaUbicacion}
                         wrapped
                       />
@@ -2460,11 +2263,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                 tipo="votante"
                 onEliminar={handleEliminarPersona}
                 onTelefono={handleOpenTelefono}
-                onDireccion={handleOpenDireccion}
-                onConfirmar={handleConfirmar} esCoincidencia={!!matchCI}
-                onAnular={handleAnular}
-                canConfirmar={canConfirmar}
-                canAnular={canAnular}
+                esCoincidencia={!!matchCI}
                 onAsignarUbicacion={setVotanteParaUbicacion}
                 wrapped
               />
@@ -2487,14 +2286,9 @@ const Dashboard = ({ currentUser, onLogout }) => {
     return (
       <div className="space-y-6">
         {/* Stats */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
           <StatCard label="Subcoords" value={stats.subcoordinadores ?? misSubs.length} icon={Users} accent />
           <StatCard label="Votantes" value={stats.totalVotantes ?? misVotantesDirectos.length} icon={CheckCircle2} />
-          <VoteProgressCard
-            confirmed={stats.votosConfirmados ?? 0}
-            total={stats.totalVotantes ?? misVotantesDirectos.length}
-            percentage={stats.porcentajeConfirmados ?? 0}
-          />
           <StatCard label="Total Red" value={stats.totalRed ?? (misSubs.length + misVotantesDirectos.length)} icon={TrendingUp} />
         </div>
 
@@ -2579,14 +2373,12 @@ const Dashboard = ({ currentUser, onLogout }) => {
                     onEliminar={handleEliminarPersona}
                     rolLabel="Subcoordinador"
                     onTelefono={handleOpenTelefono}
-                    onDireccion={handleOpenDireccion}
                     onCopy={handleCopy}
                     copiedCode={copiedCode}
                     tablaAcceso="subcoordinadores"
                     onGenerarAcceso={handleGenerarAcceso}
                     generandoAcceso={generandoAcceso}
                     esSuperadmin={currentUser.role === "superadmin"}
-                    counter={<VoteCounter confirmed={votsDeEste.filter((v) => v.voto_confirmado).length} total={votsDeEste.length} />}
                     expandible
                     isExpanded={isExpandedSub}
                     onAsignarUbicacion={setVotanteParaUbicacion}
@@ -2608,11 +2400,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                             tipo="votante"
                             onEliminar={handleEliminarPersona}
                             onTelefono={handleOpenTelefono}
-                            onDireccion={handleOpenDireccion}
-                            onConfirmar={handleConfirmar} esCoincidencia={!!matchCI}
-                            onAnular={handleAnular}
-                            canConfirmar={canConfirmar}
-                            canAnular={canAnular}
+                            esCoincidencia={!!matchCI}
                             onAsignarUbicacion={setVotanteParaUbicacion}
                             wrapped
                           />
@@ -2643,11 +2431,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                 tipo="votante"
                 onEliminar={handleEliminarPersona}
                 onTelefono={handleOpenTelefono}
-                onDireccion={handleOpenDireccion}
-                onConfirmar={handleConfirmar} esCoincidencia={!!matchCI}
-                onAnular={handleAnular}
-                canConfirmar={canConfirmar}
-                canAnular={canAnular}
+                esCoincidencia={!!matchCI}
                 onAsignarUbicacion={setVotanteParaUbicacion}
                 wrapped
               />
@@ -2670,12 +2454,6 @@ const Dashboard = ({ currentUser, onLogout }) => {
         {/* Stats */}
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
           <StatCard label="Mis Votantes" value={stats.votantes} icon={CheckCircle2} accent />
-          <VoteProgressCard
-            confirmed={stats.votosConfirmados}
-            total={stats.votantes}
-            percentage={stats.porcentajeConfirmados}
-          />
-          <StatCard label="Pendientes" value={stats.votosPendientes} icon={Clock} />
         </div>
 
         {/* Botones */}
@@ -2727,11 +2505,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                 tipo="votante"
                 onEliminar={handleEliminarPersona}
                 onTelefono={handleOpenTelefono}
-                onDireccion={handleOpenDireccion}
-                onConfirmar={handleConfirmar} esCoincidencia={!!matchCI}
-                onAnular={handleAnular}
-                canConfirmar={canConfirmar}
-                canAnular={canAnular}
+                esCoincidencia={!!matchCI}
                 onAsignarUbicacion={setVotanteParaUbicacion}
                 wrapped
               />
@@ -2882,30 +2656,6 @@ const Dashboard = ({ currentUser, onLogout }) => {
             )
           }
           onClose={() => setModalTelefonoState({ show: false, tipo: null, persona: null })}
-        />
-      )}
-
-      {modalDireccionState.show && (
-        <ModalDireccion
-          tipo={modalDireccionState.tipo}
-          persona={modalDireccionState.persona}
-          onSave={(nuevaDireccion) =>
-            handleSaveDireccion(
-              modalDireccionState.tipo,
-              modalDireccionState.persona,
-              nuevaDireccion
-            )
-          }
-          onClose={() => setModalDireccionState({ show: false, tipo: null, persona: null })}
-        />
-      )}
-
-      {confirmVotoState.show && (
-        <ConfirmVotoModal
-          votante={confirmVotoState.votante}
-          accion={confirmVotoState.accion}
-          onConfirm={handleConfirmVoto}
-          onClose={() => setConfirmVotoState({ show: false, votante: null, accion: null })}
         />
       )}
 
