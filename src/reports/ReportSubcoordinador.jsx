@@ -6,7 +6,6 @@ export default function ReportSubcoordinador({ estructura, currentUser }) {
     (v) => String(v.asignado_por) === String(currentUser.ci)
   );
 
-  const votosConfirmados = misVotantes.filter((v) => v.voto_confirmado === true).length;
   const conTelefono = misVotantes.filter((v) => !!v.telefono).length;
   const sinTelefono = misVotantes.length - conTelefono;
 
@@ -26,10 +25,6 @@ export default function ReportSubcoordinador({ estructura, currentUser }) {
           <span class="label">Sin Teléfono</span>
           <span class="value">${sinTelefono}</span>
         </div>
-        <div class="summary-item">
-          <span class="label">Votos Confirmados</span>
-          <span class="value">${votosConfirmados}</span>
-        </div>
       </div>
     </section>
 
@@ -48,7 +43,6 @@ export default function ReportSubcoordinador({ estructura, currentUser }) {
           <th>Votante</th>
           <th style="width:18%">CI</th>
           <th style="width:20%">Teléfono</th>
-          <th style="width:15%">Confirmado</th>
         </tr>
       </thead>
       <tbody>
@@ -60,7 +54,6 @@ export default function ReportSubcoordinador({ estructura, currentUser }) {
         <td>${v.nombre} ${v.apellido}</td>
         <td>${v.ci}</td>
         <td>${v.telefono || "—"}</td>
-        <td>${v.voto_confirmado ? "Sí" : "No"}</td>
       </tr>
     `;
   });

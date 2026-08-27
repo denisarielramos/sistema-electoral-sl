@@ -27,13 +27,12 @@ export const generateReport = ({ titulo, datos, currentUser }) => {
   // Table
   autoTable(doc, {
     startY: 25,
-    head: [["Nombre", "CI", "Rol", "Teléfono", "Estado"]],
+    head: [["Nombre", "CI", "Rol", "Teléfono"]],
     body: datos.map((item) => [
       item.nombre,
       item.ci,
       item.rol,
       item.telefono || "-",
-      item.voto_confirmado ? "Confirmado" : "Pendiente",
     ]),
     theme: "grid",
     headStyles: {

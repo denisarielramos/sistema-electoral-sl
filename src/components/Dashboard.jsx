@@ -1673,11 +1673,12 @@ const Dashboard = ({ currentUser, onLogout }) => {
     return (
       <div className="space-y-6">
         {/* Stats */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
           <StatCard label="Dirigentes" value={stats.dirigentes} icon={Shield} accent />
           <StatCard label="Coordinadores" value={stats.coordinadores} icon={Users} />
           <StatCard label="Subcoords" value={stats.subcoordinadores} icon={Users} />
           <StatCard label="Votantes" value={stats.votantes} icon={CheckCircle2} />
+          <StatCard label="Total" value={stats.totalRed} icon={TrendingUp} />
         </div>
 
         {/* Botones de accion */}
@@ -2454,6 +2455,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
         {/* Stats */}
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
           <StatCard label="Mis Votantes" value={stats.votantes} icon={CheckCircle2} accent />
+          <StatCard label="Total" value={stats.totalRed ?? stats.votantes} icon={TrendingUp} />
         </div>
 
         {/* Botones */}
