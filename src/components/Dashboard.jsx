@@ -130,7 +130,7 @@ const buildContactMessage = (persona) => {
   const local = persona?.local_votacion || "Sin dato";
   const mesa = persona?.mesa || "Sin dato";
   const orden = persona?.orden || "Sin dato";
-  return `¡Hola ${nombre}! 👋\n\nTe escribimos del equipo de *José "Chechito" López* para recordarte tus datos de votación 🗳️:\n\n📍 Local de votación: ${local}\n🪑 Mesa: ${mesa}\n🔢 Orden: ${orden}\n\nEl día de la elección te pedimos tu apoyo votando la *Opción 3, Lista 1* ✅, la lista de José "Chechito" López.\n\n¡Contamos con vos! 🙌`;
+  return `¡Hola ${nombre}! 👋\n\nTe escribimos del equipo de *José "Chechito" López* para recordarte tus datos de votación 🗳️:\n\n📍 Local de votación: ${local}\nMesa: ${mesa}\nOrden: ${orden}\n\nEl día de la elección te pedimos tu apoyo votando la *Opción 3, Lista 1* ✅, la lista de José "Chechito" López.\n\n¡Contamos con vos! 🙌`;
 };
 
 // Icono de WhatsApp (lucide-react no incluye logos de marca) — mismo trazo/grosor que
@@ -453,7 +453,6 @@ const PersonCard = ({
         <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-slate-500">
           <span className="truncate">Tel: {persona.telefono || "Sin teléfono"}</span>
           <span className="truncate">Dir: {direccionMostrar || "Sin dirección"}</span>
-          <span>Seccional: {persona.seccional || "Sin dato"}</span>
           <span className="truncate">Local: {persona.local_votacion || "Sin dato"}</span>
           <span>Mesa: {persona.mesa || "Sin dato"}</span>
           <span>Orden: {persona.orden || "Sin dato"}</span>
@@ -727,7 +726,6 @@ const ModalAgregarDirigente = ({
             <div className="bg-brand-50 border border-brand-100 rounded-xl px-4 py-3">
               <p className="font-semibold text-sm text-slate-800">{personaPadron.nombre} {personaPadron.apellido || ""}</p>
               <p className="text-xs text-slate-500 mt-0.5">CI: {personaPadron.ci}</p>
-              {personaPadron.seccional && <p className="text-xs text-slate-500">Seccional: {personaPadron.seccional}</p>}
             </div>
             <div>
               <label className={labelCls}>Telefono celular <span className="text-red-500">*</span></label>
@@ -1864,7 +1862,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
             className="inline-flex items-center gap-2 px-4 h-9 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 rounded-lg text-sm font-medium transition-colors"
           >
             <MapIcon className="w-4 h-4" />
-            Vista por seccional
+            Vista por local
           </button>
           <button
             onClick={() => setMostrarMapeo(true)}

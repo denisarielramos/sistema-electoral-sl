@@ -49,7 +49,6 @@ const MiEstructura = ({
           <Copy className="w-4 h-4" /> Copiar acceso
         </button>
       )}
-      {persona.seccional && <p>Seccional: {persona.seccional}</p>}
       {persona.local_votacion && <p>Local: {persona.local_votacion}</p>}
       {persona.mesa && <p>Mesa: {persona.mesa}</p>}
       {persona.orden && <p>Orden: {persona.orden}</p>}
