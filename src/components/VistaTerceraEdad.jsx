@@ -11,6 +11,7 @@ import { personaCoincideConsulta } from "../utils/busquedaHelpers";
 
 // ======================= HELPERS =======================
 const normalizeCI = (ci) => String(ci ?? "").replace(/\D/g, "");
+const normalizeRole = (value) => String(value ?? "").trim().toLowerCase();
 
 const SIN_DATO = "Sin dato";
 
@@ -20,6 +21,39 @@ const formatCI = (ci) => {
   const num = Number(digits);
   if (Number.isNaN(num)) return digits;
   return new Intl.NumberFormat("es-PY").format(num);
+};
+
+const nombrePersona = (persona) => {
+  if (!persona) return SIN_DATO;
+  const completo = `${persona.nombre || ""} ${persona.apellido || ""}`.trim();
+  return completo || SIN_DATO;
+};
+
+// Resuelve, para un votante, quién lo tiene en su estructura: el subcoordinador
+// (si lo asignó uno), el coordinador de esa rama, y el dirigente de ese coordinador.
+// Misma interpretación de asignado_por/asignado_por_rol/coordinador_ci (con
+// compatibilidad legacy) que ya usan getVotantesDeSubcoord/getVotantesDirectosCoord
+// en utils/estructuraHelpers.js.
+const resolverJerarquiaVotante = (votante, { subsPorCI, coordsPorCI, dirsPorCI }) => {
+  const rol = normalizeRole(votante.asignado_por_rol);
+  const asignadoPorCI = normalizeCI(votante.asignado_por);
+
+  let subcoordinador = null;
+  let coordinador = null;
+
+  if (rol === "subcoordinador" || (rol === "" && subsPorCI.has(asignadoPorCI))) {
+    subcoordinador = subsPorCI.get(asignadoPorCI) || null;
+    if (subcoordinador) {
+      coordinador = coordsPorCI.get(normalizeCI(subcoordinador.coordinador_ci)) || null;
+    }
+  } else {
+    const coordCI = rol === "coordinador" ? asignadoPorCI : normalizeCI(votante.coordinador_ci);
+    coordinador = coordCI ? coordsPorCI.get(coordCI) || null : null;
+  }
+
+  const dirigente = coordinador ? dirsPorCI.get(normalizeCI(coordinador.dirigente_ci)) || null : null;
+
+  return { subcoordinador, coordinador, dirigente };
 };
 
 // ======================= STAT CARD =======================
@@ -70,6 +104,10 @@ export default function VistaTerceraEdad({
     const seen = new Set();
     const list = [];
 
+    const subsPorCI = new Map((estructura?.subcoordinadores || []).map((s) => [normalizeCI(s.ci), s]));
+    const coordsPorCI = new Map((estructura?.coordinadores || []).map((c) => [normalizeCI(c.ci), c]));
+    const dirsPorCI = new Map((estructura?.dirigentes || []).map((d) => [normalizeCI(d.ci), d]));
+
     const campo = (persona, padronPersona, key) => {
       const propio = persona?.[key];
       if (propio !== null && propio !== undefined && propio !== "") return propio;
@@ -94,6 +132,8 @@ export default function VistaTerceraEdad({
           ? `${nombre === SIN_DATO ? "" : nombre} ${apellido === SIN_DATO ? "" : apellido}`.trim() || SIN_DATO
           : SIN_DATO;
 
+      const { subcoordinador, coordinador, dirigente } = resolverJerarquiaVotante(persona, { subsPorCI, coordsPorCI, dirsPorCI });
+
       list.push({
         ci,
         nombreCompleto,
@@ -101,6 +141,9 @@ export default function VistaTerceraEdad({
         local_votacion: campo(persona, padronPersona, "local_votacion"),
         mesa: campo(persona, padronPersona, "mesa"),
         orden: campo(persona, padronPersona, "orden"),
+        dirigente: nombrePersona(dirigente),
+        coordinador: nombrePersona(coordinador),
+        subcoordinador: nombrePersona(subcoordinador),
       });
     });
 
@@ -299,6 +342,9 @@ export default function VistaTerceraEdad({
                     <th className="text-left px-4 py-3 font-semibold text-slate-600 whitespace-nowrap">LOCAL</th>
                     <th className="text-left px-4 py-3 font-semibold text-slate-600 whitespace-nowrap">NOMBRE Y APELLIDO</th>
                     <th className="text-left px-4 py-3 font-semibold text-slate-600 whitespace-nowrap">CI</th>
+                    <th className="text-left px-4 py-3 font-semibold text-slate-600 whitespace-nowrap">DIRIGENTE</th>
+                    <th className="text-left px-4 py-3 font-semibold text-slate-600 whitespace-nowrap">COORDINADOR</th>
+                    <th className="text-left px-4 py-3 font-semibold text-slate-600 whitespace-nowrap">SUBCOORDINADOR</th>
                     <th className="text-left px-4 py-3 font-semibold text-slate-600 whitespace-nowrap">TELEFONO</th>
                     <th className="text-left px-4 py-3 font-semibold text-slate-600 whitespace-nowrap">MESA</th>
                     <th className="text-left px-4 py-3 font-semibold text-slate-600 whitespace-nowrap">ORDEN</th>
@@ -312,6 +358,9 @@ export default function VistaTerceraEdad({
                       </td>
                       <td className="px-4 py-3 text-slate-800 font-medium whitespace-nowrap">{p.nombreCompleto}</td>
                       <td className="px-4 py-3 text-slate-600 whitespace-nowrap font-mono">{formatCI(p.ci)}</td>
+                      <td className="px-4 py-3 text-slate-600 whitespace-nowrap">{p.dirigente}</td>
+                      <td className="px-4 py-3 text-slate-600 whitespace-nowrap">{p.coordinador}</td>
+                      <td className="px-4 py-3 text-slate-600 whitespace-nowrap">{p.subcoordinador}</td>
                       <td className="px-4 py-3 text-slate-600 whitespace-nowrap">{p.telefono}</td>
                       <td className="px-4 py-3 text-slate-600 whitespace-nowrap">{p.mesa}</td>
                       <td className="px-4 py-3 text-slate-600 whitespace-nowrap">{p.orden}</td>
