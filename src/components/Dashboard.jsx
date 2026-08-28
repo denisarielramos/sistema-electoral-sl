@@ -38,6 +38,7 @@ import ModalAgregarCoordinador from "./ModalAgregarCoordinador";
 import PadronSearch from "./PadronSearch";
 import ModalTelefono from "./ModalTelefono";
 import VistaSeccional from "./VistaSeccional";
+import VistaTerceraEdad from "./VistaTerceraEdad";
 import MapeoTerritorial from "./mapeo/MapeoTerritorial";
 import BitacoraVisitas from "./mapeo/BitacoraVisitas";
 import AccesoRapidoHogar from "./mapeo/AccesoRapidoHogar";
@@ -93,6 +94,7 @@ const ActionBtn = ({ onClick, title, variant = "default", ariaLabel, children })
     default: "border border-slate-200 text-slate-600 hover:bg-slate-50",
     green: "border border-emerald-200 text-emerald-700 hover:bg-emerald-50",
     blue: "border border-blue-200 text-blue-700 hover:bg-blue-50",
+    amber: "border border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100",
     danger: "border border-red-200 text-red-600 hover:bg-red-50",
     "danger-solid": "bg-red-600 text-white hover:bg-red-700",
     "success-solid": "bg-emerald-600 text-white hover:bg-emerald-700",
@@ -348,6 +350,7 @@ const PersonCard = ({
   excelBusyKey,
   onAsignarUbicacion,
   onEliminar,
+  onToggleTerceraEdad, // solo superadmin, solo tipo="votante" — ver handleToggleTerceraEdad
   esCoincidencia = false, // true si esta tarjeta es la que matcheó la búsqueda interna (no un ancestro mostrado por contexto)
   expandible = false,
   isExpanded = false,
@@ -424,6 +427,15 @@ const PersonCard = ({
         {onAsignarUbicacion && (
           <ActionBtn onClick={() => onAsignarUbicacion(persona)} title="Asignar ubicación / agregar a hogar">
             <Home className="w-3.5 h-3.5" />
+          </ActionBtn>
+        )}
+        {tipo === "votante" && onToggleTerceraEdad && (
+          <ActionBtn
+            onClick={() => onToggleTerceraEdad(persona)}
+            title={persona.tercera_edad === true ? "Quitar tercera edad" : "Marcar como tercera edad"}
+            variant={persona.tercera_edad === true ? "amber" : "default"}
+          >
+            <AlertCircle className="w-3.5 h-3.5" />
           </ActionBtn>
         )}
         {esSuperadmin && onDescargarExcel && (
@@ -790,6 +802,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
   // Vista por seccional (superadmin): reemplaza el contenido del Dashboard por una
   // vista de solo lectura filtrable, reutilizando estructura/padronMap ya en memoria.
   const [mostrarSeccional, setMostrarSeccional] = useState(false);
+  const [mostrarTerceraEdad, setMostrarTerceraEdad] = useState(false);
 
   // Mapeo territorial / Bitácora de visitas (superadmin, dirigente, coordinador):
   // pantallas completas separadas, igual que Vista por seccional. Subcoordinador no
@@ -1150,6 +1163,17 @@ const Dashboard = ({ currentUser, onLogout }) => {
     const { error } = await supabase.from(tabla).update({ telefono: nuevoTelefono }).eq("ci", persona.ci);
     if (error) { alert("Error al guardar teléfono: " + error.message); throw error; }
     setModalTelefonoState({ show: false, tipo: null, persona: null });
+    await cargarEstructura();
+  }, [cargarEstructura]);
+
+  // ======================= TERCERA EDAD (solo superadmin, solo votantes) =======================
+  const handleToggleTerceraEdad = useCallback(async (persona) => {
+    const nuevoValor = persona?.tercera_edad !== true;
+    const { error } = await supabase
+      .from("votantes")
+      .update({ tercera_edad: nuevoValor })
+      .eq("ci", persona.ci);
+    if (error) { alert("Error al actualizar tercera edad: " + error.message); return; }
     await cargarEstructura();
   }, [cargarEstructura]);
 
@@ -1731,6 +1755,13 @@ const Dashboard = ({ currentUser, onLogout }) => {
             Vista por local
           </button>
           <button
+            onClick={() => setMostrarTerceraEdad(true)}
+            className="inline-flex items-center gap-2 px-4 h-9 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 rounded-lg text-sm font-medium transition-colors"
+          >
+            <AlertCircle className="w-4 h-4" />
+            Tercera edad
+          </button>
+          <button
             onClick={() => setMostrarMapeo(true)}
             className="inline-flex items-center gap-2 px-4 h-9 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 rounded-lg text-sm font-medium transition-colors"
           >
@@ -1896,6 +1927,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                                                 onTelefono={handleOpenTelefono}
                                                 esCoincidencia={!!matchCI}
                                                 onAsignarUbicacion={setVotanteParaUbicacion}
+                                                onToggleTerceraEdad={handleToggleTerceraEdad}
                                                 wrapped
                                               />
                                             ))}
@@ -1914,6 +1946,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                                       onTelefono={handleOpenTelefono}
                                       esCoincidencia={!!matchCI}
                                       onAsignarUbicacion={setVotanteParaUbicacion}
+                                      onToggleTerceraEdad={handleToggleTerceraEdad}
                                       wrapped
                                     />
                                   ))}
@@ -1941,6 +1974,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                             onTelefono={handleOpenTelefono}
                             esCoincidencia={!!matchCI}
                             onAsignarUbicacion={setVotanteParaUbicacion}
+                            onToggleTerceraEdad={handleToggleTerceraEdad}
                             wrapped
                           />
                         ))}
@@ -2046,6 +2080,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                                         onTelefono={handleOpenTelefono}
                                         esCoincidencia={!!matchCI}
                                         onAsignarUbicacion={setVotanteParaUbicacion}
+                                        onToggleTerceraEdad={handleToggleTerceraEdad}
                                         wrapped
                                       />
                                     ))}
@@ -2063,6 +2098,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
                               onTelefono={handleOpenTelefono}
                               esCoincidencia={!!matchCI}
                               onAsignarUbicacion={setVotanteParaUbicacion}
+                              onToggleTerceraEdad={handleToggleTerceraEdad}
                               wrapped
                             />
                           ))}
@@ -2539,6 +2575,20 @@ const Dashboard = ({ currentUser, onLogout }) => {
         padronError={padronError}
         onRetryPadron={cargarPadron}
         onBack={() => setMostrarSeccional(false)}
+      />
+    );
+  }
+
+  // ======================= VISTA TERCERA EDAD (superadmin, pantalla completa) =======================
+  if (mostrarTerceraEdad && currentUser.role === "superadmin") {
+    return (
+      <VistaTerceraEdad
+        estructura={estructura}
+        padronMap={padronMap}
+        padronLoading={padronLoading}
+        padronError={padronError}
+        onRetryPadron={cargarPadron}
+        onBack={() => setMostrarTerceraEdad(false)}
       />
     );
   }
