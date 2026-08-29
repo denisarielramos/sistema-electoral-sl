@@ -2666,7 +2666,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
       </main>
 
       {currentUser.role === "superadmin" && (
-        <AsistenteIA estructura={estructura} estadisticas={estadisticas} />
+        <AsistenteIA estructura={estructura} estadisticas={estadisticas} padron={padron} />
       )}
 
       {/* MODALES */}

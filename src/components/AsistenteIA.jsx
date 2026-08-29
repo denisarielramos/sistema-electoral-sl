@@ -1,18 +1,32 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Bot, LoaderCircle, Send, ShieldCheck, Sparkles, X } from "lucide-react";
+import {
+  Bot,
+  ChevronDown,
+  Database,
+  LoaderCircle,
+  MapPin,
+  Phone,
+  Search,
+  Send,
+  ShieldCheck,
+  Sparkles,
+  UserRound,
+  X,
+} from "lucide-react";
 import Markdown from "react-markdown";
+import { resolverConsultaLocal } from "../utils/asistenteConsultas";
 import { buildAsistenteResumen } from "../utils/asistenteResumen";
 
 const INITIAL_MESSAGE = {
   role: "assistant",
   content:
-    "Hola. Puedo explicar el resumen general, la confirmación y posibles inconsistencias de la estructura. Solo analizo cifras agregadas y no modifico datos.",
+    "Hola. Puedo consultar la estructura y el padrón, mostrar fichas completas y explicar las cifras generales. Las búsquedas de personas se resuelven dentro de esta aplicación y no modifican datos.",
 };
 
 const SUGGESTIONS = [
-  "Dame un resumen general",
-  "¿Qué inconsistencias debería revisar?",
-  "Explicame el nivel de confirmación",
+  "¿Quiénes son los dirigentes sin coordinadores?",
+  "Mostrame las personas de tercera edad",
+  "Mostrame los votantes pendientes",
 ];
 
 const formatAssistantMarkdown = (content) =>
@@ -50,18 +64,126 @@ const markdownComponents = {
   ),
 };
 
-const AssistantMessage = ({ content }) => (
+const InfoItem = ({ icon: Icon, label, value, wide = false }) => {
+  if (!value) return null;
+  return (
+    <div className={`min-w-0 ${wide ? "col-span-2" : ""}`}>
+      <div className="mb-0.5 flex items-center gap-1 text-[10px] font-bold uppercase tracking-[0.08em] text-slate-400">
+        {Icon && <Icon className="h-3 w-3" />}
+        {label}
+      </div>
+      <p className="break-words text-xs font-medium leading-5 text-slate-700">{value}</p>
+    </div>
+  );
+};
+
+const LocalResult = ({ result }) => {
+  const [visibleCount, setVisibleCount] = useState(10);
+  const visibleRows = result.rows.slice(0, visibleCount);
+  const hasMore = visibleCount < result.rows.length;
+
+  return (
+    <div className="mt-1">
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.08em] text-emerald-700 ring-1 ring-emerald-100">
+          <Database className="h-3 w-3" />
+          Consulta local
+        </span>
+        <span className="text-[11px] font-semibold text-slate-400">No enviada a OpenAI</span>
+      </div>
+
+      <h3 className="text-base font-bold leading-6 text-slate-900">{result.title}</h3>
+      <p className="mt-1 text-sm leading-5 text-slate-600">{result.description}</p>
+
+      {result.total === 0 ? (
+        <div className="mt-4 rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-center">
+          <Search className="mx-auto h-5 w-5 text-slate-400" />
+          <p className="mt-2 text-xs font-medium text-slate-500">No hay registros para mostrar.</p>
+        </div>
+      ) : (
+        <div className="mt-4 space-y-3">
+          {visibleRows.map((row, index) => {
+            const confirmed = row.confirmacion?.startsWith("Confirmado");
+            return (
+              <article
+                key={`${row.id}-${index}`}
+                className="rounded-xl border border-slate-200 bg-slate-50/70 p-3.5"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <h4 className="truncate text-sm font-bold text-slate-900">{row.nombreCompleto}</h4>
+                    <p className="mt-0.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-brand-700">
+                      {row.rol}
+                    </p>
+                  </div>
+                  <span
+                    className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-bold ${
+                      confirmed
+                        ? "bg-emerald-100 text-emerald-700"
+                        : row.confirmacion === "Pendiente"
+                          ? "bg-amber-100 text-amber-700"
+                          : "bg-slate-200 text-slate-600"
+                    }`}
+                  >
+                    {row.confirmacion}
+                  </span>
+                </div>
+
+                <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 border-t border-slate-200 pt-3">
+                  <InfoItem icon={UserRound} label="CI" value={row.ci || "Sin dato"} />
+                  <InfoItem icon={Phone} label="Teléfono" value={row.telefono || "Sin dato"} />
+                  <InfoItem icon={MapPin} label="Local" value={row.local || "Sin dato"} wide />
+                  <InfoItem label="Mesa" value={row.mesa || "Sin dato"} />
+                  <InfoItem label="Orden" value={row.orden || "Sin dato"} />
+                  <InfoItem label="Seccional" value={row.seccional || "Sin dato"} />
+                  <InfoItem label="Tercera edad" value={row.terceraEdad} />
+                  <InfoItem label="Dirigente" value={row.dirigente} wide />
+                  <InfoItem label="Coordinador" value={row.coordinador} wide />
+                  <InfoItem label="Subcoordinador" value={row.subcoordinador} wide />
+                  <InfoItem label="Asignado por" value={row.asignadoPor} wide />
+                  <InfoItem label="Dirección" value={row.direccion} wide />
+                </div>
+              </article>
+            );
+          })}
+
+          {hasMore && (
+            <button
+              type="button"
+              onClick={() => setVisibleCount((current) => current + 10)}
+              className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-bold text-slate-600 transition-colors hover:bg-slate-50"
+            >
+              Mostrar 10 más
+              <ChevronDown className="h-3.5 w-3.5" />
+            </button>
+          )}
+
+          {result.truncated && (
+            <p className="rounded-lg bg-amber-50 px-3 py-2 text-[11px] leading-4 text-amber-800">
+              Se muestran los primeros {result.rows.length} de {result.total} resultados. Refiná la pregunta para ver un grupo más específico.
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const AssistantMessage = ({ content, result }) => (
   <div className="flex w-full items-start gap-2.5">
     <div className="mt-6 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-brand-700 ring-1 ring-brand-100">
-      <Sparkles className="h-4 w-4" />
+      {result ? <Database className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />}
     </div>
     <div className="min-w-0 flex-1">
       <div className="mb-1.5 flex items-center gap-2 px-1">
-        <span className="text-[11px] font-bold uppercase tracking-[0.1em] text-slate-500">Análisis IA</span>
+        <span className="text-[11px] font-bold uppercase tracking-[0.1em] text-slate-500">
+          {result ? "Resultado del sistema" : "Análisis IA"}
+        </span>
         <span className="h-1 w-1 rounded-full bg-emerald-500" aria-hidden="true" />
       </div>
       <div className="overflow-hidden rounded-2xl rounded-tl-md border border-slate-200 bg-white px-4 py-4 shadow-sm">
-        <Markdown components={markdownComponents}>{formatAssistantMarkdown(content)}</Markdown>
+        {content && <Markdown components={markdownComponents}>{formatAssistantMarkdown(content)}</Markdown>}
+        {result && <LocalResult result={result} />}
       </div>
     </div>
   </div>
@@ -76,7 +198,7 @@ const getErrorMessage = async (response) => {
   }
 };
 
-const AsistenteIA = ({ estructura, estadisticas }) => {
+const AsistenteIA = ({ estructura, estadisticas, padron }) => {
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState([INITIAL_MESSAGE]);
   const [input, setInput] = useState("");
@@ -101,10 +223,21 @@ const AsistenteIA = ({ estructura, estadisticas }) => {
     const question = text.trim();
     if (!question || loading) return;
 
-    const userMessage = { role: "user", content: question };
+    const localResult = resolverConsultaLocal({ question, estructura, padron });
+    const userMessage = { role: "user", content: question, localOnly: Boolean(localResult) };
     const nextMessages = [...messages, userMessage];
     setMessages(nextMessages);
     setInput("");
+
+    if (localResult) {
+      setMessages([
+        ...nextMessages,
+        { role: "assistant", content: "", result: localResult, localOnly: true },
+      ]);
+      window.setTimeout(() => inputRef.current?.focus(), 50);
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -114,7 +247,7 @@ const AsistenteIA = ({ estructura, estadisticas }) => {
         body: JSON.stringify({
           question,
           summary,
-          history: messages.slice(-6),
+          history: messages.filter((message) => !message.localOnly && !message.result).slice(-6),
         }),
       });
 
@@ -169,7 +302,7 @@ const AsistenteIA = ({ estructura, estadisticas }) => {
                   <h2 className="text-sm font-bold tracking-tight">Asistente IA</h2>
                   <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-brand-100">
                     <ShieldCheck className="h-3.5 w-3.5" />
-                    <span className="truncate">Seguro · solo datos agregados</span>
+                    <span className="truncate">Consultas locales · solo lectura</span>
                   </div>
                 </div>
               </div>
@@ -193,7 +326,11 @@ const AsistenteIA = ({ estructura, estadisticas }) => {
                     {message.content}
                   </div>
                 ) : (
-                  <AssistantMessage key={`${message.role}-${index}`} content={message.content} />
+                  <AssistantMessage
+                    key={`${message.role}-${index}`}
+                    content={message.content}
+                    result={message.result}
+                  />
                 )
               ))}
 
