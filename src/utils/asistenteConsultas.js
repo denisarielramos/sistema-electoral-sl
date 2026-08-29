@@ -35,6 +35,18 @@ const fullName = (persona) =>
 
 const normalizeQuestion = (question) => normalizeTexto(String(question || "").replace(/[¿?¡!]/g, " "));
 
+const getResponseMode = (question) => {
+  const asksForList =
+    /\b(quien|quienes|cual|cuales|lista|listame|listar|mostrame|mostrar|nombres?)\b/.test(question);
+  const asksForCount =
+    /\b(cuanto|cuanta|cuantos|cuantas|cantidad)\b/.test(question) ||
+    /\b(numero|total)\s+de\b/.test(question);
+
+  if (asksForList) return "list";
+  if (asksForCount) return "count";
+  return "default";
+};
+
 const buildIndexes = (estructura = {}) => {
   const dirigentes = (estructura.dirigentes || []).filter(ACTIVE);
   const coordinadores = (estructura.coordinadores || []).filter(ACTIVE);
@@ -145,6 +157,17 @@ const buildEmptyResult = (title, description) => ({
   truncated: false,
   localOnly: true,
 });
+
+const applyResponseMode = (result, responseMode) => {
+  if (!result || responseMode !== "count") return result;
+
+  return {
+    ...result,
+    kind: "count",
+    rows: [],
+    truncated: false,
+  };
+};
 
 const roleFromQuestion = (question) => {
   if (/\bsubcoordinadores?\b/.test(question)) return "subcoordinador";
@@ -383,18 +406,20 @@ export const resolverConsultaLocal = ({ question, estructura = {}, padron = [] }
   if (!normalizedQuestion) return null;
 
   const indexes = buildIndexes(estructura);
+  const responseMode = getResponseMode(normalizedQuestion);
+  const finalize = (result) => applyResponseMode(result, responseMode);
 
   const hierarchyGap = resolveHierarchyGap(normalizedQuestion, estructura, indexes);
-  if (hierarchyGap) return hierarchyGap;
+  if (hierarchyGap) return finalize(hierarchyGap);
 
   const children = resolveChildrenQuery(rawQuestion, normalizedQuestion, estructura, indexes);
-  if (children) return children;
+  if (children) return finalize(children);
 
   const filtered = resolveFilteredList(rawQuestion, normalizedQuestion, estructura, padron, indexes);
-  if (filtered) return filtered;
+  if (filtered) return finalize(filtered);
 
   const lookup = resolvePersonLookup(rawQuestion, normalizedQuestion, padron, indexes);
-  if (lookup) return lookup;
+  if (lookup) return finalize(lookup);
 
   if (isSensitiveSystemQuestion(normalizedQuestion)) {
     return buildEmptyResult(

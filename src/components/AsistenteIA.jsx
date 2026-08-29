@@ -3,6 +3,7 @@ import {
   Bot,
   ChevronDown,
   Database,
+  Hash,
   LoaderCircle,
   MapPin,
   Phone,
@@ -79,8 +80,10 @@ const InfoItem = ({ icon: Icon, label, value, wide = false }) => {
 
 const LocalResult = ({ result }) => {
   const [visibleCount, setVisibleCount] = useState(10);
-  const visibleRows = result.rows.slice(0, visibleCount);
-  const hasMore = visibleCount < result.rows.length;
+  const rows = result.rows || [];
+  const visibleRows = rows.slice(0, visibleCount);
+  const hasMore = visibleCount < rows.length;
+  const isCount = result.kind === "count";
 
   return (
     <div className="mt-1">
@@ -92,15 +95,32 @@ const LocalResult = ({ result }) => {
         <span className="text-[11px] font-semibold text-slate-400">No enviada a OpenAI</span>
       </div>
 
-      <h3 className="text-base font-bold leading-6 text-slate-900">{result.title}</h3>
-      <p className="mt-1 text-sm leading-5 text-slate-600">{result.description}</p>
+      {isCount ? (
+        <div className="rounded-2xl border border-brand-100 bg-gradient-to-br from-brand-50 to-white p-5 text-center">
+          <span className="mx-auto inline-flex h-9 w-9 items-center justify-center rounded-xl bg-brand-100 text-brand-700">
+            <Hash className="h-4 w-4" />
+          </span>
+          <p className="mt-3 text-5xl font-black tracking-tight text-brand-700">{result.total}</p>
+          <h3 className="mt-2 text-sm font-bold leading-5 text-slate-900">{result.title}</h3>
+        </div>
+      ) : (
+        <>
+          <div className="flex items-start justify-between gap-3">
+            <h3 className="text-base font-bold leading-6 text-slate-900">{result.title}</h3>
+            <span className="shrink-0 rounded-full bg-brand-50 px-2.5 py-1 text-xs font-black text-brand-700 ring-1 ring-brand-100">
+              {result.total}
+            </span>
+          </div>
+          <p className="mt-1 text-sm leading-5 text-slate-600">{result.description}</p>
+        </>
+      )}
 
-      {result.total === 0 ? (
+      {!isCount && result.total === 0 ? (
         <div className="mt-4 rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-center">
           <Search className="mx-auto h-5 w-5 text-slate-400" />
           <p className="mt-2 text-xs font-medium text-slate-500">No hay registros para mostrar.</p>
         </div>
-      ) : (
+      ) : !isCount ? (
         <div className="mt-4 space-y-3">
           {visibleRows.map((row, index) => {
             const confirmed = row.confirmacion?.startsWith("Confirmado");
@@ -160,11 +180,11 @@ const LocalResult = ({ result }) => {
 
           {result.truncated && (
             <p className="rounded-lg bg-amber-50 px-3 py-2 text-[11px] leading-4 text-amber-800">
-              Se muestran los primeros {result.rows.length} de {result.total} resultados. Refiná la pregunta para ver un grupo más específico.
+              Se muestran los primeros {rows.length} de {result.total} resultados. Refiná la pregunta para ver un grupo más específico.
             </p>
           )}
         </div>
-      )}
+      ) : null}
     </div>
   );
 };

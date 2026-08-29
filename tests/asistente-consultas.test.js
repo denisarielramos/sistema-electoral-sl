@@ -85,6 +85,43 @@ test("combina filtros de tercera edad y mesa sin consultar a OpenAI", () => {
   assert.equal(result.rows[0].terceraEdad, "Sí");
 });
 
+test("una pregunta de cantidad devuelve solo el total y no las personas", () => {
+  const result = resolverConsultaLocal({
+    question: "¿Cuántas personas son de tercera edad?",
+    estructura,
+    padron,
+  });
+
+  assert.equal(result.kind, "count");
+  assert.equal(result.total, 1);
+  assert.deepEqual(result.rows, []);
+  assert.equal(result.truncated, false);
+});
+
+test("una pregunta de quiénes devuelve el total y conserva el listado", () => {
+  const result = resolverConsultaLocal({
+    question: "¿Quiénes son las personas de tercera edad?",
+    estructura,
+    padron,
+  });
+
+  assert.equal(result.kind, "people");
+  assert.equal(result.total, 1);
+  assert.equal(result.rows[0].nombreCompleto, "Elena Gómez");
+});
+
+test("la regla de cantidad también se aplica a consultas jerárquicas", () => {
+  const result = resolverConsultaLocal({
+    question: "¿Cuántos dirigentes no tienen coordinadores?",
+    estructura,
+    padron,
+  });
+
+  assert.equal(result.kind, "count");
+  assert.equal(result.total, 1);
+  assert.deepEqual(result.rows, []);
+});
+
 test("lista los votantes de un coordinador y resuelve toda su jerarquía", () => {
   const result = resolverConsultaLocal({
     question: "Mostrame los votantes de Carla Benítez",

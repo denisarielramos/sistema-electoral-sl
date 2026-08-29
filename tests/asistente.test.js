@@ -1,7 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { buildAsistenteResumen } from "../src/utils/asistenteResumen.js";
-import { isSameOrigin, sanitizeHistory, sanitizeSummary } from "../api/asistente.js";
+import {
+  getResponseInstruction,
+  isSameOrigin,
+  sanitizeHistory,
+  sanitizeSummary,
+} from "../api/asistente.js";
 
 test("el resumen contiene solo métricas agregadas y clasifica la jerarquía", () => {
   const estructura = {
@@ -66,6 +71,20 @@ test("el historial acepta solo seis mensajes de usuario o asistente", () => {
   assert.equal(sanitized.length, 6);
   assert.equal(sanitized.every((message) => message.role !== "system"), true);
   assert.equal(sanitized.at(-1).content, "mensaje-7");
+});
+
+test("las preguntas de cantidad piden una respuesta numérica sin listado", () => {
+  const instruction = getResponseInstruction("¿Cuántos votantes están pendientes?");
+
+  assert.match(instruction, /únicamente con la cifra/);
+  assert.match(instruction, /sin lista/);
+});
+
+test("si se piden nombres, el total acompaña al detalle", () => {
+  const instruction = getResponseInstruction("¿Quiénes son los coordinadores pendientes?");
+
+  assert.match(instruction, /primero el total/);
+  assert.match(instruction, /después el detalle/);
 });
 
 test("el endpoint exige que el origen coincida con el host", () => {

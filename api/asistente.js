@@ -118,6 +118,26 @@ const readBody = (req) => {
   return req.body || {};
 };
 
+export const getResponseInstruction = (question) => {
+  const normalized = String(question || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  const asksForList =
+    /\b(quien|quienes|cual|cuales|lista|listame|listar|mostrame|mostrar|nombres?)\b/.test(normalized);
+  const asksForCount =
+    /\b(cuanto|cuanta|cuantos|cuantas|cantidad)\b/.test(normalized) ||
+    /\b(numero|total)\s+de\b/.test(normalized);
+
+  if (asksForList) {
+    return "La pregunta pide identificar elementos: indicá primero el total y después el detalle disponible.";
+  }
+  if (asksForCount) {
+    return "La pregunta pide una cantidad: respondé únicamente con la cifra y una etiqueta breve, sin lista, análisis ni recomendación adicional.";
+  }
+  return "Respondé con el formato más breve y claro que corresponda a la consulta, sin agregar listados no solicitados.";
+};
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
@@ -156,7 +176,7 @@ export default async function handler(req, res) {
       ...history,
       {
         role: "user",
-        content: `Resumen estadístico actual:\n${JSON.stringify(summary)}\n\nPregunta: ${question}`,
+        content: `Resumen estadístico actual:\n${JSON.stringify(summary)}\n\nFormato de respuesta: ${getResponseInstruction(question)}\n\nPregunta: ${question}`,
       },
     ];
 
