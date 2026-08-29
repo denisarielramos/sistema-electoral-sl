@@ -42,6 +42,7 @@ import VistaTerceraEdad from "./VistaTerceraEdad";
 import MapeoTerritorial from "./mapeo/MapeoTerritorial";
 import BitacoraVisitas from "./mapeo/BitacoraVisitas";
 import AccesoRapidoHogar from "./mapeo/AccesoRapidoHogar";
+import AsistenteIA from "./AsistenteIA";
 import {
   generateSuperadminPDF,
   generateCoordinadorPDF,
@@ -2663,6 +2664,10 @@ const Dashboard = ({ currentUser, onLogout }) => {
           renderSubcoordinador()
         ) : null}
       </main>
+
+      {currentUser.role === "superadmin" && (
+        <AsistenteIA estructura={estructura} estadisticas={estadisticas} />
+      )}
 
       {/* MODALES */}
       <AddPersonModal
