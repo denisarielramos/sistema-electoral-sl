@@ -11,6 +11,7 @@ import {
 } from "./estructuraHelpers.js";
 
 const MAX_LOCAL_ROWS = 250;
+let lastLocalContextQuestion = "";
 
 const ROLE_LABELS = {
   dirigente: "Dirigente",
@@ -91,6 +92,11 @@ const fullName = (persona) =>
   `${persona?.nombre || ""} ${persona?.apellido || ""}`.trim() || "Sin nombre registrado";
 
 const normalizeQuestion = (question) => normalizeTexto(String(question || "").replace(/[¿?¡!]/g, " "));
+
+const isContextualLocalFollowUp = (question) =>
+  /^(?:y\s+)?(?:quien(?:es)?(?:\s+son)?|cual(?:es)?(?:\s+son)?|mostrame(?:los|las)?|mostralos|mostralas|listame(?:los|las)?|lista(?:los|las)|dame\s+(?:la\s+)?lista|cuanto(?:s|as)?(?:\s+son)?|cuanta(?:s)?(?:\s+son)?|cantidad|total)$/.test(
+    String(question || "").trim()
+  );
 
 const getResponseMode = (question) => {
   const asksForList =
@@ -499,13 +505,24 @@ const resolveFilteredList = (rawQuestion, question, estructura, padron, indexes)
 };
 
 export const resolverConsultaLocal = ({ question, estructura = {}, padron = [] }) => {
-  const rawQuestion = String(question || "").trim();
+  const currentRawQuestion = String(question || "").trim();
+  const currentNormalizedQuestion = normalizeQuestion(currentRawQuestion);
+  if (!currentNormalizedQuestion) return null;
+
+  const usePreviousContext =
+    Boolean(lastLocalContextQuestion) && isContextualLocalFollowUp(currentNormalizedQuestion);
+  const rawQuestion = usePreviousContext
+    ? `${lastLocalContextQuestion} ${currentRawQuestion}`
+    : currentRawQuestion;
   const normalizedQuestion = normalizeQuestion(rawQuestion);
-  if (!normalizedQuestion) return null;
 
   const indexes = buildIndexes(estructura);
   const responseMode = getResponseMode(normalizedQuestion);
-  const finalize = (result) => applyResponseMode(result, responseMode);
+  const finalize = (result) => {
+    const finalized = applyResponseMode(result, responseMode);
+    if (finalized) lastLocalContextQuestion = rawQuestion;
+    return finalized;
+  };
 
   const hierarchyGap = resolveHierarchyGap(normalizedQuestion, estructura, indexes);
   if (hierarchyGap) return finalize(hierarchyGap);
@@ -520,12 +537,15 @@ export const resolverConsultaLocal = ({ question, estructura = {}, padron = [] }
   if (lookup) return finalize(lookup);
 
   if (isSensitiveSystemQuestion(normalizedQuestion)) {
-    return buildEmptyResult(
-      "No pude interpretar la consulta",
-      "Probá indicando el dato o filtro exacto: nombre o CI, rol, teléfono, dirección, local, mesa, orden, seccional, tercera edad, confirmación o relación jerárquica."
+    return finalize(
+      buildEmptyResult(
+        "No pude interpretar la consulta",
+        "Probá indicando el dato o filtro exacto: nombre o CI, rol, teléfono, dirección, local, mesa, orden, seccional, tercera edad, confirmación o relación jerárquica."
+      )
     );
   }
 
+  lastLocalContextQuestion = "";
   return null;
 };
 
