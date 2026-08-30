@@ -27,14 +27,13 @@ const INITIAL_MESSAGE = {
 const SUGGESTIONS = [
   "¿Quiénes son los dirigentes sin coordinadores?",
   "Mostrame las personas de tercera edad",
-  "Mostrame los votantes pendientes",
+  "¿Cuántos en mi red no tienen teléfono?",
 ];
 
 const formatAssistantMarkdown = (content) =>
   String(content || "")
     .replace(/^Resumen general:\s*$/gim, "### Resumen general")
     .replace(/^\s*-\s+En la estructura jerárquica:\s*$/gim, "\n#### Estructura jerárquica\n")
-    .replace(/^\s*-\s+(Confirmación|Promedios):\s*$/gim, "\n#### $1\n")
     .replace(/^\s{2,}-\s+/gm, "- ")
     .trim();
 
@@ -122,50 +121,34 @@ const LocalResult = ({ result }) => {
         </div>
       ) : !isCount ? (
         <div className="mt-4 space-y-3">
-          {visibleRows.map((row, index) => {
-            const confirmed = row.confirmacion?.startsWith("Confirmado");
-            return (
-              <article
-                key={`${row.id}-${index}`}
-                className="rounded-xl border border-slate-200 bg-slate-50/70 p-3.5"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <h4 className="truncate text-sm font-bold text-slate-900">{row.nombreCompleto}</h4>
-                    <p className="mt-0.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-brand-700">
-                      {row.rol}
-                    </p>
-                  </div>
-                  <span
-                    className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-bold ${
-                      confirmed
-                        ? "bg-emerald-100 text-emerald-700"
-                        : row.confirmacion === "Pendiente"
-                          ? "bg-amber-100 text-amber-700"
-                          : "bg-slate-200 text-slate-600"
-                    }`}
-                  >
-                    {row.confirmacion}
-                  </span>
-                </div>
+          {visibleRows.map((row, index) => (
+            <article
+              key={`${row.id}-${index}`}
+              className="rounded-xl border border-slate-200 bg-slate-50/70 p-3.5"
+            >
+              <div className="min-w-0">
+                <h4 className="truncate text-sm font-bold text-slate-900">{row.nombreCompleto}</h4>
+                <p className="mt-0.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-brand-700">
+                  {row.rol}
+                </p>
+              </div>
 
-                <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 border-t border-slate-200 pt-3">
-                  <InfoItem icon={UserRound} label="CI" value={row.ci || "Sin dato"} />
-                  <InfoItem icon={Phone} label="Teléfono" value={row.telefono || "Sin dato"} />
-                  <InfoItem icon={MapPin} label="Local" value={row.local || "Sin dato"} wide />
-                  <InfoItem label="Mesa" value={row.mesa || "Sin dato"} />
-                  <InfoItem label="Orden" value={row.orden || "Sin dato"} />
-                  <InfoItem label="Seccional" value={row.seccional || "Sin dato"} />
-                  <InfoItem label="Tercera edad" value={row.terceraEdad} />
-                  <InfoItem label="Dirigente" value={row.dirigente} wide />
-                  <InfoItem label="Coordinador" value={row.coordinador} wide />
-                  <InfoItem label="Subcoordinador" value={row.subcoordinador} wide />
-                  <InfoItem label="Asignado por" value={row.asignadoPor} wide />
-                  <InfoItem label="Dirección" value={row.direccion} wide />
-                </div>
-              </article>
-            );
-          })}
+              <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 border-t border-slate-200 pt-3">
+                <InfoItem icon={UserRound} label="CI" value={row.ci || "Sin dato"} />
+                <InfoItem icon={Phone} label="Teléfono" value={row.telefono || "Sin dato"} />
+                <InfoItem icon={MapPin} label="Local" value={row.local || "Sin dato"} wide />
+                <InfoItem label="Mesa" value={row.mesa || "Sin dato"} />
+                <InfoItem label="Orden" value={row.orden || "Sin dato"} />
+                <InfoItem label="Seccional" value={row.seccional || "Sin dato"} />
+                <InfoItem label="Tercera edad" value={row.terceraEdad} />
+                <InfoItem label="Dirigente" value={row.dirigente} wide />
+                <InfoItem label="Coordinador" value={row.coordinador} wide />
+                <InfoItem label="Subcoordinador" value={row.subcoordinador} wide />
+                <InfoItem label="Asignado por" value={row.asignadoPor} wide />
+                <InfoItem label="Dirección" value={row.direccion} wide />
+              </div>
+            </article>
+          ))}
 
           {hasMore && (
             <button
@@ -218,6 +201,14 @@ const getErrorMessage = async (response) => {
   }
 };
 
+const isConfirmationQuestion = (question) => {
+  const normalized = String(question || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  return /\b(confirmad[oa]s?|confirmacion|pendientes?)\b/.test(normalized);
+};
+
 const AsistenteIA = ({ estructura, estadisticas, padron }) => {
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState([INITIAL_MESSAGE]);
@@ -242,6 +233,23 @@ const AsistenteIA = ({ estructura, estadisticas, padron }) => {
   const sendQuestion = async (text) => {
     const question = text.trim();
     if (!question || loading) return;
+
+    if (isConfirmationQuestion(question)) {
+      const userMessage = { role: "user", content: question, localOnly: true };
+      setMessages((current) => [
+        ...current,
+        userMessage,
+        {
+          role: "assistant",
+          content:
+            "Ese criterio ya no forma parte del sistema. Podés consultar por rol, estructura, tercera edad, teléfono, local, mesa, orden, seccional u otros datos disponibles.",
+          localOnly: true,
+        },
+      ]);
+      setInput("");
+      window.setTimeout(() => inputRef.current?.focus(), 50);
+      return;
+    }
 
     const localResult = resolverConsultaLocal({ question, estructura, padron });
     const userMessage = { role: "user", content: question, localOnly: Boolean(localResult) };
@@ -407,7 +415,7 @@ const AsistenteIA = ({ estructura, estadisticas, padron }) => {
                 </button>
               </div>
               <p className="mt-2 text-[11px] text-slate-400 text-center">
-                No consulta personas ni modifica información.
+                No modifica información.
               </p>
             </form>
           </section>
