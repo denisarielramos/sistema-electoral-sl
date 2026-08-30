@@ -46,9 +46,6 @@ export const buildAsistenteResumen = (estructura = {}, estadisticas = {}) => {
     votantesSinJerarquiaReconocida += 1;
   });
 
-  const subsConfirmados = subcoordinadores.filter((p) => p.confirmado === true).length;
-  const votosConfirmados = votantes.filter((p) => p.voto_confirmado === true).length;
-
   return {
     actualizadoEn: new Date().toISOString(),
     totales: {
@@ -73,16 +70,6 @@ export const buildAsistenteResumen = (estructura = {}, estadisticas = {}) => {
       votantesDirectosCoordinador,
       votantesDeSubcoordinador,
       votantesSinJerarquiaReconocida,
-    },
-    confirmacion: {
-      totalConfirmable: estadisticas.totalConfirmable ?? 0,
-      totalConfirmados: estadisticas.totalConfirmados ?? 0,
-      pendientes: estadisticas.votosPendientes ?? 0,
-      porcentajeConfirmados: estadisticas.porcentajeConfirmados ?? 0,
-      subcoordinadoresConfirmados: subsConfirmados,
-      subcoordinadoresPendientes: Math.max(0, subcoordinadores.length - subsConfirmados),
-      votantesConfirmados: votosConfirmados,
-      votantesPendientes: Math.max(0, votantes.length - votosConfirmados),
     },
     promedios: {
       coordinadoresPorDirigente: promedio(coordinadores.length, dirigentes.length),
