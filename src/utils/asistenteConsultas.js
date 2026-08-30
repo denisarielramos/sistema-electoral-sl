@@ -28,6 +28,63 @@ const ROLE_LABELS_PLURAL = {
   padron: "Personas del padrón",
 };
 
+const DATA_PRESENCE_FIELDS = [
+  {
+    key: "telefono",
+    label: "teléfono",
+    pattern: "(?:telefono|celular|numero\\s+de\\s+telefono)",
+    getValue: (persona) => persona?.telefono,
+  },
+  {
+    key: "direccion",
+    label: "dirección",
+    pattern: "(?:direccion|domicilio)",
+    getValue: (persona) => persona?.direccion_override || persona?.direccion,
+  },
+  {
+    key: "local_votacion",
+    label: "local de votación",
+    pattern: "(?:local(?:\\s+de\\s+votacion)?)",
+    getValue: (persona) => persona?.local_votacion,
+  },
+  {
+    key: "mesa",
+    label: "mesa",
+    pattern: "mesa",
+    getValue: (persona) => persona?.mesa,
+  },
+  {
+    key: "orden",
+    label: "orden",
+    pattern: "orden",
+    getValue: (persona) => persona?.orden,
+  },
+  {
+    key: "seccional",
+    label: "seccional",
+    pattern: "seccional",
+    getValue: (persona) => persona?.seccional,
+  },
+  {
+    key: "nombre",
+    label: "nombre",
+    pattern: "nombre",
+    getValue: (persona) => persona?.nombre,
+  },
+  {
+    key: "apellido",
+    label: "apellido",
+    pattern: "apellido",
+    getValue: (persona) => persona?.apellido,
+  },
+  {
+    key: "ci",
+    label: "CI",
+    pattern: "(?:ci|cedula)",
+    getValue: (persona) => persona?.ci,
+  },
+];
+
 const ACTIVE = (persona) => persona?.activo !== false;
 const present = (value) => value !== null && value !== undefined && String(value).trim() !== "";
 const fullName = (persona) =>
@@ -46,6 +103,36 @@ const getResponseMode = (question) => {
   if (asksForCount) return "count";
   return "default";
 };
+
+const getDataPresenceFilters = (question) =>
+  DATA_PRESENCE_FIELDS.flatMap((field) => {
+    const fieldPattern = field.pattern;
+    const missingPatterns = [
+      new RegExp(`\\bsin\\s+(?:el\\s+|la\\s+)?${fieldPattern}\\b`),
+      new RegExp(
+        `\\bno\\s+(?:tiene|tienen|cuenta|cuentan)\\s+(?:con\\s+)?(?:el\\s+|la\\s+)?${fieldPattern}\\b`
+      ),
+      new RegExp(`\\b(?:falta|faltan)\\s+(?:el\\s+|la\\s+)?${fieldPattern}\\b`),
+      new RegExp(
+        `\\b${fieldPattern}\\s+(?:faltante|faltantes|vacio|vacia|vacios|vacias|no\\s+registrad[oa]s?|sin\\s+registrar)\\b`
+      ),
+    ];
+    const presentPatterns = [
+      new RegExp(`\\bcon\\s+(?:el\\s+|la\\s+)?${fieldPattern}\\b`),
+      new RegExp(
+        `\\b(?:tiene|tienen|cuenta|cuentan)\\s+(?:con\\s+)?(?:el\\s+|la\\s+)?${fieldPattern}\\b`
+      ),
+      new RegExp(`\\b${fieldPattern}\\s+(?:registrad[oa]s?|cargad[oa]s?|disponible?s?)\\b`),
+    ];
+
+    if (missingPatterns.some((pattern) => pattern.test(question))) {
+      return [{ ...field, mode: "missing" }];
+    }
+    if (presentPatterns.some((pattern) => pattern.test(question))) {
+      return [{ ...field, mode: "present" }];
+    }
+    return [];
+  });
 
 const buildIndexes = (estructura = {}) => {
   const dirigentes = (estructura.dirigentes || []).filter(ACTIVE);
@@ -216,7 +303,7 @@ const extractPersonSearch = (rawQuestion, normalizedQuestion) => {
 };
 
 const isSensitiveSystemQuestion = (question) =>
-  /\b(nombre|apellido|persona|personas|quien|quienes|ci|cedula|telefono|direccion|dirigente|coordinador|subcoordinador|votante|padron|mesa|orden|local|seccional|tercera edad|adulto mayor|confirmado|confirmados|pendiente|pendientes|vota|votan)\b/.test(
+  /\b(nombre|apellido|persona|personas|quien|quienes|ci|cedula|telefono|celular|direccion|domicilio|dirigente|coordinador|subcoordinador|votante|padron|mesa|orden|local|seccional|tercera edad|adulto mayor|confirmado|confirmados|pendiente|pendientes|vota|votan)\b/.test(
     question
   );
 
@@ -348,6 +435,7 @@ const resolveFilteredList = (rawQuestion, question, estructura, padron, indexes)
   const confirmed = /\bconfirmados?\b/.test(question) && !pending;
   const mesa = extractNumberFilter(rawQuestion, "mesa");
   const orden = extractNumberFilter(rawQuestion, "orden");
+  const dataPresenceFilters = getDataPresenceFilters(question);
 
   const structurePeople = getStructurePeople(indexes);
   const sourcePeople = scopePadron ? padron || [] : structurePeople;
@@ -360,6 +448,7 @@ const resolveFilteredList = (rawQuestion, question, estructura, padron, indexes)
 
   const hasFilter =
     Boolean(role || thirdAge || pending || confirmed || mesa || orden || local || seccional) ||
+    dataPresenceFilters.length > 0 ||
     broadList;
   if (!hasFilter) return null;
 
@@ -377,6 +466,14 @@ const resolveFilteredList = (rawQuestion, question, estructura, padron, indexes)
     if (orden && normalizeTexto(persona?.orden) !== normalizeTexto(orden)) continue;
     if (local && normalizeTexto(persona?.local_votacion) !== normalizeTexto(local)) continue;
     if (seccional && normalizeTexto(persona?.seccional) !== normalizeTexto(seccional)) continue;
+    if (
+      dataPresenceFilters.some((filter) => {
+        const hasData = present(filter.getValue(persona));
+        return filter.mode === "missing" ? hasData : !hasData;
+      })
+    ) {
+      continue;
+    }
     total += 1;
     if (rows.length < MAX_LOCAL_ROWS) rows.push({ persona, role: personRole });
   }
@@ -385,6 +482,7 @@ const resolveFilteredList = (rawQuestion, question, estructura, padron, indexes)
     role ? ROLE_LABELS_PLURAL[role] : scopePadron ? "Personas del padrón" : "Personas de la estructura",
     thirdAge ? "de tercera edad" : "",
     pending ? "pendientes" : confirmed ? "confirmadas" : "",
+    ...dataPresenceFilters.map((filter) => `${filter.mode === "missing" ? "sin" : "con"} ${filter.label}`),
     mesa ? `mesa ${mesa}` : "",
     orden ? `orden ${orden}` : "",
     local ? `local ${local}` : "",
@@ -424,7 +522,7 @@ export const resolverConsultaLocal = ({ question, estructura = {}, padron = [] }
   if (isSensitiveSystemQuestion(normalizedQuestion)) {
     return buildEmptyResult(
       "No pude interpretar la consulta",
-      "Probá indicando el dato o filtro exacto: nombre o CI, rol, mesa, orden, local, tercera edad, confirmación o relación jerárquica."
+      "Probá indicando el dato o filtro exacto: nombre o CI, rol, teléfono, dirección, local, mesa, orden, seccional, tercera edad, confirmación o relación jerárquica."
     );
   }
 
