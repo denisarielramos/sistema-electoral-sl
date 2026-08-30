@@ -180,13 +180,6 @@ const resolveVoterHierarchy = (persona, indexes) => {
   return { dirigente, coordinador, subcoordinador };
 };
 
-const getConfirmation = (persona, role) => {
-  if (role === "dirigente" || role === "coordinador") return "Confirmado por rol";
-  if (role === "subcoordinador") return persona?.confirmado === true ? "Confirmado" : "Pendiente";
-  if (role === "votante") return persona?.voto_confirmado === true ? "Confirmado" : "Pendiente";
-  return "Sin asignación";
-};
-
 const toResultRow = (persona, role, indexes) => {
   const ci = normalizeCI(persona?.ci);
   let dirigente = null;
@@ -218,7 +211,6 @@ const toResultRow = (persona, role, indexes) => {
     direccion: persona?.direccion_override || persona?.direccion || "",
     terceraEdad:
       persona?.tercera_edad === true ? "Sí" : persona?.tercera_edad === false ? "No" : "Sin dato",
-    confirmacion: getConfirmation(persona, role),
     dirigente: dirigente ? fullName(dirigente) : "",
     coordinador: coordinador ? fullName(coordinador) : "",
     subcoordinador: subcoordinador ? fullName(subcoordinador) : "",
@@ -309,7 +301,7 @@ const extractPersonSearch = (rawQuestion, normalizedQuestion) => {
 };
 
 const isSensitiveSystemQuestion = (question) =>
-  /\b(nombre|apellido|persona|personas|quien|quienes|ci|cedula|telefono|celular|direccion|domicilio|dirigente|coordinador|subcoordinador|votante|padron|mesa|orden|local|seccional|tercera edad|adulto mayor|confirmado|confirmados|pendiente|pendientes|vota|votan)\b/.test(
+  /\b(nombre|apellido|persona|personas|quien|quienes|ci|cedula|telefono|celular|direccion|domicilio|dirigente|coordinador|subcoordinador|votante|padron|mesa|orden|local|seccional|tercera edad|adulto mayor|vota|votan)\b/.test(
     question
   );
 
@@ -437,8 +429,6 @@ const resolveFilteredList = (rawQuestion, question, estructura, padron, indexes)
   const scopePadron = /\bpadron\b/.test(question);
   const role = roleFromQuestion(question);
   const thirdAge = /\b(tercera edad|adultos? mayores?)\b/.test(question);
-  const pending = /\bpendientes?\b/.test(question);
-  const confirmed = /\bconfirmados?\b/.test(question) && !pending;
   const mesa = extractNumberFilter(rawQuestion, "mesa");
   const orden = extractNumberFilter(rawQuestion, "orden");
   const dataPresenceFilters = getDataPresenceFilters(question);
@@ -453,7 +443,7 @@ const resolveFilteredList = (rawQuestion, question, estructura, padron, indexes)
     !/\b(informacion|datos|ficha|detalle)\b.*\b(de|del)\b/.test(question);
 
   const hasFilter =
-    Boolean(role || thirdAge || pending || confirmed || mesa || orden || local || seccional) ||
+    Boolean(role || thirdAge || mesa || orden || local || seccional) ||
     dataPresenceFilters.length > 0 ||
     broadList;
   if (!hasFilter) return null;
@@ -466,8 +456,6 @@ const resolveFilteredList = (rawQuestion, question, estructura, padron, indexes)
     if (!ACTIVE(persona)) continue;
     if (role && personRole !== role) continue;
     if (thirdAge && persona?.tercera_edad !== true) continue;
-    if (pending && getConfirmation(persona, personRole) !== "Pendiente") continue;
-    if (confirmed && !getConfirmation(persona, personRole).startsWith("Confirmado")) continue;
     if (mesa && normalizeTexto(persona?.mesa) !== normalizeTexto(mesa)) continue;
     if (orden && normalizeTexto(persona?.orden) !== normalizeTexto(orden)) continue;
     if (local && normalizeTexto(persona?.local_votacion) !== normalizeTexto(local)) continue;
@@ -487,7 +475,6 @@ const resolveFilteredList = (rawQuestion, question, estructura, padron, indexes)
   const labels = [
     role ? ROLE_LABELS_PLURAL[role] : scopePadron ? "Personas del padrón" : "Personas de la estructura",
     thirdAge ? "de tercera edad" : "",
-    pending ? "pendientes" : confirmed ? "confirmadas" : "",
     ...dataPresenceFilters.map((filter) => `${filter.mode === "missing" ? "sin" : "con"} ${filter.label}`),
     mesa ? `mesa ${mesa}` : "",
     orden ? `orden ${orden}` : "",
@@ -540,7 +527,7 @@ export const resolverConsultaLocal = ({ question, estructura = {}, padron = [] }
     return finalize(
       buildEmptyResult(
         "No pude interpretar la consulta",
-        "Probá indicando el dato o filtro exacto: nombre o CI, rol, teléfono, dirección, local, mesa, orden, seccional, tercera edad, confirmación o relación jerárquica."
+        "Probá indicando el dato o filtro exacto: nombre o CI, rol, teléfono, dirección, local, mesa, orden, seccional, tercera edad o relación jerárquica."
       )
     );
   }
