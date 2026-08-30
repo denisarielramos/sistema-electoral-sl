@@ -122,6 +122,69 @@ test("la regla de cantidad también se aplica a consultas jerárquicas", () => {
   assert.deepEqual(result.rows, []);
 });
 
+test("cuenta personas de la red sin teléfono sin listar nombres", () => {
+  const result = resolverConsultaLocal({
+    question: "¿Cuántos en mi red no tienen teléfono?",
+    estructura,
+    padron,
+  });
+
+  assert.equal(result.kind, "count");
+  assert.equal(result.total, 2);
+  assert.match(result.title, /sin teléfono/i);
+  assert.deepEqual(result.rows, []);
+});
+
+test("lista personas sin teléfono cuando se piden quiénes", () => {
+  const result = resolverConsultaLocal({
+    question: "¿Quiénes en mi red no tienen teléfono?",
+    estructura,
+    padron,
+  });
+
+  assert.equal(result.kind, "people");
+  assert.equal(result.total, 2);
+  assert.deepEqual(
+    result.rows.map((row) => row.nombreCompleto).sort(),
+    ["Carla Benítez", "Diego Pérez"].sort()
+  );
+});
+
+test("combina rol, tercera edad y ausencia de teléfono", () => {
+  const result = resolverConsultaLocal({
+    question: "¿Cuántos votantes de tercera edad no tienen teléfono?",
+    estructura: {
+      ...estructura,
+      votantes: [
+        ...estructura.votantes,
+        {
+          ci: "600",
+          nombre: "Gloria",
+          apellido: "Vera",
+          tercera_edad: true,
+          voto_confirmado: false,
+        },
+      ],
+    },
+    padron,
+  });
+
+  assert.equal(result.kind, "count");
+  assert.equal(result.total, 1);
+});
+
+test("también reconoce consultas por datos presentes", () => {
+  const result = resolverConsultaLocal({
+    question: "¿Cuántos tienen teléfono?",
+    estructura,
+    padron,
+  });
+
+  assert.equal(result.kind, "count");
+  assert.equal(result.total, 3);
+  assert.match(result.title, /con teléfono/i);
+});
+
 test("lista los votantes de un coordinador y resuelve toda su jerarquía", () => {
   const result = resolverConsultaLocal({
     question: "Mostrame los votantes de Carla Benítez",
