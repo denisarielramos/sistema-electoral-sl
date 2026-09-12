@@ -116,6 +116,7 @@ export const getPersonasDisponibles = (padron, estructura) => {
       asignadoRol: rol,
       asignadoPorNombre:
         dir?.asignado_por_nombre ||
+        coord?.asignado_por_nombre ||
         sub?.asignado_por_nombre ||
         vot?.asignado_por_nombre ||
         "",
