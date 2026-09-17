@@ -1220,6 +1220,21 @@ const Dashboard = ({ currentUser, onLogout }) => {
     [padron, estructuraPadron, estructura]
   );
 
+  // Mantener en memoria los datos de padrón de una persona recién agregada evita
+  // que su tarjeta vuelva a aparecer como "Cargando..." hasta el próximo login.
+  const recordarPersonaPadron = useCallback((persona) => {
+    const ci = normalizeCI(persona?.ci);
+    if (!ci) return;
+    const normalizada = { ...persona, ci };
+    setEstructuraPadron((prev) => {
+      const index = prev.findIndex((p) => normalizeCI(p.ci) === ci);
+      if (index === -1) return [...prev, normalizada];
+      const next = [...prev];
+      next[index] = { ...next[index], ...normalizada };
+      return next;
+    });
+  }, []);
+
   // ======================= ESTADÍSTICAS =======================
   const estadisticas = useMemo(
     () => getEstadisticas(estructura, currentUser),
@@ -1323,9 +1338,10 @@ const Dashboard = ({ currentUser, onLogout }) => {
 
     const { error } = await supabase.from("votantes").insert(payload);
     if (error) { alert("Error al agregar votante: " + error.message); return; }
+    recordarPersonaPadron(persona);
     setShowAddModal(false);
     await cargarEstructura();
-  }, [currentUser, estructura, cargarEstructura, verificarCIDisponible]);
+  }, [currentUser, estructura, cargarEstructura, verificarCIDisponible, recordarPersonaPadron]);
 
 
 
@@ -1355,10 +1371,11 @@ const Dashboard = ({ currentUser, onLogout }) => {
     const { data, error } = await supabase.from("coordinadores").insert(payload).select().single();
     if (error) { alert("Error al agregar coordinador: " + error.message); return; }
     const savedCode = data?.login_code || loginCode;
+    recordarPersonaPadron(persona);
     alert(`Coordinador agregado. Código de acceso: ${savedCode}`);
     setShowAgregarCoord(false);
     await cargarEstructura();
-  }, [currentUser, cargarEstructura, verificarCIDisponible]);
+  }, [currentUser, cargarEstructura, verificarCIDisponible, recordarPersonaPadron]);
 
   // ======================= AGREGAR COORDINADOR (DIRIGENTE vía ModalAgregarCoordinador) =======================
   const handleAddCoordinadorDesdeModal = useCallback(async ({ persona, dirigenteCI }) => {
@@ -1384,10 +1401,11 @@ const Dashboard = ({ currentUser, onLogout }) => {
     const { data, error } = await supabase.from("coordinadores").insert(payload).select().single();
     if (error) { alert("Error al agregar coordinador: " + error.message); return; }
     const savedCode = data?.login_code || loginCode;
+    recordarPersonaPadron(persona);
     alert(`Coordinador agregado. Código de acceso: ${savedCode}`);
     setShowAgregarCoord(false);
     await cargarEstructura();
-  }, [currentUser, cargarEstructura, verificarCIDisponible]);
+  }, [currentUser, cargarEstructura, verificarCIDisponible, recordarPersonaPadron]);
 
   // ======================= AGREGAR SUBCOORDINADOR (SUPERADMIN/COORDINADOR) =======================
   const handleAddSubcoordinador = useCallback(async (persona) => {
@@ -1442,10 +1460,11 @@ const Dashboard = ({ currentUser, onLogout }) => {
       return;
     }
     const savedCode = data?.login_code || loginCode;
+    recordarPersonaPadron(persona);
     alert(`Subcoordinador agregado. Código de acceso: ${savedCode}`);
     setShowAddModal(false);
     await cargarEstructura();
-  }, [currentUser, cargarEstructura, verificarCIDisponible, onLogout]);
+  }, [currentUser, cargarEstructura, verificarCIDisponible, onLogout, recordarPersonaPadron]);
 
     // ======================= AGREGAR DIRIGENTE (SUPERADMIN) =======================
   const handleAgregarDirigenteDesdePadron = useCallback(async (persona) => {
@@ -1468,10 +1487,11 @@ const Dashboard = ({ currentUser, onLogout }) => {
     };
     const { data, error } = await supabase.from("dirigentes").insert(payload).select().single();
     if (error) { alert("Error al agregar dirigente: " + error.message); return null; }
+    recordarPersonaPadron(persona);
     setShowAgregarDirigente(false);
     await cargarEstructura();
     return data?.login_code || loginCode;
-  }, [currentUser, cargarEstructura, verificarCIDisponible]);
+  }, [currentUser, cargarEstructura, verificarCIDisponible, recordarPersonaPadron]);
 
   const handleAgregarDirigenteExterno = useCallback(async (datos) => {
     const ciDir = normalizeCI(datos.ci);
