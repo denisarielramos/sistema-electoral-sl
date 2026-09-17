@@ -1,0 +1,60 @@
+name: Apply login padron readiness fix
+
+on:
+  push:
+    branches:
+      - fix/login-esperar-padron
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/login-esperar-padron
+          fetch-depth: 0
+
+      - name: Patch Dashboard initial loading flow
+        env:
+          OLD_EFFECT_B64: ICB1c2VFZmZlY3QoKCkgPT4gewogICAgY2FyZ2FyRXN0cnVjdHVyYSgpOwogICAgY2FyZ2FyUGFkcm9uKCk7CiAgfSwgW2NhcmdhckVzdHJ1Y3R1cmEsIGNhcmdhclBhZHJvbl0pOw==
+          NEW_EFFECT_B64: ICB1c2VFZmZlY3QoKCkgPT4gewogICAgLy8gRWwgRGFzaGJvYXJkIHNlIG1vbnRhIGRlIGNlcm8gZW4gY2FkYSBsb2dpbi4gRXN0YSBjYXJnYSBpbmljaWFsIGRlYmUgZWplY3V0YXJzZQogICAgLy8gdW5hIHNvbGEgdmV6OiBjdWFuZG8gZWwgcGFkcsOzbiBwYXNhIGRlIHZhY8OtbyBhIGNhcmdhZG8gY2FtYmlhIGxhIHJlZmVyZW5jaWEgZGUKICAgIC8vIGNhcmdhclBhZHJvbiwgeSBhbnRlcyBlc28gZGlzcGFyYWJhIGlubmVjZXNhcmlhbWVudGUgb3RyYSBjYXJnYSBkZSBlc3RydWN0dXJhLgogICAgY2FyZ2FyRXN0cnVjdHVyYSgpOwogICAgY2FyZ2FyUGFkcm9uKCk7CiAgICAvLyBlc2xpbnQtZGlzYWJsZS1uZXh0LWxpbmUgcmVhY3QtaG9va3MvZXhoYXVzdGl2ZS1kZXBzCiAgfSwgW10pOw==
+          OLD_RENDER_B64: ICAgICAgICB7bG9hZGluZyA/ICgKICAgICAgICAgIDxkaXYgY2xhc3NOYW1lPSJ0ZXh0LWNlbnRlciBweS0yMCI+CiAgICAgICAgICAgIDxkaXYgY2xhc3NOYW1lPSJ3LTggaC04IGJvcmRlci0yIGJvcmRlci1icmFuZC0yMDAgYm9yZGVyLXQtYnJhbmQtNjAwIHJvdW5kZWQtZnVsbCBhbmltYXRlLXNwaW4gbXgtYXV0byBtYi0zIiAvPgogICAgICAgICAgICA8cCBjbGFzc05hbWU9InRleHQtc20gdGV4dC1zbGF0ZS00MDAiPkNhcmdhbmRvIGRhdG9zLi4uPC9wPgogICAgICAgICAgPC9kaXY+
+          NEW_RENDER_B64: ICAgICAgICB7bG9hZGluZyB8fCAhcGFkcm9uTG9hZGVkID8gKAogICAgICAgICAgPGRpdiBjbGFzc05hbWU9InRleHQtY2VudGVyIHB5LTIwIj4KICAgICAgICAgICAgPGRpdiBjbGFzc05hbWU9InctOCBoLTggYm9yZGVyLTIgYm9yZGVyLWJyYW5kLTIwMCBib3JkZXItdC1icmFuZC02MDAgcm91bmRlZC1mdWxsIGFuaW1hdGUtc3BpbiBteC1hdXRvIG1iLTMiIC8+CiAgICAgICAgICAgIDxwIGNsYXNzTmFtZT0idGV4dC1zbSB0ZXh0LXNsYXRlLTQwMCI+CiAgICAgICAgICAgICAge2xvYWRpbmcgPyAiQ2FyZ2FuZG8gZXN0cnVjdHVyYS4uLiIgOiAiUHJlcGFyYW5kbyBkYXRvcyBkZWwgcGFkcsOzbi4uLiJ9CiAgICAgICAgICAgIDwvcD4KICAgICAgICAgIDwvZGl2Pg==
+        run: |
+          python - <<'PY'
+          import os, base64
+          from pathlib import Path
+
+          path = Path('src/components/Dashboard.jsx')
+          text = path.read_text(encoding='utf-8')
+
+          for old_key, new_key in [
+              ('OLD_EFFECT_B64', 'NEW_EFFECT_B64'),
+              ('OLD_RENDER_B64', 'NEW_RENDER_B64'),
+          ]:
+              old = base64.b64decode(os.environ[old_key]).decode('utf-8')
+              new = base64.b64decode(os.environ[new_key]).decode('utf-8')
+              if new in text:
+                  continue
+              if old not in text:
+                  raise SystemExit(f'Expected block not found: {old_key}')
+              text = text.replace(old, new, 1)
+
+          path.write_text(text, encoding='utf-8')
+          PY
+
+      - name: Commit patched Dashboard
+        run: |
+          if git diff --quiet -- src/components/Dashboard.jsx; then
+            echo "No Dashboard changes to commit"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/components/Dashboard.jsx
+          git commit -m "fix: wait for padron before rendering structure"
+          git push origin HEAD:fix/login-esperar-padron
