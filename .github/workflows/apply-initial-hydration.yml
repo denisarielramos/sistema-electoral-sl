@@ -1,0 +1,199 @@
+name: Apply initial hydration optimization
+
+on:
+  push:
+    branches:
+      - perf/optimizar-carga-sin-romper-crud
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: perf/optimizar-carga-sin-romper-crud
+          fetch-depth: 0
+
+      - name: Patch Dashboard
+        run: |
+          python - <<'PY'
+          import re
+          from pathlib import Path
+
+          p = Path("src/components/Dashboard.jsx")
+          text = p.read_text(encoding="utf-8")
+
+          text = text.replace(
+              'import React, { useCallback, useEffect, useMemo, useState } from "react";',
+              'import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";',
+              1,
+          )
+
+          state_old = '''  const [estructuraError, setEstructuraError] = useState(null);
+  const [padron, setPadron] = useState([]);'''
+          state_new = '''  const [estructuraError, setEstructuraError] = useState(null);
+  // Padrón mínimo usado para enriquecer la estructura visible apenas inicia sesión.
+  // Se mantiene separado del padrón completo para no bloquear ni alterar el buscador.
+  const [estructuraPadron, setEstructuraPadron] = useState([]);
+  const [padron, setPadron] = useState([]);'''
+          if state_old not in text:
+              raise SystemExit("state anchor not found")
+          text = text.replace(state_old, state_new, 1)
+
+          marker = "  // ======================= CARGAR ESTRUCTURA (RAW) ======================="
+          if marker not in text:
+              raise SystemExit("structure marker not found")
+
+          hydration = '''  // ======================= PADRÓN MÍNIMO PARA LA ESTRUCTURA =======================
+  // Carga únicamente los CI que ya pertenecen a la estructura. Esto permite mostrar
+  // nombre/local/mesa/orden completos antes de renderizar el Dashboard sin esperar
+  // la descarga de las ~170k filas del padrón general.
+  const cargarPadronDeEstructura = useCallback(async (raw) => {
+    const ciSet = new Set();
+    for (const grupo of [
+      raw.dirigentes,
+      raw.coordinadores,
+      raw.subcoordinadores,
+      raw.votantes,
+    ]) {
+      for (const row of grupo || []) {
+        const ci = normalizeCI(row.ci);
+        if (ci) ciSet.add(ci);
+      }
+    }
+
+    const cises = [...ciSet];
+    if (cises.length === 0) {
+      setEstructuraPadron([]);
+      return;
+    }
+
+    // Mantener lotes pequeños evita URLs demasiado largas en PostgREST.
+    const CHUNK = 400;
+    const lotes = [];
+    for (let i = 0; i < cises.length; i += CHUNK) {
+      lotes.push(cises.slice(i, i + CHUNK));
+    }
+
+    const resultados = await Promise.all(
+      lotes.map(async (lote) => {
+        const { data, error } = await supabase
+          .from("padron")
+          .select("ci,nombre,apellido,seccional,local_votacion,mesa,orden,direccion")
+          .in("ci", lote);
+        if (error) throw error;
+        return data || [];
+      })
+    );
+
+    setEstructuraPadron(resultados.flat());
+  }, []);
+
+'''
+          text = text.replace(marker, hydration + marker, 1)
+
+          pattern = re.compile(
+              r'''  // ======================= CARGAR ESTRUCTURA \(RAW\) =======================\n'''
+              r'''  const cargarEstructura = useCallback\(async \(\) => \{.*?\n'''
+              r'''  \}, \[fetchAllActive\]\);''',
+              re.S,
+          )
+          replacement = '''  // ======================= CARGAR ESTRUCTURA (RAW) =======================
+  const cargarEstructura = useCallback(async (esperarPadronEstructura = false) => {
+    setLoading(true);
+    setEstructuraError(null);
+    try {
+      const [dirigentes, coordinadores, subcoordinadores, votantes] = await Promise.all([
+        fetchAllActive("dirigentes"),
+        fetchAllActive("coordinadores"),
+        fetchAllActive("subcoordinadores"),
+        fetchAllActive("votantes"),
+      ]);
+
+      // Guardar solo datos crudos, normalizando CI para comparaciones consistentes
+      const norm = (rows) => rows.map((r) => ({ ...r, ci: normalizeCI(r.ci) }));
+      const raw = {
+        dirigentes: norm(dirigentes),
+        coordinadores: norm(coordinadores),
+        subcoordinadores: norm(subcoordinadores),
+        votantes: norm(votantes),
+      };
+
+      setEstructuraRaw(raw);
+
+      // Solo el arranque espera este subconjunto. Las recargas posteriores del CRUD
+      // conservan su comportamiento actual y no agregan latencia innecesaria.
+      if (esperarPadronEstructura) {
+        try {
+          await cargarPadronDeEstructura(raw);
+        } catch (err) {
+          // La estructura sigue siendo utilizable; el padrón completo que carga en
+          // segundo plano puede completar los nombres si este fetch puntual falla.
+          console.error("[Dashboard] Error cargando padrón de estructura:", err);
+        }
+      }
+    } catch (err) {
+      console.error("[Dashboard]", err.message);
+      setEstructuraError(err.message || "Error al cargar la estructura.");
+    } finally {
+      setLoading(false);
+    }
+  }, [fetchAllActive, cargarPadronDeEstructura]);'''
+          text, n = pattern.subn(replacement, text, count=1)
+          if n != 1:
+              raise SystemExit(f"structure block replacements: {n}")
+
+          effect_old = '''  useEffect(() => {
+    cargarEstructura();
+    cargarPadron();
+  }, [cargarEstructura, cargarPadron]);'''
+          effect_new = '''  // Inicializar una sola vez por montaje. `cargarPadron` cambia de referencia cuando
+  // pasa de 0 a >0 filas; sin este guard el efecto podía volver a descargar la
+  // estructura después de terminar el padrón completo.
+  const inicializacionRef = useRef(false);
+  useEffect(() => {
+    if (inicializacionRef.current) return;
+    inicializacionRef.current = true;
+
+    const iniciar = async () => {
+      // Priorizar primero la estructura + sus CI del padrón. Recién cuando está lista
+      // se libera el loader y se inicia el padrón completo en segundo plano.
+      await cargarEstructura(true);
+      cargarPadron();
+    };
+
+    iniciar();
+  }, [cargarEstructura, cargarPadron]);'''
+          if effect_old not in text:
+              raise SystemExit("initial effect not found")
+          text = text.replace(effect_old, effect_new, 1)
+
+          map_old = '''  const padronMap = useMemo(() => {
+    const map = new Map();
+    for (const p of padron) map.set(normalizeCI(p.ci), p);
+    return map;
+  }, [padron]);'''
+          map_new = '''  const padronMap = useMemo(() => {
+    const map = new Map();
+    for (const p of estructuraPadron) map.set(normalizeCI(p.ci), p);
+    for (const p of padron) map.set(normalizeCI(p.ci), p);
+    return map;
+  }, [estructuraPadron, padron]);'''
+          if map_old not in text:
+              raise SystemExit("padronMap block not found")
+          text = text.replace(map_old, map_new, 1)
+
+          p.write_text(text, encoding="utf-8")
+          PY
+
+      - name: Commit optimization
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/components/Dashboard.jsx
+          git commit -m "perf: hydrate visible structure before first render"
+          git push origin HEAD:perf/optimizar-carga-sin-romper-crud
