@@ -73,8 +73,6 @@ const PadronSearch = ({
   const isNumeric = /^\d+$/.test(term);
   const words = isNumeric ? [] : termNorm.split(" ").filter(Boolean);
 
-  // Modo remoto solo cuando no existe un padrón completo cargado. El superadmin,
-  // que aún usa ese dataset para vistas globales, conserva el camino local existente.
   const remoteMode = padron.length === 0 && !padronLoading;
 
   useEffect(() => {
