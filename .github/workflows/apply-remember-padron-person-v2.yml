@@ -1,0 +1,140 @@
+name: Apply padron memory patch v2
+
+on:
+  push:
+    branches:
+      - perf/busqueda-padron-bajo-demanda
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: perf/busqueda-padron-bajo-demanda
+          fetch-depth: 0
+
+      - name: Patch Dashboard
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          p = Path('src/components/Dashboard.jsx')
+          t = p.read_text(encoding='utf-8')
+
+          stats_marker = '''  // ======================= ESTADÍSTICAS =======================
+          const estadisticas = useMemo(
+          '''
+          helper = '''  // Mantener en memoria los datos de padrón de una persona recién agregada evita
+          // que su tarjeta vuelva a aparecer como "Cargando..." hasta el próximo login.
+          const recordarPersonaPadron = useCallback((persona) => {
+            const ci = normalizeCI(persona?.ci);
+            if (!ci) return;
+            const normalizada = { ...persona, ci };
+            setEstructuraPadron((prev) => {
+              const index = prev.findIndex((p) => normalizeCI(p.ci) === ci);
+              if (index === -1) return [...prev, normalizada];
+              const next = [...prev];
+              next[index] = { ...next[index], ...normalizada };
+              return next;
+            });
+          }, []);
+
+          // ======================= ESTADÍSTICAS =======================
+          const estadisticas = useMemo(
+          '''
+          if 'const recordarPersonaPadron = useCallback' not in t:
+              if stats_marker not in t:
+                  raise SystemExit('stats marker not found')
+              t = t.replace(stats_marker, helper, 1)
+
+          replacements = [
+              (
+                  '''    const { error } = await supabase.from("votantes").insert(payload);
+              if (error) { alert("Error al agregar votante: " + error.message); return; }
+              setShowAddModal(false);
+              await cargarEstructura();
+            }, [currentUser, estructura, cargarEstructura, verificarCIDisponible]);
+          ''',
+                  '''    const { error } = await supabase.from("votantes").insert(payload);
+              if (error) { alert("Error al agregar votante: " + error.message); return; }
+              recordarPersonaPadron(persona);
+              setShowAddModal(false);
+              await cargarEstructura();
+            }, [currentUser, estructura, cargarEstructura, verificarCIDisponible, recordarPersonaPadron]);
+          ''',
+                  1,
+              ),
+              (
+                  '''    const savedCode = data?.login_code || loginCode;
+              alert(`Coordinador agregado. Código de acceso: ${savedCode}`);
+              setShowAgregarCoord(false);
+              await cargarEstructura();
+            }, [currentUser, cargarEstructura, verificarCIDisponible]);
+          ''',
+                  '''    const savedCode = data?.login_code || loginCode;
+              recordarPersonaPadron(persona);
+              alert(`Coordinador agregado. Código de acceso: ${savedCode}`);
+              setShowAgregarCoord(false);
+              await cargarEstructura();
+            }, [currentUser, cargarEstructura, verificarCIDisponible, recordarPersonaPadron]);
+          ''',
+                  0,
+              ),
+              (
+                  '''    const savedCode = data?.login_code || loginCode;
+              alert(`Subcoordinador agregado. Código de acceso: ${savedCode}`);
+              setShowAddModal(false);
+              await cargarEstructura();
+            }, [currentUser, cargarEstructura, verificarCIDisponible, onLogout]);
+          ''',
+                  '''    const savedCode = data?.login_code || loginCode;
+              recordarPersonaPadron(persona);
+              alert(`Subcoordinador agregado. Código de acceso: ${savedCode}`);
+              setShowAddModal(false);
+              await cargarEstructura();
+            }, [currentUser, cargarEstructura, verificarCIDisponible, onLogout, recordarPersonaPadron]);
+          ''',
+                  1,
+              ),
+              (
+                  '''    const { data, error } = await supabase.from("dirigentes").insert(payload).select().single();
+              if (error) { alert("Error al agregar dirigente: " + error.message); return null; }
+              setShowAgregarDirigente(false);
+              await cargarEstructura();
+              return data?.login_code || loginCode;
+            }, [currentUser, cargarEstructura, verificarCIDisponible]);
+          ''',
+                  '''    const { data, error } = await supabase.from("dirigentes").insert(payload).select().single();
+              if (error) { alert("Error al agregar dirigente: " + error.message); return null; }
+              recordarPersonaPadron(persona);
+              setShowAgregarDirigente(false);
+              await cargarEstructura();
+              return data?.login_code || loginCode;
+            }, [currentUser, cargarEstructura, verificarCIDisponible, recordarPersonaPadron]);
+          ''',
+                  1,
+              ),
+          ]
+
+          for old, new, count in replacements:
+              if new in t:
+                  continue
+              if old not in t:
+                  raise SystemExit('expected add-handler block not found')
+              t = t.replace(old, new, count) if count else t.replace(old, new)
+
+          p.write_text(t, encoding='utf-8')
+          PY
+
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/components/Dashboard.jsx
+          git commit -m "fix: keep newly added padron data in memory"
+          git push origin HEAD:perf/busqueda-padron-bajo-demanda
