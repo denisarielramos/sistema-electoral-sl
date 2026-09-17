@@ -87,21 +87,34 @@ export const getTodosVotantesCoord = (estructura, coordCI) => {
 
 // ======================= PERSONAS DISPONIBLES =======================
 export const getPersonasDisponibles = (padron, estructura) => {
+  // Indexar una sola vez por CI evita recorrer las 4 tablas completas por cada
+  // persona del padrón. Con ~170k registros, los .find() anidados convertían
+  // esta función en uno de los principales cuellos de botella del navegador.
+  // Se conserva exactamente la misma prioridad histórica:
+  // dirigente > coordinador > subcoordinador > votante.
+  const indexarPorCI = (rows = []) => {
+    const map = new Map();
+    for (const row of rows) {
+      const ci = normalizeCI(row.ci);
+      // Array.find() devolvía la primera coincidencia; no sobrescribir preserva
+      // ese comportamiento incluso si existiera algún dato duplicado legacy.
+      if (!map.has(ci)) map.set(ci, row);
+    }
+    return map;
+  };
+
+  const dirigentesPorCI = indexarPorCI(estructura.dirigentes);
+  const coordinadoresPorCI = indexarPorCI(estructura.coordinadores);
+  const subcoordinadoresPorCI = indexarPorCI(estructura.subcoordinadores);
+  const votantesPorCI = indexarPorCI(estructura.votantes);
+
   return padron.map((p) => {
     const ci = normalizeCI(p.ci);
 
-    const dir = (estructura.dirigentes || []).find(
-      (d) => normalizeCI(d.ci) === ci
-    );
-    const coord = estructura.coordinadores.find(
-      (c) => normalizeCI(c.ci) === ci
-    );
-    const sub = estructura.subcoordinadores.find(
-      (s) => normalizeCI(s.ci) === ci
-    );
-    const vot = estructura.votantes.find(
-      (v) => normalizeCI(v.ci) === ci
-    );
+    const dir = dirigentesPorCI.get(ci);
+    const coord = coordinadoresPorCI.get(ci);
+    const sub = subcoordinadoresPorCI.get(ci);
+    const vot = votantesPorCI.get(ci);
 
     let rol = null;
     if (dir) rol = "dirigente";
