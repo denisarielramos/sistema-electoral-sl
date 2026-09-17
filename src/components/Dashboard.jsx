@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../supabaseClient";
 import { generarAccessCodeUnico } from "../utils/accessCode";
 import {
@@ -764,6 +764,9 @@ const Dashboard = ({ currentUser, onLogout }) => {
     votantes: [],
   });
   const [estructuraError, setEstructuraError] = useState(null);
+  // Padrón mínimo usado para enriquecer la estructura visible apenas inicia sesión.
+  // Se mantiene separado del padrón completo para no bloquear ni alterar el buscador.
+  const [estructuraPadron, setEstructuraPadron] = useState([]);
   const [padron, setPadron] = useState([]);
   const [padronLoaded, setPadronLoaded] = useState(false);
   const [padronLoading, setPadronLoading] = useState(false);
@@ -837,8 +840,53 @@ const Dashboard = ({ currentUser, onLogout }) => {
     return acum;
   }, []);
 
+  // ======================= PADRÓN MÍNIMO PARA LA ESTRUCTURA =======================
+  // Carga únicamente los CI que ya pertenecen a la estructura. Esto permite mostrar
+  // nombre/local/mesa/orden completos antes de renderizar el Dashboard sin esperar
+  // la descarga de las ~170k filas del padrón general.
+  const cargarPadronDeEstructura = useCallback(async (raw) => {
+    const ciSet = new Set();
+    for (const grupo of [
+      raw.dirigentes,
+      raw.coordinadores,
+      raw.subcoordinadores,
+      raw.votantes,
+    ]) {
+      for (const row of grupo || []) {
+        const ci = normalizeCI(row.ci);
+        if (ci) ciSet.add(ci);
+      }
+    }
+
+    const cises = [...ciSet];
+    if (cises.length === 0) {
+      setEstructuraPadron([]);
+      return;
+    }
+
+    // Mantener lotes pequeños evita URLs demasiado largas en PostgREST.
+    const CHUNK = 400;
+    const lotes = [];
+    for (let i = 0; i < cises.length; i += CHUNK) {
+      lotes.push(cises.slice(i, i + CHUNK));
+    }
+
+    const resultados = await Promise.all(
+      lotes.map(async (lote) => {
+        const { data, error } = await supabase
+          .from("padron")
+          .select("ci,nombre,apellido,seccional,local_votacion,mesa,orden,direccion")
+          .in("ci", lote);
+        if (error) throw error;
+        return data || [];
+      })
+    );
+
+    setEstructuraPadron(resultados.flat());
+  }, []);
+
   // ======================= CARGAR ESTRUCTURA (RAW) =======================
-  const cargarEstructura = useCallback(async () => {
+  const cargarEstructura = useCallback(async (esperarPadronEstructura = false) => {
     setLoading(true);
     setEstructuraError(null);
     try {
@@ -851,20 +899,33 @@ const Dashboard = ({ currentUser, onLogout }) => {
 
       // Guardar solo datos crudos, normalizando CI para comparaciones consistentes
       const norm = (rows) => rows.map((r) => ({ ...r, ci: normalizeCI(r.ci) }));
-
-      setEstructuraRaw({
+      const raw = {
         dirigentes: norm(dirigentes),
         coordinadores: norm(coordinadores),
         subcoordinadores: norm(subcoordinadores),
         votantes: norm(votantes),
-      });
+      };
+
+      setEstructuraRaw(raw);
+
+      // Solo el arranque espera este subconjunto. Las recargas posteriores del CRUD
+      // conservan su comportamiento actual y no agregan latencia innecesaria.
+      if (esperarPadronEstructura) {
+        try {
+          await cargarPadronDeEstructura(raw);
+        } catch (err) {
+          // La estructura sigue siendo utilizable; el padrón completo que carga en
+          // segundo plano puede completar los nombres si este fetch puntual falla.
+          console.error("[Dashboard] Error cargando padrón de estructura:", err);
+        }
+      }
     } catch (err) {
       console.error("[Dashboard]", err.message);
       setEstructuraError(err.message || "Error al cargar la estructura.");
     } finally {
       setLoading(false);
     }
-  }, [fetchAllActive]);
+  }, [fetchAllActive, cargarPadronDeEstructura]);
 
   // ======================= PADRON: HELPERS INDEXEDDB =======================
   const openPadronDB = () =>
@@ -1003,9 +1064,22 @@ const Dashboard = ({ currentUser, onLogout }) => {
     }
   }, [padron.length]);  // solo re-crea si cambia la longitud (de 0 a >0)
 
+  // Inicializar una sola vez por montaje. `cargarPadron` cambia de referencia cuando
+  // pasa de 0 a >0 filas; sin este guard el efecto podía volver a descargar la
+  // estructura después de terminar el padrón completo.
+  const inicializacionRef = useRef(false);
   useEffect(() => {
-    cargarEstructura();
-    cargarPadron();
+    if (inicializacionRef.current) return;
+    inicializacionRef.current = true;
+
+    const iniciar = async () => {
+      // Priorizar primero la estructura + sus CI del padrón. Recién cuando está lista
+      // se libera el loader y se inicia el padrón completo en segundo plano.
+      await cargarEstructura(true);
+      cargarPadron();
+    };
+
+    iniciar();
   }, [cargarEstructura, cargarPadron]);
 
     // ======================= COPY =======================
@@ -1095,9 +1169,10 @@ const Dashboard = ({ currentUser, onLogout }) => {
   // Índice CI → registro de padrón, usando el padrón completo ya en memoria/IndexedDB.
   const padronMap = useMemo(() => {
     const map = new Map();
+    for (const p of estructuraPadron) map.set(normalizeCI(p.ci), p);
     for (const p of padron) map.set(normalizeCI(p.ci), p);
     return map;
-  }, [padron]);
+  }, [estructuraPadron, padron]);
 
   // ======================= ESTRUCTURA ENRIQUECIDA =======================
   // Combina estructuraRaw con datos del padrón. Los datos de la tabla de estructura
