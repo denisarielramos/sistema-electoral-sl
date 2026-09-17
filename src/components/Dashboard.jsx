@@ -1241,9 +1241,20 @@ const Dashboard = ({ currentUser, onLogout }) => {
 
     const { error } = await supabase.from("votantes").insert(payload);
     if (error) { alert("Error al agregar votante: " + error.message); return; }
+
+    // El INSERT ya fue exitoso: actualizar solo el estado local evita volver a
+    // descargar toda la estructura (dirigentes, coordinadores, subs y votantes).
+    // La estructura enriquecida y las estadísticas se recalculan automáticamente.
+    setEstructuraRaw((prev) => ({
+      ...prev,
+      votantes: [
+        ...prev.votantes,
+        { ...payload, ci: ciVotante },
+      ],
+    }));
+
     setShowAddModal(false);
-    await cargarEstructura();
-  }, [currentUser, estructura, cargarEstructura, verificarCIDisponible]);
+  }, [currentUser, estructura, verificarCIDisponible]);
 
 
 
