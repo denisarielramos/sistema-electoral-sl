@@ -1004,9 +1004,13 @@ const Dashboard = ({ currentUser, onLogout }) => {
   }, [padron.length]);  // solo re-crea si cambia la longitud (de 0 a >0)
 
   useEffect(() => {
+    // El Dashboard se monta de cero en cada login. Esta carga inicial debe ejecutarse
+    // una sola vez: cuando el padrón pasa de vacío a cargado cambia la referencia de
+    // cargarPadron, y antes eso disparaba innecesariamente otra carga de estructura.
     cargarEstructura();
     cargarPadron();
-  }, [cargarEstructura, cargarPadron]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
     // ======================= COPY =======================
   const handleCopy = useCallback(async (code) => {
@@ -2672,10 +2676,12 @@ const Dashboard = ({ currentUser, onLogout }) => {
 
       {/* CONTENT */}
       <main className="max-w-5xl mx-auto px-4 py-5">
-        {loading ? (
+        {loading || !padronLoaded ? (
           <div className="text-center py-20">
             <div className="w-8 h-8 border-2 border-brand-200 border-t-brand-600 rounded-full animate-spin mx-auto mb-3" />
-            <p className="text-sm text-slate-400">Cargando datos...</p>
+            <p className="text-sm text-slate-400">
+              {loading ? "Cargando estructura..." : "Preparando datos del padrón..."}
+            </p>
           </div>
         ) : estructuraError ? (
           <div className="text-center py-20">
