@@ -6,6 +6,7 @@ import { supabase } from "../supabaseClient";
 // Si el padrón completo ya está en memoria (superadmin / caché), conserva la búsqueda local.
 // Si no está cargado, consulta Supabase bajo demanda mediante buscar_padron_app y evita
 // descargar ~170k registros únicamente para abrir el buscador.
+// La búsqueda remota mantiene coincidencias parciales de CI y palabras de nombre/apellido.
 
 const normalize = (value = "") =>
   String(value)
