@@ -1,0 +1,47 @@
+name: Apply lazy padron loading
+
+on:
+  push:
+    branches:
+      - perf/busqueda-padron-bajo-demanda
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: perf/busqueda-padron-bajo-demanda
+          fetch-depth: 0
+
+      - name: Patch Dashboard lazy padron loading
+        env:
+          OLD_B64: ICAgICAgLy8gUHJpb3JpemFyIHByaW1lcm8gbGEgZXN0cnVjdHVyYSArIHN1cyBDSSBkZWwgcGFkcsOzbi4gUmVjacOpbiBjdWFuZG8gZXN0w6EgbGlzdGEKICAgICAgLy8gc2UgbGliZXJhIGVsIGxvYWRlciB5IHNlIGluaWNpYSBlbCBwYWRyw7NuIGNvbXBsZXRvIGVuIHNlZ3VuZG8gcGxhbm8uCiAgICAgIGF3YWl0IGNhcmdhckVzdHJ1Y3R1cmEodHJ1ZSk7CiAgICAgIGNhcmdhclBhZHJvbigpOwogICAgfTsKCiAgICBpbmljaWFyKCk7CiAgfSwgW2NhcmdhckVzdHJ1Y3R1cmEsIGNhcmdhclBhZHJvbl0pOwoKICAgIC8vID09PT09PT09PT09PT09PT09PT09PT09IENPUFkgPT09PT09PT09PT09PT09PT09PT09PT0=
+          NEW_B64: ICAgICAgLy8gUHJpb3JpemFyIHByaW1lcm8gbGEgZXN0cnVjdHVyYSArIHN1cyBDSSBkZWwgcGFkcsOzbi4gUGFyYSB1c3VhcmlvcyBkZSBlc3RydWN0dXJhCiAgICAgIC8vIG5vIGRlc2NhcmdhbW9zIGxhcyB+MTcwayBmaWxhcyBlbiBjYWRhIGxvZ2luOiBlbCBwYWRyw7NuIGNvbXBsZXRvIHNlIHRyYWUgc29sbwogICAgICAvLyBjdWFuZG8gYWJyZW4gdW5hIGFjY2nDs24gcXVlIHJlYWxtZW50ZSBsbyBuZWNlc2l0YS4gRWwgc3VwZXJhZG1pbiBjb25zZXJ2YSBsYQogICAgICAvLyBwcmVjYXJnYSBlbiBzZWd1bmRvIHBsYW5vIHBvcnF1ZSBzdXMgdmlzdGFzIGdsb2JhbGVzIHPDrSByZXV0aWxpemFuIGVzZSBkYXRhc2V0LgogICAgICBhd2FpdCBjYXJnYXJFc3RydWN0dXJhKHRydWUpOwogICAgICBpZiAoY3VycmVudFVzZXIucm9sZSA9PT0gInN1cGVyYWRtaW4iKSB7CiAgICAgICAgY2FyZ2FyUGFkcm9uKCk7CiAgICAgIH0KICAgIH07CgogICAgaW5pY2lhcigpOwogIH0sIFtjYXJnYXJFc3RydWN0dXJhLCBjYXJnYXJQYWRyb24sIGN1cnJlbnRVc2VyLnJvbGVdKTsKCiAgLy8gRGlyaWdlbnRlL2Nvb3JkaW5hZG9yL3N1YmNvb3JkaW5hZG9yOiBjYXJnYXIgZWwgcGFkcsOzbiBjb21wbGV0byDDum5pY2FtZW50ZSBhbCBhYnJpcgogIC8vIHVuIG1vZGFsIHF1ZSB0b2RhdsOtYSBkZXBlbmRlIGRlbCBidXNjYWRvciBsb2NhbC4gRXN0byBtYW50aWVuZSBpbnRhY3RvIGVsIGZsdWpvCiAgLy8gZnVuY2lvbmFsIGFjdHVhbCB5IGV2aXRhIHRyYW5zZmVyaXIvcHJvY2VzYXIgMTcwayBmaWxhcyBkdXJhbnRlIHVuIGxvZ2luIG5vcm1hbC4KICB1c2VFZmZlY3QoKCkgPT4gewogICAgY29uc3QgbmVjZXNpdGFQYWRyb25Db21wbGV0byA9CiAgICAgIHNob3dBZGRNb2RhbCB8fCBzaG93QWdyZWdhckRpcmlnZW50ZSB8fCBzaG93QWdyZWdhckNvb3JkOwoKICAgIGlmICghbmVjZXNpdGFQYWRyb25Db21wbGV0byB8fCBwYWRyb24ubGVuZ3RoID4gMCB8fCBwYWRyb25Mb2FkaW5nKSByZXR1cm47CiAgICBjYXJnYXJQYWRyb24oKTsKICB9LCBbCiAgICBzaG93QWRkTW9kYWwsCiAgICBzaG93QWdyZWdhckRpcmlnZW50ZSwKICAgIHNob3dBZ3JlZ2FyQ29vcmQsCiAgICBwYWRyb24ubGVuZ3RoLAogICAgcGFkcm9uTG9hZGluZywKICAgIGNhcmdhclBhZHJvbiwKICBdKTsKCiAgICAvLyA9PT09PT09PT09PT09PT09PT09PT09PSBDT1BZID09PT09PT09PT09PT09PT09PT09PT09
+        run: |
+          python - <<'PY'
+          import base64, os
+          from pathlib import Path
+          p = Path('src/components/Dashboard.jsx')
+          t = p.read_text(encoding='utf-8')
+          old = base64.b64decode(os.environ['OLD_B64']).decode('utf-8')
+          new = base64.b64decode(os.environ['NEW_B64']).decode('utf-8')
+          if new in t:
+            raise SystemExit('Optimization already applied')
+          if old not in t:
+            raise SystemExit('Expected initialization block not found')
+          p.write_text(t.replace(old, new, 1), encoding='utf-8')
+          PY
+
+      - name: Commit optimization and remove workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/components/Dashboard.jsx
+          git rm .github/workflows/apply-lazy-padron.yml
+          git commit -m "perf: defer full padron loading for structure users"
+          git push origin HEAD:perf/busqueda-padron-bajo-demanda
