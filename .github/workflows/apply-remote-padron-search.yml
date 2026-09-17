@@ -1,0 +1,77 @@
+name: Apply remote padron search integration
+
+on:
+  push:
+    branches:
+      - perf/busqueda-padron-bajo-demanda
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: perf/busqueda-padron-bajo-demanda
+          fetch-depth: 0
+
+      - name: Patch Dashboard remote search integration
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('src/components/Dashboard.jsx')
+          text = p.read_text(encoding='utf-8')
+
+          old_effect = '''  // Dirigente/coordinador/subcoordinador: cargar el padrón completo únicamente al abrir
+  // un modal que todavía depende del buscador local. Esto mantiene intacto el flujo
+  // funcional actual y evita transferir/procesar 170k filas durante un login normal.
+  useEffect(() => {
+    const necesitaPadronCompleto =
+      showAddModal || showAgregarDirigente || showAgregarCoord;
+
+    if (!necesitaPadronCompleto || padron.length > 0 || padronLoading) return;
+    cargarPadron();
+  }, [
+    showAddModal,
+    showAgregarDirigente,
+    showAgregarCoord,
+    padron.length,
+    padronLoading,
+    cargarPadron,
+  ]);
+
+'''
+          if old_effect not in text:
+              raise SystemExit('lazy full-padron effect not found')
+          text = text.replace(old_effect, '', 1)
+
+          old_personas = '''  const personasDisponibles = useMemo(
+    () => getPersonasDisponibles(padron, estructura),
+    [padron, estructura]
+  );
+'''
+          new_personas = '''  const personasDisponibles = useMemo(
+    () => getPersonasDisponibles(
+      padron.length > 0 ? padron : estructuraPadron,
+      estructura
+    ),
+    [padron, estructuraPadron, estructura]
+  );
+'''
+          if old_personas not in text:
+              raise SystemExit('personasDisponibles block not found')
+          text = text.replace(old_personas, new_personas, 1)
+
+          p.write_text(text, encoding='utf-8')
+          PY
+
+      - name: Commit integration
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/components/Dashboard.jsx
+          git commit -m "perf: stop full padron load for normal add flows"
+          git push origin HEAD:perf/busqueda-padron-bajo-demanda
