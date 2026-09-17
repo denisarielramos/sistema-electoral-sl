@@ -19,21 +19,18 @@ jobs:
           fetch-depth: 0
 
       - name: Patch Dashboard voter add flow
-        shell: python
         run: |
+          python - <<'PY'
           from pathlib import Path
 
           path = Path("src/components/Dashboard.jsx")
           text = path.read_text(encoding="utf-8")
 
           old = '''    const { error } = await supabase.from("votantes").insert(payload);
-              if (error) { alert("Error al agregar votante: " + error.message); return; }
-              setShowAddModal(false);
-              await cargarEstructura();
-            }, [currentUser, estructura, cargarEstructura, verificarCIDisponible]);'''
-
-          # Tolerate the repository's normal 4-space indentation exactly as committed.
-          old = old.replace("              ", "    ")
+    if (error) { alert("Error al agregar votante: " + error.message); return; }
+    setShowAddModal(false);
+    await cargarEstructura();
+  }, [currentUser, estructura, cargarEstructura, verificarCIDisponible]);'''
 
           new = '''    const { error } = await supabase.from("votantes").insert(payload);
     if (error) { alert("Error al agregar votante: " + error.message); return; }
@@ -60,6 +57,7 @@ jobs:
               print("Patch applied")
           else:
               raise SystemExit("Expected Dashboard block was not found; refusing to modify the file")
+          PY
 
       - name: Commit patched Dashboard
         run: |
