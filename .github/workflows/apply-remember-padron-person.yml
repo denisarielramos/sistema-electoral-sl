@@ -1,0 +1,43 @@
+name: Apply padron memory patch
+
+on:
+  push:
+    branches:
+      - perf/busqueda-padron-bajo-demanda
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: perf/busqueda-padron-bajo-demanda
+          fetch-depth: 0
+      - name: Patch Dashboard
+        env:
+          OLD_STATS: ICAvLyA9PT09PT09PT09PT09PT09PT09PT09PSBFU1RBRMONU1RJQ0FTID09PT09PT09PT09PT09PT09PT09PT09CiAgY29uc3QgZXN0YWRpc3RpY2FzID0gdXNlTWVtbygK
+          NEW_STATS: ICAvLyBNYW50ZW5lciBlbiBtZW1vcmlhIGxvcyBkYXRvcyBkZSBwYWRyw7NuIGRlIHVuYSBwZXJzb25hIHJlY2nDqW4gYWdyZWdhZGEgZXZpdGEKICAvLyBxdWUgc3UgdGFyamV0YSB2dWVsdmEgYSBhcGFyZWNlciBjb21vICJDYXJnYW5kby4uLiIgaGFzdGEgZWwgcHLDs3hpbW8gbG9naW4uCiAgY29uc3QgcmVjb3JkYXJQZXJzb25hUGFkcm9uID0gdXNlQ2FsbGJhY2soKHBlcnNvbmEpID0+IHsKICAgIGNvbnN0IGNpID0gbm9ybWFsaXplQ0kocGVyc29uYT8uY2kpOwogICAgaWYgKCFjaSkgcmV0dXJuOwogICAgY29uc3Qgbm9ybWFsaXphZGEgPSB7IC4uLnBlcnNvbmEsIGNpIH07CiAgICBzZXRFc3RydWN0dXJhUGFkcm9uKChwcmV2KSA9PiB7CiAgICAgIGNvbnN0IGluZGV4ID0gcHJldi5maW5kSW5kZXgoKHApID0+IG5vcm1hbGl6ZUNJKHAuY2kpID09PSBjaSk7CiAgICAgIGlmIChpbmRleCA9PT0gLTEpIHJldHVybiBbLi4ucHJldiwgbm9ybWFsaXphZGFdOwogICAgICBjb25zdCBuZXh0ID0gWy4uLnByZXZdOwogICAgICBuZXh0W2luZGV4XSA9IHsgLi4ubmV4dFtpbmRleF0sIC4uLm5vcm1hbGl6YWRhIH07CiAgICAgIHJldHVybiBuZXh0OwogICAgfSk7CiAgfSwgW10pOwoKICAvLyA9PT09PT09PT09PT09PT09PT09PT09PSBFU1RBRMONU1RJQ0FTID09PT09PT09PT09PT09PT09PT09PT09CiAgY29uc3QgZXN0YWRpc3RpY2FzID0gdXNlTWVtbygK
+          OLD_VOT: ICAgIGNvbnN0IHsgZXJyb3IgfSA9IGF3YWl0IHN1cGFiYXNlLmZyb20oInZvdGFudGVzIikuaW5zZXJ0KHBheWxvYWQpOwogICAgaWYgKGVycm9yKSB7IGFsZXJ0KCJFcnJvciBhbCBhZ3JlZ2FyIHZvdGFudGU6ICIgKyBlcnJvci5tZXNzYWdlKTsgcmV0dXJuOyB9CiAgICBzZXRTaG93QWRkTW9kYWwoZmFsc2UpOwogICAgYXdhaXQgY2FyZ2FyRXN0cnVjdHVyYSgpOwogIH0sIFtjdXJyZW50VXNlciwgZXN0cnVjdHVyYSwgY2FyZ2FyRXN0cnVjdHVyYSwgdmVyaWZpY2FyQ0lEaXNwb25pYmxlXSk7Cg==
+          NEW_VOT: ICAgIGNvbnN0IHsgZXJyb3IgfSA9IGF3YWl0IHN1cGFiYXNlLmZyb20oInZvdGFudGVzIikuaW5zZXJ0KHBheWxvYWQpOwogICAgaWYgKGVycm9yKSB7IGFsZXJ0KCJFcnJvciBhbCBhZ3JlZ2FyIHZvdGFudGU6ICIgKyBlcnJvci5tZXNzYWdlKTsgcmV0dXJuOyB9CiAgICByZWNvcmRhclBlcnNvbmFQYWRyb24ocGVyc29uYSk7CiAgICBzZXRTaG93QWRkTW9kYWwoZmFsc2UpOwogICAgYXdhaXQgY2FyZ2FyRXN0cnVjdHVyYSgpOwogIH0sIFtjdXJyZW50VXNlciwgZXN0cnVjdHVyYSwgY2FyZ2FyRXN0cnVjdHVyYSwgdmVyaWZpY2FyQ0lEaXNwb25pYmxlLCByZWNvcmRhclBlcnNvbmFQYWRyb25dKTsK
+          OLD_COORD: ICAgIGNvbnN0IHNhdmVkQ29kZSA9IGRhdGE/LmxvZ2luX2NvZGUgfHwgbG9naW5Db2RlOwogICAgYWxlcnQoYENvb3JkaW5hZG9yIGFncmVnYWRvLiBDw7NkaWdvIGRlIGFjY2VzbzogJHtzYXZlZENvZGV9YCk7CiAgICBzZXRTaG93QWdyZWdhckNvb3JkKGZhbHNlKTsKICAgIGF3YWl0IGNhcmdhckVzdHJ1Y3R1cmEoKTsKICB9LCBbY3VycmVudFVzZXIsIGNhcmdhckVzdHJ1Y3R1cmEsIHZlcmlmaWNhckNJRGlzcG9uaWJsZV0pOwo=
+          NEW_COORD: ICAgIGNvbnN0IHNhdmVkQ29kZSA9IGRhdGE/LmxvZ2luX2NvZGUgfHwgbG9naW5Db2RlOwogICAgcmVjb3JkYXJQZXJzb25hUGFkcm9uKHBlcnNvbmEpOwogICAgYWxlcnQoYENvb3JkaW5hZG9yIGFncmVnYWRvLiBDw7NkaWdvIGRlIGFjY2VzbzogJHtzYXZlZENvZGV9YCk7CiAgICBzZXRTaG93QWdyZWdhckNvb3JkKGZhbHNlKTsKICAgIGF3YWl0IGNhcmdhckVzdHJ1Y3R1cmEoKTsKICB9LCBbY3VycmVudFVzZXIsIGNhcmdhckVzdHJ1Y3R1cmEsIHZlcmlmaWNhckNJRGlzcG9uaWJsZSwgcmVjb3JkYXJQZXJzb25hUGFkcm9uXSk7Cg==
+          OLD_SUB: ICAgIGNvbnN0IHNhdmVkQ29kZSA9IGRhdGE/LmxvZ2luX2NvZGUgfHwgbG9naW5Db2RlOwogICAgYWxlcnQoYFN1YmNvb3JkaW5hZG9yIGFncmVnYWRvLiBDw7NkaWdvIGRlIGFjY2VzbzogJHtzYXZlZENvZGV9YCk7CiAgICBzZXRTaG93QWRkTW9kYWwoZmFsc2UpOwogICAgYXdhaXQgY2FyZ2FyRXN0cnVjdHVyYSgpOwogIH0sIFtjdXJyZW50VXNlciwgY2FyZ2FyRXN0cnVjdHVyYSwgdmVyaWZpY2FyQ0lEaXNwb25pYmxlLCBvbkxvZ291dF0pOwo=
+          NEW_SUB: ICAgIGNvbnN0IHNhdmVkQ29kZSA9IGRhdGE/LmxvZ2luX2NvZGUgfHwgbG9naW5Db2RlOwogICAgcmVjb3JkYXJQZXJzb25hUGFkcm9uKHBlcnNvbmEpOwogICAgYWxlcnQoYFN1YmNvb3JkaW5hZG9yIGFncmVnYWRvLiBDw7NkaWdvIGRlIGFjY2VzbzogJHtzYXZlZENvZGV9YCk7CiAgICBzZXRTaG93QWRkTW9kYWwoZmFsc2UpOwogICAgYXdhaXQgY2FyZ2FyRXN0cnVjdHVyYSgpOwogIH0sIFtjdXJyZW50VXNlciwgY2FyZ2FyRXN0cnVjdHVyYSwgdmVyaWZpY2FyQ0lEaXNwb25pYmxlLCBvbkxvZ291dCwgcmVjb3JkYXJQZXJzb25hUGFkcm9uXSk7Cg==
+          OLD_DIR: ICAgIGNvbnN0IHsgZGF0YSwgZXJyb3IgfSA9IGF3YWl0IHN1cGFiYXNlLmZyb20oImRpcmlnZW50ZXMiKS5pbnNlcnQocGF5bG9hZCkuc2VsZWN0KCkuc2luZ2xlKCk7CiAgICBpZiAoZXJyb3IpIHsgYWxlcnQoIkVycm9yIGFsIGFncmVnYXIgZGlyaWdlbnRlOiAiICsgZXJyb3IubWVzc2FnZSk7IHJldHVybiBudWxsOyB9CiAgICBzZXRTaG93QWdyZWdhckRpcmlnZW50ZShmYWxzZSk7CiAgICBhd2FpdCBjYXJnYXJFc3RydWN0dXJhKCk7CiAgICByZXR1cm4gZGF0YT8ubG9naW5fY29kZSB8fCBsb2dpbkNvZGU7CiAgfSwgW2N1cnJlbnRVc2VyLCBjYXJnYXJFc3RydWN0dXJhLCB2ZXJpZmljYXJDSURpc3BvbmlibGVdKTsK
+          NEW_DIR: ICAgIGNvbnN0IHsgZGF0YSwgZXJyb3IgfSA9IGF3YWl0IHN1cGFiYXNlLmZyb20oImRpcmlnZW50ZXMiKS5pbnNlcnQocGF5bG9hZCkuc2VsZWN0KCkuc2luZ2xlKCk7CiAgICBpZiAoZXJyb3IpIHsgYWxlcnQoIkVycm9yIGFsIGFncmVnYXIgZGlyaWdlbnRlOiAiICsgZXJyb3IubWVzc2FnZSk7IHJldHVybiBudWxsOyB9CiAgICByZWNvcmRhclBlcnNvbmFQYWRyb24ocGVyc29uYSk7CiAgICBzZXRTaG93QWdyZWdhckRpcmlnZW50ZShmYWxzZSk7CiAgICBhd2FpdCBjYXJnYXJFc3RydWN0dXJhKCk7CiAgICByZXR1cm4gZGF0YT8ubG9naW5fY29kZSB8fCBsb2dpbkNvZGU7CiAgfSwgW2N1cnJlbnRVc2VyLCBjYXJnYXJFc3RydWN0dXJhLCB2ZXJpZmljYXJDSURpc3BvbmlibGUsIHJlY29yZGFyUGVyc29uYVBhZHJvbl0pOwo=
+        run: |
+          python -c "import base64,os; from pathlib import Path; p=Path('src/components/Dashboard.jsx'); t=p.read_text(encoding='utf-8'); pairs=[('OLD_STATS','NEW_STATS',1),('OLD_VOT','NEW_VOT',1),('OLD_COORD','NEW_COORD',0),('OLD_SUB','NEW_SUB',1),('OLD_DIR','NEW_DIR',1)];
+for a,b,count in pairs:
+ old=base64.b64decode(os.environ[a]).decode(); new=base64.b64decode(os.environ[b]).decode(); assert old in t, a+' not found'; t=t.replace(old,new,count) if count else t.replace(old,new)
+p.write_text(t,encoding='utf-8')"
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/components/Dashboard.jsx
+          git commit -m "fix: keep newly added padron data in memory"
+          git push origin HEAD:perf/busqueda-padron-bajo-demanda
