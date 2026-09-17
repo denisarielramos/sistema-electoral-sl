@@ -1,0 +1,74 @@
+name: Apply voter add performance fix
+
+on:
+  push:
+    branches:
+      - fix/alta-votante-sin-recarga-total
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/alta-votante-sin-recarga-total
+          fetch-depth: 0
+
+      - name: Patch Dashboard voter add flow
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path("src/components/Dashboard.jsx")
+          text = path.read_text(encoding="utf-8")
+
+          old = '''    const { error } = await supabase.from("votantes").insert(payload);
+              if (error) { alert("Error al agregar votante: " + error.message); return; }
+              setShowAddModal(false);
+              await cargarEstructura();
+            }, [currentUser, estructura, cargarEstructura, verificarCIDisponible]);'''
+
+          # Tolerate the repository's normal 4-space indentation exactly as committed.
+          old = old.replace("              ", "    ")
+
+          new = '''    const { error } = await supabase.from("votantes").insert(payload);
+    if (error) { alert("Error al agregar votante: " + error.message); return; }
+
+    // El INSERT ya fue exitoso: actualizar solo el estado local evita volver a
+    // descargar toda la estructura (dirigentes, coordinadores, subs y votantes).
+    // La estructura enriquecida y las estadísticas se recalculan automáticamente.
+    setEstructuraRaw((prev) => ({
+      ...prev,
+      votantes: [
+        ...prev.votantes,
+        { ...payload, ci: ciVotante },
+      ],
+    }));
+
+    setShowAddModal(false);
+  }, [currentUser, estructura, verificarCIDisponible]);'''
+
+          if new in text:
+              print("Patch already applied")
+          elif old in text:
+              text = text.replace(old, new, 1)
+              path.write_text(text, encoding="utf-8")
+              print("Patch applied")
+          else:
+              raise SystemExit("Expected Dashboard block was not found; refusing to modify the file")
+
+      - name: Commit patched Dashboard
+        run: |
+          if git diff --quiet -- src/components/Dashboard.jsx; then
+            echo "No Dashboard changes to commit"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/components/Dashboard.jsx
+          git commit -m "fix: avoid full reload after adding voter"
+          git push origin HEAD:fix/alta-votante-sin-recarga-total
