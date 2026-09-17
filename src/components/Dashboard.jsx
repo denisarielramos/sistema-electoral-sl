@@ -1631,7 +1631,6 @@ const Dashboard = ({ currentUser, onLogout }) => {
       await borrar("dirigentes", cises.dirigentes);
 
       await cargarEstructura();
-      alert(`${nombre} fue eliminado de la estructura.`);
     } catch (error) {
       console.error("Error eliminando persona:", error);
       alert(error.message || "No se pudo eliminar la persona.");
