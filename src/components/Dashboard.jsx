@@ -1068,12 +1068,23 @@ const Dashboard = ({ currentUser, onLogout }) => {
       { tabla: "subcoordinadores", rol: "subcoordinador" },
       { tabla: "votantes", rol: "votante" },
     ];
-    for (const { tabla, rol } of tablas) {
-      const { data, error } = await supabase
-        .from(tabla)
-        .select("ci, activo")
-        .eq("ci", ciNorm)
-        .maybeSingle();
+
+    // Consultar las 4 tablas en paralelo evita acumular la latencia de 4
+    // round-trips consecutivos en cada alta, especialmente perceptible en celular.
+    const resultados = await Promise.all(
+      tablas.map(async ({ tabla, rol }) => {
+        const { data, error } = await supabase
+          .from(tabla)
+          .select("ci, activo")
+          .eq("ci", ciNorm)
+          .maybeSingle();
+        return { tabla, rol, data, error };
+      })
+    );
+
+    // Promise.all conserva el orden de `tablas`, así que mantenemos exactamente
+    // la misma prioridad de validación que tenía el flujo secuencial anterior.
+    for (const { tabla, rol, data, error } of resultados) {
       if (error) {
         console.error(`[verificarCIDisponible] ${tabla}: ${error.message}`);
         continue; // no bloquear por un error de lectura puntual
@@ -1539,13 +1550,30 @@ const Dashboard = ({ currentUser, onLogout }) => {
       await borrar("coordinadores", cises.coordinadores);
       await borrar("dirigentes", cises.dirigentes);
 
-      await cargarEstructura();
+      // Los borrados ya fueron confirmados por Supabase. Actualizamos únicamente
+      // el estado local para evitar descargar de nuevo toda la estructura y mostrar
+      // la pantalla global de "Cargando datos..." después de cada eliminación.
+      setEstructuraRaw((prev) => ({
+        dirigentes: prev.dirigentes.filter(
+          (item) => !cises.dirigentes.has(normalizeCI(item.ci))
+        ),
+        coordinadores: prev.coordinadores.filter(
+          (item) => !cises.coordinadores.has(normalizeCI(item.ci))
+        ),
+        subcoordinadores: prev.subcoordinadores.filter(
+          (item) => !cises.subcoordinadores.has(normalizeCI(item.ci))
+        ),
+        votantes: prev.votantes.filter(
+          (item) => !cises.votantes.has(normalizeCI(item.ci))
+        ),
+      }));
+
       alert(`${nombre} fue eliminado de la estructura.`);
     } catch (error) {
       console.error("Error eliminando persona:", error);
       alert(error.message || "No se pudo eliminar la persona.");
     }
-  }, [currentUser, estructura, cargarEstructura]);
+  }, [currentUser, estructura]);
 
   // ======================= BUSQUEDA INTERNA POR ESTRUCTURA =======================
   // En vez de reemplazar el arbol por una lista plana, la busqueda filtra el arbol
