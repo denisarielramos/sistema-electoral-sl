@@ -1,0 +1,46 @@
+name: Apply personas disponibles optimization
+
+on:
+  push:
+    branches:
+      - perf/optimizar-carga-sin-romper-crud
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: perf/optimizar-carga-sin-romper-crud
+          fetch-depth: 0
+
+      - name: Patch getPersonasDisponibles
+        env:
+          OLD_B64: Ly8gPT09PT09PT09PT09PT09PT09PT09PT0gUEVSU09OQVMgRElTUE9OSUJMRVMgPT09PT09PT09PT09PT09PT09PT09PT0KZXhwb3J0IGNvbnN0IGdldFBlcnNvbmFzRGlzcG9uaWJsZXMgPSAocGFkcm9uLCBlc3RydWN0dXJhKSA9PiB7CiAgcmV0dXJuIHBhZHJvbi5tYXAoKHApID0+IHsKICAgIGNvbnN0IGNpID0gbm9ybWFsaXplQ0kocC5jaSk7CgogICAgY29uc3QgZGlyID0gKGVzdHJ1Y3R1cmEuZGlyaWdlbnRlcyB8fCBbXSkuZmluZCgKICAgICAgKGQpID0+IG5vcm1hbGl6ZUNJKGQuY2kpID09PSBjaQogICAgKTsKICAgIGNvbnN0IGNvb3JkID0gZXN0cnVjdHVyYS5jb29yZGluYWRvcmVzLmZpbmQoCiAgICAgIChjKSA9PiBub3JtYWxpemVDSShjLmNpKSA9PT0gY2kKICAgICk7CiAgICBjb25zdCBzdWIgPSBlc3RydWN0dXJhLnN1YmNvb3JkaW5hZG9yZXMuZmluZCgKICAgICAgKHMpID0+IG5vcm1hbGl6ZUNJKHMuY2kpID09PSBjaQogICAgKTsKICAgIGNvbnN0IHZvdCA9IGVzdHJ1Y3R1cmEudm90YW50ZXMuZmluZCgKICAgICAgKHYpID0+IG5vcm1hbGl6ZUNJKHYuY2kpID09PSBjaQogICAgKTsKCiAgICBsZXQgcm9sID0gbnVsbDsKICAgIGlmIChkaXIpIHJvbCA9ICJkaXJpZ2VudGUiOwogICAgZWxzZSBpZiAoY29vcmQpIHJvbCA9ICJjb29yZGluYWRvciI7CiAgICBlbHNlIGlmIChzdWIpIHJvbCA9ICJzdWJjb29yZGluYWRvciI7CiAgICBlbHNlIGlmICh2b3QpIHJvbCA9ICJ2b3RhbnRlIjsKCiAgICByZXR1cm4gewogICAgICAuLi5wLAogICAgICBjaSwKICAgICAgYXNpZ25hZG86IHJvbCAhPT0gbnVsbCwKICAgICAgYXNpZ25hZG9Sb2w6IHJvbCwKICAgICAgYXNpZ25hZG9Qb3JOb21icmU6CiAgICAgICAgZGlyPy5hc2lnbmFkb19wb3Jfbm9tYnJlIHx8CiAgICAgICAgY29vcmQ/LmFzaWduYWRvX3Bvcl9ub21icmUgfHwKICAgICAgICBzdWI/LmFzaWduYWRvX3Bvcl9ub21icmUgfHwKICAgICAgICB2b3Q/LmFzaWduYWRvX3Bvcl9ub21icmUgfHwKICAgICAgICAiIiwKICAgIH07CiAgfSk7Cn07
+          NEW_B64: Ly8gPT09PT09PT09PT09PT09PT09PT09PT0gUEVSU09OQVMgRElTUE9OSUJMRVMgPT09PT09PT09PT09PT09PT09PT09PT0KZXhwb3J0IGNvbnN0IGdldFBlcnNvbmFzRGlzcG9uaWJsZXMgPSAocGFkcm9uLCBlc3RydWN0dXJhKSA9PiB7CiAgLy8gSW5kZXhhciB1bmEgc29sYSB2ZXogcG9yIENJIGV2aXRhIHJlY29ycmVyIGxhcyA0IHRhYmxhcyBjb21wbGV0YXMgcG9yIGNhZGEKICAvLyBwZXJzb25hIGRlbCBwYWRyw7NuLiBDb24gfjE3MGsgcmVnaXN0cm9zLCBsb3MgLmZpbmQoKSBhbmlkYWRvcyBjb252ZXJ0w61hbgogIC8vIGVzdGEgZnVuY2nDs24gZW4gdW5vIGRlIGxvcyBwcmluY2lwYWxlcyBjdWVsbG9zIGRlIGJvdGVsbGEgZGVsIG5hdmVnYWRvci4KICAvLyBTZSBjb25zZXJ2YSBleGFjdGFtZW50ZSBsYSBtaXNtYSBwcmlvcmlkYWQgaGlzdMOzcmljYToKICAvLyBkaXJpZ2VudGUgPiBjb29yZGluYWRvciA+IHN1YmNvb3JkaW5hZG9yID4gdm90YW50ZS4KICBjb25zdCBpbmRleGFyUG9yQ0kgPSAocm93cyA9IFtdKSA9PiB7CiAgICBjb25zdCBtYXAgPSBuZXcgTWFwKCk7CiAgICBmb3IgKGNvbnN0IHJvdyBvZiByb3dzKSB7CiAgICAgIGNvbnN0IGNpID0gbm9ybWFsaXplQ0kocm93LmNpKTsKICAgICAgLy8gQXJyYXkuZmluZCgpIGRldm9sdsOtYSBsYSBwcmltZXJhIGNvaW5jaWRlbmNpYTsgbm8gc29icmVzY3JpYmlyIHByZXNlcnZhCiAgICAgIC8vIGVzZSBjb21wb3J0YW1pZW50byBpbmNsdXNvIHNpIGV4aXN0aWVyYSBhbGfDum4gZGF0byBkdXBsaWNhZG8gbGVnYWN5LgogICAgICBpZiAoIW1hcC5oYXMoY2kpKSBtYXAuc2V0KGNpLCByb3cpOwogICAgfQogICAgcmV0dXJuIG1hcDsKICB9OwoKICBjb25zdCBkaXJpZ2VudGVzUG9yQ0kgPSBpbmRleGFyUG9yQ0koZXN0cnVjdHVyYS5kaXJpZ2VudGVzKTsKICBjb25zdCBjb29yZGluYWRvcmVzUG9yQ0kgPSBpbmRleGFyUG9yQ0koZXN0cnVjdHVyYS5jb29yZGluYWRvcmVzKTsKICBjb25zdCBzdWJjb29yZGluYWRvcmVzUG9yQ0kgPSBpbmRleGFyUG9yQ0koZXN0cnVjdHVyYS5zdWJjb29yZGluYWRvcmVzKTsKICBjb25zdCB2b3RhbnRlc1BvckNJID0gaW5kZXhhclBvckNJKGVzdHJ1Y3R1cmEudm90YW50ZXMpOwoKICByZXR1cm4gcGFkcm9uLm1hcCgocCkgPT4gewogICAgY29uc3QgY2kgPSBub3JtYWxpemVDSShwLmNpKTsKCiAgICBjb25zdCBkaXIgPSBkaXJpZ2VudGVzUG9yQ0kuZ2V0KGNpKTsKICAgIGNvbnN0IGNvb3JkID0gY29vcmRpbmFkb3Jlc1BvckNJLmdldChjaSk7CiAgICBjb25zdCBzdWIgPSBzdWJjb29yZGluYWRvcmVzUG9yQ0kuZ2V0KGNpKTsKICAgIGNvbnN0IHZvdCA9IHZvdGFudGVzUG9yQ0kuZ2V0KGNpKTsKCiAgICBsZXQgcm9sID0gbnVsbDsKICAgIGlmIChkaXIpIHJvbCA9ICJkaXJpZ2VudGUiOwogICAgZWxzZSBpZiAoY29vcmQpIHJvbCA9ICJjb29yZGluYWRvciI7CiAgICBlbHNlIGlmIChzdWIpIHJvbCA9ICJzdWJjb29yZGluYWRvciI7CiAgICBlbHNlIGlmICh2b3QpIHJvbCA9ICJ2b3RhbnRlIjsKCiAgICByZXR1cm4gewogICAgICAuLi5wLAogICAgICBjaSwKICAgICAgYXNpZ25hZG86IHJvbCAhPT0gbnVsbCwKICAgICAgYXNpZ25hZG9Sb2w6IHJvbCwKICAgICAgYXNpZ25hZG9Qb3JOb21icmU6CiAgICAgICAgZGlyPy5hc2lnbmFkb19wb3Jfbm9tYnJlIHx8CiAgICAgICAgY29vcmQ/LmFzaWduYWRvX3Bvcl9ub21icmUgfHwKICAgICAgICBzdWI/LmFzaWduYWRvX3Bvcl9ub21icmUgfHwKICAgICAgICB2b3Q/LmFzaWduYWRvX3Bvcl9ub21icmUgfHwKICAgICAgICAiIiwKICAgIH07CiAgfSk7Cn07
+        run: |
+          python - <<'PY'
+          import base64, os
+          from pathlib import Path
+          p = Path('src/utils/estructuraHelpers.js')
+          t = p.read_text(encoding='utf-8')
+          old = base64.b64decode(os.environ['OLD_B64']).decode('utf-8')
+          new = base64.b64decode(os.environ['NEW_B64']).decode('utf-8')
+          if new in t:
+            raise SystemExit('Optimization already applied')
+          if old not in t:
+            raise SystemExit('Expected original block not found')
+          p.write_text(t.replace(old, new, 1), encoding='utf-8')
+          PY
+
+      - name: Commit optimization
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/utils/estructuraHelpers.js
+          git commit -m "perf: index structure CIs for padron availability"
+          git push origin HEAD:perf/optimizar-carga-sin-romper-crud
