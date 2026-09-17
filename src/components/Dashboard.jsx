@@ -1073,14 +1073,36 @@ const Dashboard = ({ currentUser, onLogout }) => {
     inicializacionRef.current = true;
 
     const iniciar = async () => {
-      // Priorizar primero la estructura + sus CI del padrón. Recién cuando está lista
-      // se libera el loader y se inicia el padrón completo en segundo plano.
+      // Priorizar primero la estructura + sus CI del padrón. Para usuarios de estructura
+      // no descargamos las ~170k filas en cada login: el padrón completo se trae solo
+      // cuando abren una acción que realmente lo necesita. El superadmin conserva la
+      // precarga en segundo plano porque sus vistas globales sí reutilizan ese dataset.
       await cargarEstructura(true);
-      cargarPadron();
+      if (currentUser.role === "superadmin") {
+        cargarPadron();
+      }
     };
 
     iniciar();
-  }, [cargarEstructura, cargarPadron]);
+  }, [cargarEstructura, cargarPadron, currentUser.role]);
+
+  // Dirigente/coordinador/subcoordinador: cargar el padrón completo únicamente al abrir
+  // un modal que todavía depende del buscador local. Esto mantiene intacto el flujo
+  // funcional actual y evita transferir/procesar 170k filas durante un login normal.
+  useEffect(() => {
+    const necesitaPadronCompleto =
+      showAddModal || showAgregarDirigente || showAgregarCoord;
+
+    if (!necesitaPadronCompleto || padron.length > 0 || padronLoading) return;
+    cargarPadron();
+  }, [
+    showAddModal,
+    showAgregarDirigente,
+    showAgregarCoord,
+    padron.length,
+    padronLoading,
+    cargarPadron,
+  ]);
 
     // ======================= COPY =======================
   const handleCopy = useCallback(async (code) => {
