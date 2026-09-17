@@ -1086,24 +1086,6 @@ const Dashboard = ({ currentUser, onLogout }) => {
     iniciar();
   }, [cargarEstructura, cargarPadron, currentUser.role]);
 
-  // Dirigente/coordinador/subcoordinador: cargar el padrón completo únicamente al abrir
-  // un modal que todavía depende del buscador local. Esto mantiene intacto el flujo
-  // funcional actual y evita transferir/procesar 170k filas durante un login normal.
-  useEffect(() => {
-    const necesitaPadronCompleto =
-      showAddModal || showAgregarDirigente || showAgregarCoord;
-
-    if (!necesitaPadronCompleto || padron.length > 0 || padronLoading) return;
-    cargarPadron();
-  }, [
-    showAddModal,
-    showAgregarDirigente,
-    showAgregarCoord,
-    padron.length,
-    padronLoading,
-    cargarPadron,
-  ]);
-
     // ======================= COPY =======================
   const handleCopy = useCallback(async (code) => {
     if (!code) {
@@ -1231,8 +1213,11 @@ const Dashboard = ({ currentUser, onLogout }) => {
 
   // ======================= PERSONAS DISPONIBLES =======================
   const personasDisponibles = useMemo(
-    () => getPersonasDisponibles(padron, estructura),
-    [padron, estructura]
+    () => getPersonasDisponibles(
+      padron.length > 0 ? padron : estructuraPadron,
+      estructura
+    ),
+    [padron, estructuraPadron, estructura]
   );
 
   // ======================= ESTADÍSTICAS =======================
