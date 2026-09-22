@@ -3,10 +3,24 @@
 // esta versión NO consulta Supabase — reutiliza `estructura` (ya enriquecida con el
 // padrón) y `padronMap`, ambos ya cargados en memoria/IndexedDB por Dashboard.jsx.
 // Incluye Dirigente (el original solo tenía Coordinador/Subcoordinador/Votante).
+//
+// Filtro por Seccional/Dirigente y agrupación (agregado sin tocar Supabase ni la
+// forma en que se determina a qué dirigente pertenece cada registro — se reutilizan
+// tal cual getCoordsDeDigente/getSubsDeDigente/getTodosVotantesDirigente, las mismas
+// funciones que ya usan el Dashboard y los reportes PDF/Excel):
+// - La clasificación por seccional es 100% frontend, a partir de local_votacion
+//   (ver utils/seccionalHelpers.js). Un local no mapeado no se descarta: se agrupa
+//   como "Sin seccional".
+// - Cuando se elige un Dirigente puntual, la tabla plana se reemplaza por un
+//   desglose Seccional -> Local con subtotales y el total del dirigente. Con
+//   "Todos los dirigentes" (valor por defecto) el comportamiento es idéntico al de
+//   antes de este cambio.
 
 import React, { useState, useMemo } from "react";
 import { ArrowLeft, Search, Users, Shield, UserCog, UserCheck, User, AlertTriangle } from "lucide-react";
 import { personaCoincideConsulta } from "../utils/busquedaHelpers";
+import { getCoordsDeDigente, getSubsDeDigente, getTodosVotantesDirigente } from "../utils/estructuraHelpers";
+import { obtenerSeccional, nombreVisualLocal, SECCIONAL_LABELS, SECCIONALES_DISPONIBLES, SIN_SECCIONAL } from "../utils/seccionalHelpers";
 
 // ======================= HELPERS =======================
 const normalizeCI = (ci) => String(ci ?? "").replace(/\D/g, "");
@@ -26,6 +40,43 @@ const ROLE_LABELS = {
   coordinador: "Coordinador",
   subcoordinador: "Subcoordinador",
   votante: "Votante",
+};
+
+// campo()/buildPersona(): misma lógica de enriquecimiento (persona propia primero,
+// padrón como respaldo) usada tanto para el listado global como para el listado ya
+// acotado a un solo dirigente — un único lugar para no duplicar/desalinear esta
+// regla entre los dos modos de la vista.
+const campo = (persona, padronPersona, key) => {
+  const propio = persona?.[key];
+  if (propio !== null && propio !== undefined && propio !== "") return propio;
+  const delPadron = padronPersona?.[key];
+  if (delPadron !== null && delPadron !== undefined && delPadron !== "") return delPadron;
+  return SIN_DATO;
+};
+
+const buildPersona = (role, persona, padronMap) => {
+  const ci = normalizeCI(persona?.ci);
+  const padronPersona = padronMap instanceof Map ? padronMap.get(ci) : undefined;
+  const nombre = campo(persona, padronPersona, "nombre");
+  const apellido = campo(persona, padronPersona, "apellido");
+  const nombreCompleto =
+    nombre !== SIN_DATO || apellido !== SIN_DATO
+      ? `${nombre === SIN_DATO ? "" : nombre} ${apellido === SIN_DATO ? "" : apellido}`.trim() || SIN_DATO
+      : SIN_DATO;
+
+  const localVotacion = campo(persona, padronPersona, "local_votacion");
+  const seccional = localVotacion !== SIN_DATO ? obtenerSeccional(localVotacion) : null;
+
+  return {
+    ci,
+    rol: ROLE_LABELS[role],
+    nombreCompleto,
+    local_votacion: localVotacion,
+    localVisual: localVotacion !== SIN_DATO ? nombreVisualLocal(localVotacion) : localVotacion,
+    mesa: campo(persona, padronPersona, "mesa"),
+    orden: campo(persona, padronPersona, "orden"),
+    seccional: seccional ?? SIN_SECCIONAL,
+  };
 };
 
 // ======================= BADGE =======================
@@ -86,23 +137,20 @@ export default function VistaSeccional({
 }) {
   const [filtroLocal, setFiltroLocal] = useState("");
   const [filtroRol, setFiltroRol] = useState("");
+  const [filtroSeccional, setFiltroSeccional] = useState("");
+  const [filtroDirigente, setFiltroDirigente] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
 
   const ITEMS_PER_PAGE = 50;
   const [currentPage, setCurrentPage] = useState(1);
 
   // ======================= LISTADO DE PERSONAS (deduplicado por rol + CI) =======================
+  // Sin cambios respecto de la versión anterior: mismo dataset (estructura completa,
+  // los 4 roles), misma dedup, mismo orden. Se agrega únicamente el campo `seccional`
+  // (vía buildPersona), que no altera ni el conteo ni el orden de esta lista.
   const personas = useMemo(() => {
     const seen = new Set();
     const list = [];
-
-    const campo = (persona, padronPersona, key) => {
-      const propio = persona?.[key];
-      if (propio !== null && propio !== undefined && propio !== "") return propio;
-      const delPadron = padronPersona?.[key];
-      if (delPadron !== null && delPadron !== undefined && delPadron !== "") return delPadron;
-      return SIN_DATO;
-    };
 
     const pushRole = (role, arr) => {
       (arr || []).forEach((persona) => {
@@ -111,23 +159,7 @@ export default function VistaSeccional({
         const key = `${role}:${ci}`;
         if (seen.has(key)) return; // no duplicar dentro del mismo rol
         seen.add(key);
-
-        const padronPersona = padronMap instanceof Map ? padronMap.get(ci) : undefined;
-        const nombre = campo(persona, padronPersona, "nombre");
-        const apellido = campo(persona, padronPersona, "apellido");
-        const nombreCompleto =
-          nombre !== SIN_DATO || apellido !== SIN_DATO
-            ? `${nombre === SIN_DATO ? "" : nombre} ${apellido === SIN_DATO ? "" : apellido}`.trim() || SIN_DATO
-            : SIN_DATO;
-
-        list.push({
-          ci,
-          rol: ROLE_LABELS[role],
-          nombreCompleto,
-          local_votacion: campo(persona, padronPersona, "local_votacion"),
-          mesa: campo(persona, padronPersona, "mesa"),
-          orden: campo(persona, padronPersona, "orden"),
-        });
+        list.push(buildPersona(role, persona, padronMap));
       });
     };
 
@@ -148,24 +180,70 @@ export default function VistaSeccional({
     return list;
   }, [estructura, padronMap]);
 
+  // ======================= DIRIGENTES DISPONIBLES (para el filtro, sin hardcodear) =======================
+  const dirigentesDisponibles = useMemo(() => {
+    return (estructura?.dirigentes || [])
+      .map((d) => ({ ci: normalizeCI(d.ci), nombreCompleto: `${d.nombre || ""} ${d.apellido || ""}`.trim() || SIN_DATO }))
+      .filter((d) => d.ci)
+      .sort((a, b) => a.nombreCompleto.localeCompare(b.nombreCompleto, "es"));
+  }, [estructura]);
+
+  // ======================= LISTADO ACOTADO A UN DIRIGENTE =======================
+  // Reutiliza EXACTAMENTE los mismos helpers de jerarquía que ya usa el resto de la
+  // app (Dashboard, PDFs, Excel) para determinar qué pertenece a un dirigente — no
+  // se reimplementa ese criterio acá.
+  const personasDelDirigente = useMemo(() => {
+    if (!filtroDirigente) return null;
+    const dirObj = (estructura?.dirigentes || []).find((d) => normalizeCI(d.ci) === filtroDirigente);
+    if (!dirObj) return [];
+
+    const seen = new Set();
+    const list = [];
+    const pushRole = (role, arr) => {
+      (arr || []).forEach((persona) => {
+        const ci = normalizeCI(persona?.ci);
+        if (!ci) return;
+        const key = `${role}:${ci}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        list.push(buildPersona(role, persona, padronMap));
+      });
+    };
+
+    pushRole("dirigente", [dirObj]);
+    pushRole("coordinador", getCoordsDeDigente(estructura, filtroDirigente));
+    pushRole("subcoordinador", getSubsDeDigente(estructura, filtroDirigente));
+    pushRole("votante", getTodosVotantesDirigente(estructura, filtroDirigente));
+
+    return list;
+  }, [estructura, padronMap, filtroDirigente]);
+
+  // personasBase: mismo listado global de siempre cuando no hay dirigente elegido —
+  // con "Todos los dirigentes" (valor por defecto) el resultado es idéntico al de
+  // antes de este cambio.
+  const personasBase = filtroDirigente ? personasDelDirigente : personas;
+
   // ======================= LOCALES DISPONIBLES =======================
   const localesDisponibles = useMemo(() => {
     const set = new Set();
-    personas.forEach((p) => {
+    personasBase.forEach((p) => {
       if (p.local_votacion && p.local_votacion !== SIN_DATO) set.add(String(p.local_votacion));
     });
     return Array.from(set).sort((a, b) => a.localeCompare(b, "es", { numeric: true }));
-  }, [personas]);
+  }, [personasBase]);
 
   // ======================= FILTRADO =======================
   const personasFiltradas = useMemo(() => {
-    let filtered = personas;
+    let filtered = personasBase;
 
     if (filtroLocal) {
       filtered = filtered.filter((p) => String(p.local_votacion) === filtroLocal);
     }
     if (filtroRol) {
       filtered = filtered.filter((p) => p.rol === filtroRol);
+    }
+    if (filtroSeccional) {
+      filtered = filtered.filter((p) => String(p.seccional) === String(filtroSeccional));
     }
     if (searchQuery.trim()) {
       // p.ci ya son solo dígitos y p.nombreCompleto concentra nombre+apellido; se
@@ -177,15 +255,44 @@ export default function VistaSeccional({
     }
 
     return filtered;
-  }, [personas, filtroLocal, filtroRol, searchQuery]);
+  }, [personasBase, filtroLocal, filtroRol, filtroSeccional, searchQuery]);
 
-  // ======================= PAGINACIÓN =======================
+  // ======================= AGRUPACIÓN: SECCIONAL -> LOCAL (solo con dirigente elegido) =======================
+  const gruposPorSeccional = useMemo(() => {
+    if (!filtroDirigente) return [];
+
+    const porSeccional = new Map();
+    personasFiltradas.forEach((p) => {
+      const key = p.seccional; // 1 | 2 | 3 | 4 | SIN_SECCIONAL
+      if (!porSeccional.has(key)) porSeccional.set(key, new Map());
+      const porLocal = porSeccional.get(key);
+      const localKey = p.local_votacion;
+      if (!porLocal.has(localKey)) porLocal.set(localKey, { localVisual: p.localVisual, personas: [] });
+      porLocal.get(localKey).personas.push(p);
+    });
+
+    const orden = [...SECCIONALES_DISPONIBLES, SIN_SECCIONAL];
+    return orden
+      .filter((key) => porSeccional.has(key))
+      .map((key) => {
+        const porLocal = porSeccional.get(key);
+        const locales = Array.from(porLocal.values()).sort((a, b) =>
+          a.localVisual.localeCompare(b.localVisual, "es", { numeric: true })
+        );
+        const total = locales.reduce((acc, l) => acc + l.personas.length, 0);
+        return { key, label: SECCIONAL_LABELS[key], locales, total };
+      });
+  }, [filtroDirigente, personasFiltradas]);
+
+  // ======================= PAGINACIÓN (solo aplica a la tabla plana) =======================
   const totalPages = Math.max(1, Math.ceil(personasFiltradas.length / ITEMS_PER_PAGE));
 
   // Los propios setters de filtro (más abajo) vuelven a la página 1 al cambiar,
   // en vez de sincronizarlo con un efecto separado.
   const actualizarFiltroLocal = (value) => { setFiltroLocal(value); setCurrentPage(1); };
   const actualizarFiltroRol = (value) => { setFiltroRol(value); setCurrentPage(1); };
+  const actualizarFiltroSeccional = (value) => { setFiltroSeccional(value); setCurrentPage(1); };
+  const actualizarFiltroDirigente = (value) => { setFiltroDirigente(value); setCurrentPage(1); };
   const actualizarBusqueda = (value) => { setSearchQuery(value); setCurrentPage(1); };
 
   const personasPaginadas = useMemo(() => {
@@ -211,7 +318,7 @@ export default function VistaSeccional({
   }, [totalPages, currentPage]);
 
   // ======================= ESTADÍSTICAS (se recalculan con los filtros aplicados) =======================
-  const hayFiltros = filtroLocal !== "" || filtroRol !== "" || searchQuery.trim() !== "";
+  const hayFiltros = filtroLocal !== "" || filtroRol !== "" || filtroSeccional !== "" || filtroDirigente !== "" || searchQuery.trim() !== "";
 
   const stats = useMemo(() => ({
     total: personasFiltradas.length,
@@ -292,7 +399,35 @@ export default function VistaSeccional({
 
         {/* Filtros */}
         <div className="bg-white rounded-xl border border-slate-200 p-4">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1.5">Dirigente</label>
+              <select
+                value={filtroDirigente}
+                onChange={(e) => actualizarFiltroDirigente(e.target.value)}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+              >
+                <option value="">Todos los dirigentes</option>
+                {dirigentesDisponibles.map((d) => (
+                  <option key={d.ci} value={d.ci}>{d.nombreCompleto}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1.5">Seccional</label>
+              <select
+                value={filtroSeccional}
+                onChange={(e) => actualizarFiltroSeccional(e.target.value)}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+              >
+                <option value="">Todas</option>
+                {SECCIONALES_DISPONIBLES.map((n) => (
+                  <option key={n} value={n}>{SECCIONAL_LABELS[n]}</option>
+                ))}
+              </select>
+            </div>
+
             <div>
               <label className="block text-xs font-medium text-slate-600 mb-1.5">Local</label>
               <select
@@ -338,106 +473,152 @@ export default function VistaSeccional({
           </div>
         </div>
 
-        {/* Tabla */}
-        <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-          <div className="px-4 py-3 border-b border-slate-200 bg-slate-50 flex flex-wrap items-center justify-between gap-2">
-            <p className="text-sm text-slate-600">
-              Mostrando{" "}
-              <span className="font-semibold text-slate-800">{rangoInicio}-{rangoFin}</span>{" "}
-              de{" "}
-              <span className="font-semibold text-slate-800">
-                {new Intl.NumberFormat("es-PY").format(personasFiltradas.length)}
-              </span>{" "}
-              registros
-            </p>
-            <p className="text-sm text-slate-500">
-              Pagina <span className="font-semibold text-slate-700">{currentPage}</span> de{" "}
-              <span className="font-semibold text-slate-700">{totalPages}</span>
-            </p>
-          </div>
-
-          {personasFiltradas.length === 0 ? (
-            <div className="text-center py-20">
-              <Users className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-              <p className="text-slate-500">No se encontraron personas</p>
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="bg-slate-50 border-b border-slate-200">
-                    <th className="text-left px-4 py-3 font-semibold text-slate-600 whitespace-nowrap">LOCAL</th>
-                    <th className="text-left px-4 py-3 font-semibold text-slate-600 whitespace-nowrap">ROL</th>
-                    <th className="text-left px-4 py-3 font-semibold text-slate-600 whitespace-nowrap">NOMBRE Y APELLIDO</th>
-                    <th className="text-left px-4 py-3 font-semibold text-slate-600 whitespace-nowrap">CI</th>
-                    <th className="text-left px-4 py-3 font-semibold text-slate-600 whitespace-nowrap">MESA</th>
-                    <th className="text-left px-4 py-3 font-semibold text-slate-600 whitespace-nowrap">ORDEN</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {personasPaginadas.map((p) => (
-                    <tr key={`${p.rol}-${p.ci}`} className="hover:bg-slate-50 transition-colors">
-                      <td className="px-4 py-3 text-slate-700 max-w-[200px] truncate" title={String(p.local_votacion)}>
-                        {p.local_votacion}
-                      </td>
-                      <td className="px-4 py-3">
-                        <Badge variant={p.rol.toLowerCase()}>{p.rol}</Badge>
-                      </td>
-                      <td className="px-4 py-3 text-slate-800 font-medium whitespace-nowrap">{p.nombreCompleto}</td>
-                      <td className="px-4 py-3 text-slate-600 whitespace-nowrap font-mono">{formatCI(p.ci)}</td>
-                      <td className="px-4 py-3 text-slate-600 whitespace-nowrap">{p.mesa}</td>
-                      <td className="px-4 py-3 text-slate-600 whitespace-nowrap">{p.orden}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {/* Paginación */}
-          {personasFiltradas.length > 0 && totalPages > 1 && (
-            <div className="px-4 py-4 border-t border-slate-200 bg-slate-50 flex flex-wrap items-center justify-between gap-3">
-              <p className="text-sm text-slate-500">
-                {new Intl.NumberFormat("es-PY").format(personasFiltradas.length)} registros en total
+        {filtroDirigente ? (
+          /* ======================= DESGLOSE: SECCIONAL -> LOCAL (dirigente elegido) ======================= */
+          <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+            <div className="px-4 py-3 border-b border-slate-200 bg-slate-50">
+              <p className="text-sm text-slate-600">
+                {new Intl.NumberFormat("es-PY").format(personasFiltradas.length)} registro
+                {personasFiltradas.length !== 1 ? "s" : ""} para{" "}
+                <span className="font-semibold text-slate-800">
+                  {dirigentesDisponibles.find((d) => d.ci === filtroDirigente)?.nombreCompleto || SIN_DATO}
+                </span>
               </p>
-              <div className="flex items-center gap-1 flex-wrap">
-                <button
-                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                  disabled={currentPage === 1}
-                  className="px-3 py-1.5 rounded-lg text-sm font-medium border border-slate-300 bg-white hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                >
-                  Anterior
-                </button>
-
-                {pageNumbers.map((page, i) =>
-                  page === "..." ? (
-                    <span key={`ellipsis-${i}`} className="px-2 py-1.5 text-sm text-slate-400">...</span>
-                  ) : (
-                    <button
-                      key={page}
-                      onClick={() => setCurrentPage(page)}
-                      className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
-                        currentPage === page
-                          ? "bg-brand-600 text-white border-brand-600"
-                          : "border-slate-300 bg-white hover:bg-slate-100 text-slate-700"
-                      }`}
-                    >
-                      {page}
-                    </button>
-                  )
-                )}
-
-                <button
-                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                  disabled={currentPage === totalPages}
-                  className="px-3 py-1.5 rounded-lg text-sm font-medium border border-slate-300 bg-white hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                >
-                  Siguiente
-                </button>
-              </div>
             </div>
-          )}
-        </div>
+
+            {gruposPorSeccional.length === 0 ? (
+              <div className="text-center py-20">
+                <Users className="w-12 h-12 text-slate-300 mx-auto mb-3" />
+                <p className="text-slate-500">No se encontraron personas</p>
+              </div>
+            ) : (
+              <div className="divide-y divide-slate-100">
+                {gruposPorSeccional.map((grupo) => (
+                  <div key={grupo.key} className="px-4 py-3">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-bold text-slate-800">{grupo.label}</p>
+                      <span className="text-sm font-semibold text-brand-600">{grupo.total}</span>
+                    </div>
+                    <div className="mt-2 space-y-1.5 pl-3">
+                      {grupo.locales.map((local) => (
+                        <div key={local.localVisual} className="flex items-center justify-between text-sm">
+                          <span className="text-slate-600 truncate pr-2">{local.localVisual}</span>
+                          <span className="text-slate-500 font-medium shrink-0">{local.personas.length}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="px-4 py-3 border-t border-slate-200 bg-slate-50 flex items-center justify-between">
+              <p className="text-sm font-bold text-slate-800">TOTAL DEL DIRIGENTE</p>
+              <p className="text-sm font-bold text-brand-600">{personasFiltradas.length}</p>
+            </div>
+          </div>
+        ) : (
+          /* ======================= TABLA PLANA (todos los dirigentes — comportamiento sin cambios) ======================= */
+          <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+            <div className="px-4 py-3 border-b border-slate-200 bg-slate-50 flex flex-wrap items-center justify-between gap-2">
+              <p className="text-sm text-slate-600">
+                Mostrando{" "}
+                <span className="font-semibold text-slate-800">{rangoInicio}-{rangoFin}</span>{" "}
+                de{" "}
+                <span className="font-semibold text-slate-800">
+                  {new Intl.NumberFormat("es-PY").format(personasFiltradas.length)}
+                </span>{" "}
+                registros
+              </p>
+              <p className="text-sm text-slate-500">
+                Pagina <span className="font-semibold text-slate-700">{currentPage}</span> de{" "}
+                <span className="font-semibold text-slate-700">{totalPages}</span>
+              </p>
+            </div>
+
+            {personasFiltradas.length === 0 ? (
+              <div className="text-center py-20">
+                <Users className="w-12 h-12 text-slate-300 mx-auto mb-3" />
+                <p className="text-slate-500">No se encontraron personas</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-slate-50 border-b border-slate-200">
+                      <th className="text-left px-4 py-3 font-semibold text-slate-600 whitespace-nowrap">LOCAL</th>
+                      <th className="text-left px-4 py-3 font-semibold text-slate-600 whitespace-nowrap">ROL</th>
+                      <th className="text-left px-4 py-3 font-semibold text-slate-600 whitespace-nowrap">NOMBRE Y APELLIDO</th>
+                      <th className="text-left px-4 py-3 font-semibold text-slate-600 whitespace-nowrap">CI</th>
+                      <th className="text-left px-4 py-3 font-semibold text-slate-600 whitespace-nowrap">MESA</th>
+                      <th className="text-left px-4 py-3 font-semibold text-slate-600 whitespace-nowrap">ORDEN</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {personasPaginadas.map((p) => (
+                      <tr key={`${p.rol}-${p.ci}`} className="hover:bg-slate-50 transition-colors">
+                        <td className="px-4 py-3 text-slate-700 max-w-[200px] truncate" title={String(p.local_votacion)}>
+                          {p.local_votacion}
+                        </td>
+                        <td className="px-4 py-3">
+                          <Badge variant={p.rol.toLowerCase()}>{p.rol}</Badge>
+                        </td>
+                        <td className="px-4 py-3 text-slate-800 font-medium whitespace-nowrap">{p.nombreCompleto}</td>
+                        <td className="px-4 py-3 text-slate-600 whitespace-nowrap font-mono">{formatCI(p.ci)}</td>
+                        <td className="px-4 py-3 text-slate-600 whitespace-nowrap">{p.mesa}</td>
+                        <td className="px-4 py-3 text-slate-600 whitespace-nowrap">{p.orden}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* Paginación */}
+            {personasFiltradas.length > 0 && totalPages > 1 && (
+              <div className="px-4 py-4 border-t border-slate-200 bg-slate-50 flex flex-wrap items-center justify-between gap-3">
+                <p className="text-sm text-slate-500">
+                  {new Intl.NumberFormat("es-PY").format(personasFiltradas.length)} registros en total
+                </p>
+                <div className="flex items-center gap-1 flex-wrap">
+                  <button
+                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                    disabled={currentPage === 1}
+                    className="px-3 py-1.5 rounded-lg text-sm font-medium border border-slate-300 bg-white hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  >
+                    Anterior
+                  </button>
+
+                  {pageNumbers.map((page, i) =>
+                    page === "..." ? (
+                      <span key={`ellipsis-${i}`} className="px-2 py-1.5 text-sm text-slate-400">...</span>
+                    ) : (
+                      <button
+                        key={page}
+                        onClick={() => setCurrentPage(page)}
+                        className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
+                          currentPage === page
+                            ? "bg-brand-600 text-white border-brand-600"
+                            : "border-slate-300 bg-white hover:bg-slate-100 text-slate-700"
+                        }`}
+                      >
+                        {page}
+                      </button>
+                    )
+                  )}
+
+                  <button
+                    onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={currentPage === totalPages}
+                    className="px-3 py-1.5 rounded-lg text-sm font-medium border border-slate-300 bg-white hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  >
+                    Siguiente
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </main>
     </div>
   );
