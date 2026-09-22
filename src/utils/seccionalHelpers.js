@@ -25,6 +25,12 @@ const SECCIONAL_POR_LOCAL = {
 
   // ---- Seccional 3 ----
   "ESC.NRO.598 PARROQUIAL DOMINGO SAVIO": 3,
+  // Compatibilidad: variante vieja "SABIO" que existió en padron_import_sl_2026 y
+  // ya fue corregida en Supabase. Un navegador con el padrón completo cacheado en
+  // IndexedDB desde antes de esa corrección puede seguir enviando este valor —
+  // ver cargarPadron()/padronMap en Dashboard.jsx (el refresco del caché solo se
+  // dispara si cambia la cantidad total de filas, no si cambia un valor existente).
+  "ESC.NRO.598 PARROQUIAL DOMINGO SABIO": 3,
   "COL.NAC.SAN RAFAEL": 3,
   "ESC.BASICA NRO 4181 SAN ANTONIO DE PADUA/COL. NAC. SAN ANTONIO DE PADUA": 3,
   "ESC.FAMILIA DE NAZARETH PRIV.PARROQ. SUBV. 4197": 3,
@@ -57,6 +63,8 @@ const NOMBRE_VISUAL_LOCAL = {
   "LIC. SAN MIGUEL": "San Miguel",
 
   "ESC.NRO.598 PARROQUIAL DOMINGO SAVIO": "Domingo Savio",
+  // Misma variante vieja de arriba: visualmente siempre debe leerse "Domingo Savio".
+  "ESC.NRO.598 PARROQUIAL DOMINGO SABIO": "Domingo Savio",
   "COL.NAC.SAN RAFAEL": "San Rafael",
   "ESC.BASICA NRO 4181 SAN ANTONIO DE PADUA/COL. NAC. SAN ANTONIO DE PADUA": "San Antonio de Padua",
   "ESC.FAMILIA DE NAZARETH PRIV.PARROQ. SUBV. 4197": "Familia de Nazaret",
