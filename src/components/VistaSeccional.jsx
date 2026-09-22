@@ -17,7 +17,7 @@
 //   antes de este cambio.
 
 import React, { useState, useMemo } from "react";
-import { ArrowLeft, Search, Users, Shield, UserCog, UserCheck, User, AlertTriangle } from "lucide-react";
+import { ArrowLeft, Search, Users, Shield, UserCog, UserCheck, User, AlertTriangle, ChevronDown, ChevronRight } from "lucide-react";
 import { personaCoincideConsulta } from "../utils/busquedaHelpers";
 import { getCoordsDeDigente, getSubsDeDigente, getTodosVotantesDirigente } from "../utils/estructuraHelpers";
 import { obtenerSeccional, nombreVisualLocal, SECCIONAL_LABELS, SECCIONALES_DISPONIBLES, SIN_SECCIONAL } from "../utils/seccionalHelpers";
@@ -41,6 +41,8 @@ const ROLE_LABELS = {
   subcoordinador: "Subcoordinador",
   votante: "Votante",
 };
+
+const ROL_ORDER = { Dirigente: 1, Coordinador: 2, Subcoordinador: 3, Votante: 4 };
 
 // campo()/buildPersona(): misma lógica de enriquecimiento (persona propia primero,
 // padrón como respaldo) usada tanto para el listado global como para el listado ya
@@ -140,6 +142,10 @@ export default function VistaSeccional({
   const [filtroSeccional, setFiltroSeccional] = useState("");
   const [filtroDirigente, setFiltroDirigente] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
+  // Locales expandidos en el desglose por dirigente (identificados por
+  // `${seccional}::${local_votacion crudo}` para no colisionar entre seccionales).
+  // Empiezan todos contraídos.
+  const [localesExpandidos, setLocalesExpandidos] = useState(() => new Set());
 
   const ITEMS_PER_PAGE = 50;
   const [currentPage, setCurrentPage] = useState(1);
@@ -223,14 +229,19 @@ export default function VistaSeccional({
   // antes de este cambio.
   const personasBase = filtroDirigente ? personasDelDirigente : personas;
 
-  // ======================= LOCALES DISPONIBLES =======================
+  // ======================= LOCALES DISPONIBLES (dependientes de la Seccional elegida) =======================
+  // Con una seccional elegida, solo se listan los locales de esa seccional (mismo
+  // mapeo frontend de utils/seccionalHelpers.js, sin duplicarlo). Con "Todas" se
+  // listan todos los locales, como antes.
   const localesDisponibles = useMemo(() => {
     const set = new Set();
     personasBase.forEach((p) => {
-      if (p.local_votacion && p.local_votacion !== SIN_DATO) set.add(String(p.local_votacion));
+      if (!p.local_votacion || p.local_votacion === SIN_DATO) return;
+      if (filtroSeccional && String(p.seccional) !== String(filtroSeccional)) return;
+      set.add(String(p.local_votacion));
     });
     return Array.from(set).sort((a, b) => a.localeCompare(b, "es", { numeric: true }));
-  }, [personasBase]);
+  }, [personasBase, filtroSeccional]);
 
   // ======================= FILTRADO =======================
   const personasFiltradas = useMemo(() => {
@@ -258,6 +269,9 @@ export default function VistaSeccional({
   }, [personasBase, filtroLocal, filtroRol, filtroSeccional, searchQuery]);
 
   // ======================= AGRUPACIÓN: SECCIONAL -> LOCAL (solo con dirigente elegido) =======================
+  // `localRaw` (el local_votacion crudo) queda disponible como identificador estable
+  // para expandir/contraer, y las personas de cada local se ordenan igual que en el
+  // listado global (rol, luego nombre) — mismos datos, sin volver a consultar nada.
   const gruposPorSeccional = useMemo(() => {
     if (!filtroDirigente) return [];
 
@@ -267,7 +281,7 @@ export default function VistaSeccional({
       if (!porSeccional.has(key)) porSeccional.set(key, new Map());
       const porLocal = porSeccional.get(key);
       const localKey = p.local_votacion;
-      if (!porLocal.has(localKey)) porLocal.set(localKey, { localVisual: p.localVisual, personas: [] });
+      if (!porLocal.has(localKey)) porLocal.set(localKey, { localVisual: p.localVisual, localRaw: localKey, personas: [] });
       porLocal.get(localKey).personas.push(p);
     });
 
@@ -276,9 +290,15 @@ export default function VistaSeccional({
       .filter((key) => porSeccional.has(key))
       .map((key) => {
         const porLocal = porSeccional.get(key);
-        const locales = Array.from(porLocal.values()).sort((a, b) =>
-          a.localVisual.localeCompare(b.localVisual, "es", { numeric: true })
-        );
+        const locales = Array.from(porLocal.values())
+          .map((local) => ({
+            ...local,
+            personas: [...local.personas].sort((a, b) => {
+              if (ROL_ORDER[a.rol] !== ROL_ORDER[b.rol]) return ROL_ORDER[a.rol] - ROL_ORDER[b.rol];
+              return a.nombreCompleto.localeCompare(b.nombreCompleto, "es");
+            }),
+          }))
+          .sort((a, b) => a.localVisual.localeCompare(b.localVisual, "es", { numeric: true }));
         const total = locales.reduce((acc, l) => acc + l.personas.length, 0);
         return { key, label: SECCIONAL_LABELS[key], locales, total };
       });
@@ -291,9 +311,31 @@ export default function VistaSeccional({
   // en vez de sincronizarlo con un efecto separado.
   const actualizarFiltroLocal = (value) => { setFiltroLocal(value); setCurrentPage(1); };
   const actualizarFiltroRol = (value) => { setFiltroRol(value); setCurrentPage(1); };
-  const actualizarFiltroSeccional = (value) => { setFiltroSeccional(value); setCurrentPage(1); };
-  const actualizarFiltroDirigente = (value) => { setFiltroDirigente(value); setCurrentPage(1); };
+  // Si el local ya elegido no pertenece a la seccional recién seleccionada, se
+  // resetea a "Todos" (con "Todas las seccionales" no se toca: ahí siempre es válido).
+  const actualizarFiltroSeccional = (value) => {
+    setFiltroSeccional(value);
+    setCurrentPage(1);
+    if (value && filtroLocal) {
+      const seccionalDelLocal = obtenerSeccional(filtroLocal) ?? SIN_SECCIONAL;
+      if (String(seccionalDelLocal) !== String(value)) setFiltroLocal("");
+    }
+  };
+  const actualizarFiltroDirigente = (value) => {
+    setFiltroDirigente(value);
+    setCurrentPage(1);
+    setLocalesExpandidos(new Set());
+  };
   const actualizarBusqueda = (value) => { setSearchQuery(value); setCurrentPage(1); };
+
+  const toggleLocalExpandido = (key) => {
+    setLocalesExpandidos((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
 
   const personasPaginadas = useMemo(() => {
     const start = (currentPage - 1) * ITEMS_PER_PAGE;
@@ -499,13 +541,60 @@ export default function VistaSeccional({
                       <p className="text-sm font-bold text-slate-800">{grupo.label}</p>
                       <span className="text-sm font-semibold text-brand-600">{grupo.total}</span>
                     </div>
-                    <div className="mt-2 space-y-1.5 pl-3">
-                      {grupo.locales.map((local) => (
-                        <div key={local.localVisual} className="flex items-center justify-between text-sm">
-                          <span className="text-slate-600 truncate pr-2">{local.localVisual}</span>
-                          <span className="text-slate-500 font-medium shrink-0">{local.personas.length}</span>
-                        </div>
-                      ))}
+                    <div className="mt-2 space-y-1 pl-3">
+                      {grupo.locales.map((local) => {
+                        const localKey = `${grupo.key}::${local.localRaw}`;
+                        const expandido = localesExpandidos.has(localKey);
+                        return (
+                          <div key={localKey}>
+                            <button
+                              type="button"
+                              onClick={() => toggleLocalExpandido(localKey)}
+                              aria-expanded={expandido}
+                              className="w-full flex items-center justify-between gap-2 text-sm py-1 px-1 -mx-1 rounded-lg hover:bg-slate-50 transition-colors text-left bg-transparent border-0 shadow-none"
+                            >
+                              <span className="flex items-center gap-1.5 min-w-0 text-slate-600">
+                                {expandido ? (
+                                  <ChevronDown className="w-3.5 h-3.5 shrink-0 text-slate-400" />
+                                ) : (
+                                  <ChevronRight className="w-3.5 h-3.5 shrink-0 text-slate-400" />
+                                )}
+                                <span className="truncate">{local.localVisual}</span>
+                              </span>
+                              <span className="text-slate-500 font-medium shrink-0">{local.personas.length}</span>
+                            </button>
+
+                            {expandido && (
+                              <div className="mt-1 mb-2 ml-5 border border-slate-100 rounded-lg overflow-x-auto">
+                                <table className="w-full text-xs">
+                                  <thead>
+                                    <tr className="bg-slate-50 border-b border-slate-100">
+                                      <th className="text-left px-2.5 py-1.5 font-semibold text-slate-500 whitespace-nowrap">NOMBRE Y APELLIDO</th>
+                                      <th className="text-left px-2.5 py-1.5 font-semibold text-slate-500 whitespace-nowrap">ROL</th>
+                                      <th className="text-left px-2.5 py-1.5 font-semibold text-slate-500 whitespace-nowrap">CI</th>
+                                      <th className="text-left px-2.5 py-1.5 font-semibold text-slate-500 whitespace-nowrap">MESA</th>
+                                      <th className="text-left px-2.5 py-1.5 font-semibold text-slate-500 whitespace-nowrap">ORDEN</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-slate-100">
+                                    {local.personas.map((p) => (
+                                      <tr key={`${p.rol}-${p.ci}`} className="hover:bg-slate-50 transition-colors">
+                                        <td className="px-2.5 py-1.5 text-slate-800 font-medium whitespace-nowrap">{p.nombreCompleto}</td>
+                                        <td className="px-2.5 py-1.5">
+                                          <Badge variant={p.rol.toLowerCase()}>{p.rol}</Badge>
+                                        </td>
+                                        <td className="px-2.5 py-1.5 text-slate-600 whitespace-nowrap font-mono">{formatCI(p.ci)}</td>
+                                        <td className="px-2.5 py-1.5 text-slate-600 whitespace-nowrap">{p.mesa}</td>
+                                        <td className="px-2.5 py-1.5 text-slate-600 whitespace-nowrap">{p.orden}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 ))}
