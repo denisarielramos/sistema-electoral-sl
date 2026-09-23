@@ -69,6 +69,20 @@ import {
 } from "../utils/estructuraHelpers";
 import { personaCoincideConsulta } from "../utils/busquedaHelpers";
 
+// ======================= TELÉFONO DUPLICADO (validado en Supabase) =======================
+// La unicidad de teléfono la valida un trigger en Supabase; el frontend no hace
+// ninguna consulta previa. Si el INSERT/UPDATE falla por eso, Supabase devuelve
+// error.message con el prefijo "NUMERO_DUPLICADO:" seguido del texto ya listo para
+// mostrar. Esta función solo separa ambas partes; si el error es otro, devuelve
+// null y el manejo de errores de cada handler sigue exactamente igual que antes.
+const PREFIJO_TELEFONO_DUPLICADO = "NUMERO_DUPLICADO:";
+const mensajeTelefonoDuplicado = (error) => {
+  const msg = error?.message || "";
+  return msg.startsWith(PREFIJO_TELEFONO_DUPLICADO)
+    ? msg.slice(PREFIJO_TELEFONO_DUPLICADO.length).trim()
+    : null;
+};
+
 // ======================= SMALL REUSABLE COMPONENTS =======================
 
 const Badge = ({ children, variant = "default" }) => {
@@ -1258,7 +1272,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
     const tabla = TABLE_BY_TYPE[tipo];
     if (!tabla) { alert("Tipo de persona desconocido: " + tipo); return; }
     const { error } = await supabase.from(tabla).update({ telefono: nuevoTelefono }).eq("ci", persona.ci);
-    if (error) { alert("Error al guardar teléfono: " + error.message); throw error; }
+    if (error) { alert(mensajeTelefonoDuplicado(error) || ("Error al guardar teléfono: " + error.message)); throw error; }
     setModalTelefonoState({ show: false, tipo: null, persona: null });
     await cargarEstructura();
   }, [cargarEstructura]);
@@ -1337,7 +1351,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
     }
 
     const { error } = await supabase.from("votantes").insert(payload);
-    if (error) { alert("Error al agregar votante: " + error.message); return; }
+    if (error) { alert(mensajeTelefonoDuplicado(error) || ("Error al agregar votante: " + error.message)); return; }
     recordarPersonaPadron(persona);
     setShowAddModal(false);
     await cargarEstructura();
@@ -1369,7 +1383,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
       activo: true,
     };
     const { data, error } = await supabase.from("coordinadores").insert(payload).select().single();
-    if (error) { alert("Error al agregar coordinador: " + error.message); return; }
+    if (error) { alert(mensajeTelefonoDuplicado(error) || ("Error al agregar coordinador: " + error.message)); return; }
     const savedCode = data?.login_code || loginCode;
     recordarPersonaPadron(persona);
     alert(`Coordinador agregado. Código de acceso: ${savedCode}`);
@@ -1399,7 +1413,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
       activo: true,
     };
     const { data, error } = await supabase.from("coordinadores").insert(payload).select().single();
-    if (error) { alert("Error al agregar coordinador: " + error.message); return; }
+    if (error) { alert(mensajeTelefonoDuplicado(error) || ("Error al agregar coordinador: " + error.message)); return; }
     const savedCode = data?.login_code || loginCode;
     recordarPersonaPadron(persona);
     alert(`Coordinador agregado. Código de acceso: ${savedCode}`);
@@ -1456,7 +1470,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
         onLogout();
         return;
       }
-      alert("No se pudo agregar el subcoordinador. Intentá nuevamente.");
+      alert(mensajeTelefonoDuplicado(error) || "No se pudo agregar el subcoordinador. Intentá nuevamente.");
       return;
     }
     const savedCode = data?.login_code || loginCode;
@@ -1486,7 +1500,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
       asignado_por_nombre: `${currentUser.nombre} ${currentUser.apellido || ""}`.trim(),
     };
     const { data, error } = await supabase.from("dirigentes").insert(payload).select().single();
-    if (error) { alert("Error al agregar dirigente: " + error.message); return null; }
+    if (error) { alert(mensajeTelefonoDuplicado(error) || ("Error al agregar dirigente: " + error.message)); return null; }
     recordarPersonaPadron(persona);
     setShowAgregarDirigente(false);
     await cargarEstructura();
@@ -1512,7 +1526,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
       asignado_por_nombre: `${currentUser.nombre} ${currentUser.apellido || ""}`.trim(),
     };
     const { data, error } = await supabase.from("dirigentes").insert(payload).select().single();
-    if (error) { alert("Error al agregar dirigente externo: " + error.message); return null; }
+    if (error) { alert(mensajeTelefonoDuplicado(error) || ("Error al agregar dirigente externo: " + error.message)); return null; }
     await cargarEstructura();
     return data?.login_code || loginCode;
   }, [currentUser, cargarEstructura, verificarCIDisponible]);
