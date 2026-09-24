@@ -101,12 +101,15 @@ const ModalAgregarCoordinador = ({
     }
     if (saving) return;
     setSaving(true);
-    await onAdd({
+    const ok = await onAdd({
       persona: { ...personaSeleccionada, telefono: result.normalized },
       dirigenteCI: dirigenteSeleccionado,
     });
     setSaving(false);
-    setConfirmada(personaSeleccionada);
+    // Solo mostrar la pantalla de éxito si Supabase confirmó el INSERT (ok === true).
+    // Si ok es false (error, incluido teléfono duplicado/bloqueado), el formulario
+    // queda abierto tal como estaba, sin mensaje de éxito.
+    if (ok === true) setConfirmada(personaSeleccionada);
   };
 
   // --- Vista: éxito ---

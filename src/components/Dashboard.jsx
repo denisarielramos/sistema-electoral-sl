@@ -1293,15 +1293,15 @@ const Dashboard = ({ currentUser, onLogout }) => {
     const role = currentUser.role;
     const ciVotante = normalizeCI(persona.ci);
     const telResult = validateParaguayPhone(persona.telefono);
-    if (!telResult.valid) { alert(telResult.error); return; }
+    if (!telResult.valid) { alert(telResult.error); return false; }
     const tel = telResult.normalized;
     const terceraEdad = persona.tercera_edad;
 
-    if (terceraEdad === null || terceraEdad === undefined) { alert("Debe indicar si es tercera edad."); return; }
+    if (terceraEdad === null || terceraEdad === undefined) { alert("Debe indicar si es tercera edad."); return false; }
 
     // Verificar que la CI no exista en otra jerarquía
     const chequeo = await verificarCIDisponible(ciVotante);
-    if (!chequeo.disponible) { alert(chequeo.mensaje); return; }
+    if (!chequeo.disponible) { alert(chequeo.mensaje); return false; }
 
     let payload = {
       ci: ciVotante,
@@ -1351,10 +1351,11 @@ const Dashboard = ({ currentUser, onLogout }) => {
     }
 
     const { error } = await supabase.from("votantes").insert(payload);
-    if (error) { alert(mensajeTelefonoDuplicado(error) || ("Error al agregar votante: " + error.message)); return; }
+    if (error) { alert(mensajeTelefonoDuplicado(error) || ("Error al agregar votante: " + error.message)); return false; }
     recordarPersonaPadron(persona);
     setShowAddModal(false);
     await cargarEstructura();
+    return true;
   }, [currentUser, estructura, cargarEstructura, verificarCIDisponible, recordarPersonaPadron]);
 
 
@@ -1362,16 +1363,16 @@ const Dashboard = ({ currentUser, onLogout }) => {
   // ======================= AGREGAR COORDINADOR (SUPERADMIN) =======================
   // Recibe { persona, dirigenteCI } desde ModalAgregarCoordinador
   const handleAddCoordinadorSuperadmin = useCallback(async ({ persona, dirigenteCI }) => {
-    if (!dirigenteCI) { alert("Debe seleccionar un dirigente."); return; }
+    if (!dirigenteCI) { alert("Debe seleccionar un dirigente."); return false; }
     const telResult = validateParaguayPhone(persona.telefono);
-    if (!telResult.valid) { alert(telResult.error); return; }
+    if (!telResult.valid) { alert(telResult.error); return false; }
     const tel = telResult.normalized;
     const ciCoord = normalizeCI(persona.ci);
     const chequeo = await verificarCIDisponible(ciCoord);
-    if (!chequeo.disponible) { alert(chequeo.mensaje); return; }
+    if (!chequeo.disponible) { alert(chequeo.mensaje); return false; }
     let loginCode;
     try { loginCode = await generarAccessCodeUnico(supabase); }
-    catch (err) { alert(err.message); return; }
+    catch (err) { alert(err.message); return false; }
     const payload = {
       ci: ciCoord,
       telefono: tel,
@@ -1383,25 +1384,26 @@ const Dashboard = ({ currentUser, onLogout }) => {
       activo: true,
     };
     const { data, error } = await supabase.from("coordinadores").insert(payload).select().single();
-    if (error) { alert(mensajeTelefonoDuplicado(error) || ("Error al agregar coordinador: " + error.message)); return; }
+    if (error) { alert(mensajeTelefonoDuplicado(error) || ("Error al agregar coordinador: " + error.message)); return false; }
     const savedCode = data?.login_code || loginCode;
     recordarPersonaPadron(persona);
     alert(`Coordinador agregado. Código de acceso: ${savedCode}`);
     setShowAgregarCoord(false);
     await cargarEstructura();
+    return true;
   }, [currentUser, cargarEstructura, verificarCIDisponible, recordarPersonaPadron]);
 
   // ======================= AGREGAR COORDINADOR (DIRIGENTE vía ModalAgregarCoordinador) =======================
   const handleAddCoordinadorDesdeModal = useCallback(async ({ persona, dirigenteCI }) => {
     const telResult = validateParaguayPhone(persona.telefono);
-    if (!telResult.valid) { alert(telResult.error); return; }
+    if (!telResult.valid) { alert(telResult.error); return false; }
     const tel = telResult.normalized;
     const ciCoord = normalizeCI(persona.ci);
     const chequeo = await verificarCIDisponible(ciCoord);
-    if (!chequeo.disponible) { alert(chequeo.mensaje); return; }
+    if (!chequeo.disponible) { alert(chequeo.mensaje); return false; }
     let loginCode;
     try { loginCode = await generarAccessCodeUnico(supabase); }
-    catch (err) { alert(err.message); return; }
+    catch (err) { alert(err.message); return false; }
     const payload = {
       ci: ciCoord,
       telefono: tel,
@@ -1413,18 +1415,19 @@ const Dashboard = ({ currentUser, onLogout }) => {
       activo: true,
     };
     const { data, error } = await supabase.from("coordinadores").insert(payload).select().single();
-    if (error) { alert(mensajeTelefonoDuplicado(error) || ("Error al agregar coordinador: " + error.message)); return; }
+    if (error) { alert(mensajeTelefonoDuplicado(error) || ("Error al agregar coordinador: " + error.message)); return false; }
     const savedCode = data?.login_code || loginCode;
     recordarPersonaPadron(persona);
     alert(`Coordinador agregado. Código de acceso: ${savedCode}`);
     setShowAgregarCoord(false);
     await cargarEstructura();
+    return true;
   }, [currentUser, cargarEstructura, verificarCIDisponible, recordarPersonaPadron]);
 
   // ======================= AGREGAR SUBCOORDINADOR (SUPERADMIN/COORDINADOR) =======================
   const handleAddSubcoordinador = useCallback(async (persona) => {
     const telResult = validateParaguayPhone(persona.telefono);
-    if (!telResult.valid) { alert(telResult.error); return; }
+    if (!telResult.valid) { alert(telResult.error); return false; }
     const tel = telResult.normalized;
     const ciSub = normalizeCI(persona.ci);
     const coordinadorCI = normalizeCI(currentUser.ci);
@@ -1440,19 +1443,19 @@ const Dashboard = ({ currentUser, onLogout }) => {
       .maybeSingle();
     if (coordinadorError) {
       alert("No se pudo verificar tu acceso. Intentá nuevamente.");
-      return;
+      return false;
     }
     if (!coordinadorActual) {
       alert("Tu acceso ya no está vigente. Ingresá nuevamente con tu código actual.");
       onLogout();
-      return;
+      return false;
     }
 
     const chequeo = await verificarCIDisponible(ciSub);
-    if (!chequeo.disponible) { alert(chequeo.mensaje); return; }
+    if (!chequeo.disponible) { alert(chequeo.mensaje); return false; }
     let loginCode;
     try { loginCode = await generarAccessCodeUnico(supabase); }
-    catch (err) { alert(err.message); return; }
+    catch (err) { alert(err.message); return false; }
     const payload = {
       ci: ciSub,
       telefono: tel,
@@ -1468,16 +1471,17 @@ const Dashboard = ({ currentUser, onLogout }) => {
       if (error.code === "23503") {
         alert("Tu acceso ya no está vigente. Ingresá nuevamente con tu código actual.");
         onLogout();
-        return;
+        return false;
       }
       alert(mensajeTelefonoDuplicado(error) || "No se pudo agregar el subcoordinador. Intentá nuevamente.");
-      return;
+      return false;
     }
     const savedCode = data?.login_code || loginCode;
     recordarPersonaPadron(persona);
     alert(`Subcoordinador agregado. Código de acceso: ${savedCode}`);
     setShowAddModal(false);
     await cargarEstructura();
+    return true;
   }, [currentUser, cargarEstructura, verificarCIDisponible, onLogout, recordarPersonaPadron]);
 
     // ======================= AGREGAR DIRIGENTE (SUPERADMIN) =======================
