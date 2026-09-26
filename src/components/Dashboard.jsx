@@ -244,6 +244,7 @@ const minCaracteresBusquedaInterna = (value) => {
 };
 const busquedaInternaLista = (value) => {
   const term = String(value || "").trim();
+  if (!term) return false;
   return term.length >= minCaracteresBusquedaInterna(term);
 };
 
@@ -297,7 +298,7 @@ const BuscadorInterno = React.memo(({ searchQuery, onChange, onClear }) => {
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
         <input
           id="busquedaInterna"
-          type="search"
+          type="text"
           enterKeyHint="search"
           value={draftQuery}
           onChange={(e) => handleChange(e.target.value)}
