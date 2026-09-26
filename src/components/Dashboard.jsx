@@ -830,29 +830,193 @@ const Dashboard = ({ currentUser, onLogout }) => {
   // Acceso rápido "Asignar ubicación" desde una tarjeta de votante (los 4 roles).
   const [votanteParaUbicacion, setVotanteParaUbicacion] = useState(null);
 
-  // ======================= FETCH PAGINADO DE TABLA ACTIVA =======================
-  // Trae TODAS las filas activas de una tabla, de 1000 en 1000, sin embeds.
-  // Lanza el error indicando la tabla — nunca devuelve [] silenciosamente ante un error.
-  const fetchAllActive = useCallback(async (tableName) => {
+  // ======================= FETCH PAGINADO DE ESTRUCTURA =======================
+  // Mantiene el paginado histórico de 1000 filas, pero permite aplicar filtros
+  // antes de cada página. Así los usuarios de estructura descargan solo su rama;
+  // el superadmin conserva exactamente la carga global anterior.
+  const fetchAllActiveFiltered = useCallback(async (tableName, applyFilters = (query) => query) => {
     const PAGE = 1000;
     let desde = 0;
     const acum = [];
+
     for (;;) {
-      const { data, error } = await supabase
+      let query = supabase
         .from(tableName)
         .select("*")
-        .eq("activo", true)
-        .range(desde, desde + PAGE - 1);
+        .eq("activo", true);
+
+      query = applyFilters(query).range(desde, desde + PAGE - 1);
+
+      const { data, error } = await query;
       if (error) {
         throw new Error(`Error cargando ${tableName}: ${error.message}`);
       }
       if (!data || data.length === 0) break;
+
       acum.push(...data);
       if (data.length < PAGE) break;
       desde += PAGE;
     }
+
     return acum;
   }, []);
+
+  const fetchAllActive = useCallback(
+    (tableName) => fetchAllActiveFiltered(tableName),
+    [fetchAllActiveFiltered]
+  );
+
+  // PostgREST acepta listas IN, pero se mantienen lotes pequeños para no generar
+  // URLs excesivas cuando una rama crezca. El resultado se deduplica por CI.
+  const fetchActiveByValues = useCallback(async (tableName, columnName, values) => {
+    const unicos = [...new Set((values || []).map(normalizeCI).filter(Boolean))];
+    if (unicos.length === 0) return [];
+
+    const CHUNK = 300;
+    const lotes = [];
+    for (let i = 0; i < unicos.length; i += CHUNK) {
+      lotes.push(unicos.slice(i, i + CHUNK));
+    }
+
+    const resultados = await Promise.all(
+      lotes.map((lote) =>
+        fetchAllActiveFiltered(
+          tableName,
+          (query) => query.in(columnName, lote)
+        )
+      )
+    );
+
+    const porCI = new Map();
+    for (const row of resultados.flat()) {
+      const ci = normalizeCI(row.ci);
+      if (ci && !porCI.has(ci)) porCI.set(ci, row);
+    }
+    return [...porCI.values()];
+  }, [fetchAllActiveFiltered]);
+
+  const dedupeRowsByCI = useCallback((rows) => {
+    const porCI = new Map();
+    for (const row of rows || []) {
+      const ci = normalizeCI(row?.ci);
+      if (ci && !porCI.has(ci)) porCI.set(ci, row);
+    }
+    return [...porCI.values()];
+  }, []);
+
+  // ======================= ESTRUCTURA SEGÚN ROL =======================
+  // IMPORTANTE: esto solo reduce qué filas viajan por red. No cambia los helpers de
+  // jerarquía, estadísticas, permisos de UI ni CRUD. Se incluyen también las rutas
+  // legacy usadas por estructuraHelpers (coordinador_ci y asignado_por) para no perder
+  // personas antiguas cuya relación no tenga todas las columnas modernas pobladas.
+  const cargarEstructuraSegunRol = useCallback(async () => {
+    const role = currentUser?.role;
+    const miCI = normalizeCI(currentUser?.ci);
+
+    if (role === "superadmin" || !role || !miCI) {
+      const [dirigentes, coordinadores, subcoordinadores, votantes] = await Promise.all([
+        fetchAllActive("dirigentes"),
+        fetchAllActive("coordinadores"),
+        fetchAllActive("subcoordinadores"),
+        fetchAllActive("votantes"),
+      ]);
+      return { dirigentes, coordinadores, subcoordinadores, votantes };
+    }
+
+    if (role === "dirigente") {
+      const [dirigentes, coordinadores] = await Promise.all([
+        fetchActiveByValues("dirigentes", "ci", [miCI]),
+        fetchAllActiveFiltered("coordinadores", (query) => query.eq("dirigente_ci", miCI)),
+      ]);
+
+      const coordCIs = coordinadores.map((c) => normalizeCI(c.ci));
+      const subcoordinadores = await fetchActiveByValues(
+        "subcoordinadores",
+        "coordinador_ci",
+        coordCIs
+      );
+      const subCIs = subcoordinadores.map((s) => normalizeCI(s.ci));
+
+      const [vPorDirigente, vPorCoordinador, vPorAsignador] = await Promise.all([
+        fetchAllActiveFiltered("votantes", (query) => query.eq("dirigente_ci", miCI)),
+        fetchActiveByValues("votantes", "coordinador_ci", coordCIs),
+        fetchActiveByValues("votantes", "asignado_por", [miCI, ...coordCIs, ...subCIs]),
+      ]);
+
+      return {
+        dirigentes,
+        coordinadores,
+        subcoordinadores,
+        votantes: dedupeRowsByCI([
+          ...vPorDirigente,
+          ...vPorCoordinador,
+          ...vPorAsignador,
+        ]),
+      };
+    }
+
+    if (role === "coordinador") {
+      const coordinadores = await fetchActiveByValues("coordinadores", "ci", [miCI]);
+      const miCoord = coordinadores[0] || null;
+      const dirigenteCI = normalizeCI(miCoord?.dirigente_ci);
+
+      const [dirigentes, subcoordinadores] = await Promise.all([
+        dirigenteCI
+          ? fetchActiveByValues("dirigentes", "ci", [dirigenteCI])
+          : Promise.resolve([]),
+        fetchAllActiveFiltered("subcoordinadores", (query) => query.eq("coordinador_ci", miCI)),
+      ]);
+
+      const subCIs = subcoordinadores.map((s) => normalizeCI(s.ci));
+      const [vPorCoordinador, vPorAsignador] = await Promise.all([
+        fetchAllActiveFiltered("votantes", (query) => query.eq("coordinador_ci", miCI)),
+        fetchActiveByValues("votantes", "asignado_por", [miCI, ...subCIs]),
+      ]);
+
+      return {
+        dirigentes,
+        coordinadores,
+        subcoordinadores,
+        votantes: dedupeRowsByCI([...vPorCoordinador, ...vPorAsignador]),
+      };
+    }
+
+    if (role === "subcoordinador") {
+      const subcoordinadores = await fetchActiveByValues("subcoordinadores", "ci", [miCI]);
+      const miSub = subcoordinadores[0] || null;
+      const coordinadorCI = normalizeCI(miSub?.coordinador_ci);
+
+      const coordinadores = coordinadorCI
+        ? await fetchActiveByValues("coordinadores", "ci", [coordinadorCI])
+        : [];
+      const dirigenteCI = normalizeCI(coordinadores[0]?.dirigente_ci);
+      const dirigentes = dirigenteCI
+        ? await fetchActiveByValues("dirigentes", "ci", [dirigenteCI])
+        : [];
+
+      const votantes = await fetchAllActiveFiltered(
+        "votantes",
+        (query) => query.eq("asignado_por", miCI)
+      );
+
+      return { dirigentes, coordinadores, subcoordinadores, votantes };
+    }
+
+    // Rol desconocido: fallback conservador al comportamiento anterior.
+    const [dirigentes, coordinadores, subcoordinadores, votantes] = await Promise.all([
+      fetchAllActive("dirigentes"),
+      fetchAllActive("coordinadores"),
+      fetchAllActive("subcoordinadores"),
+      fetchAllActive("votantes"),
+    ]);
+    return { dirigentes, coordinadores, subcoordinadores, votantes };
+  }, [
+    currentUser,
+    fetchAllActive,
+    fetchAllActiveFiltered,
+    fetchActiveByValues,
+    dedupeRowsByCI,
+  ]);
 
   // ======================= PADRÓN MÍNIMO PARA LA ESTRUCTURA =======================
   // Carga únicamente los CI que ya pertenecen a la estructura. Esto permite mostrar
@@ -904,20 +1068,15 @@ const Dashboard = ({ currentUser, onLogout }) => {
     setLoading(true);
     setEstructuraError(null);
     try {
-      const [dirigentes, coordinadores, subcoordinadores, votantes] = await Promise.all([
-        fetchAllActive("dirigentes"),
-        fetchAllActive("coordinadores"),
-        fetchAllActive("subcoordinadores"),
-        fetchAllActive("votantes"),
-      ]);
+      const datos = await cargarEstructuraSegunRol();
 
       // Guardar solo datos crudos, normalizando CI para comparaciones consistentes
       const norm = (rows) => rows.map((r) => ({ ...r, ci: normalizeCI(r.ci) }));
       const raw = {
-        dirigentes: norm(dirigentes),
-        coordinadores: norm(coordinadores),
-        subcoordinadores: norm(subcoordinadores),
-        votantes: norm(votantes),
+        dirigentes: norm(datos.dirigentes),
+        coordinadores: norm(datos.coordinadores),
+        subcoordinadores: norm(datos.subcoordinadores),
+        votantes: norm(datos.votantes),
       };
 
       setEstructuraRaw(raw);
@@ -939,7 +1098,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
     } finally {
       setLoading(false);
     }
-  }, [fetchAllActive, cargarPadronDeEstructura]);
+  }, [cargarEstructuraSegunRol, cargarPadronDeEstructura]);
 
   // ======================= PADRON: HELPERS INDEXEDDB =======================
   const openPadronDB = () =>
