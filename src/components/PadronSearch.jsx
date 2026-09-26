@@ -31,6 +31,7 @@ const relevance = (p, termNorm, isNumeric) => {
 };
 
 const PAGE_SIZE = 50;
+const REMOTE_DEBOUNCE_MS = 220;
 
 const PadronSearch = ({
   padron = [],
@@ -72,6 +73,9 @@ const PadronSearch = ({
   const term = searchTerm.trim();
   const termNorm = normalize(term);
   const isNumeric = /^\d+$/.test(term);
+  const looksNumeric = /^[\d+().\-\s]+$/.test(term);
+  const minChars = looksNumeric ? 2 : 3;
+  const searchReady = term.length >= minChars;
   const words = isNumeric ? [] : termNorm.split(" ").filter(Boolean);
 
   const remoteMode = padron.length === 0 && !padronLoading;
@@ -84,7 +88,7 @@ const PadronSearch = ({
       return;
     }
 
-    if (term.length < 2) {
+    if (!searchReady) {
       requestSeq.current += 1;
       setRemoteResults([]);
       setRemoteLoading(false);
@@ -117,13 +121,13 @@ const PadronSearch = ({
       } finally {
         if (seq === requestSeq.current) setRemoteLoading(false);
       }
-    }, 300);
+    }, REMOTE_DEBOUNCE_MS);
 
     return () => clearTimeout(timer);
-  }, [remoteMode, term, maxResultados, retryToken]);
+  }, [remoteMode, term, searchReady, maxResultados, retryToken]);
 
   const localFiltered = useMemo(() => {
-    if (remoteMode || !term || term.length < 2) return [];
+    if (remoteMode || !searchReady) return [];
 
     const results = [];
     for (const p of padron) {
@@ -145,7 +149,7 @@ const PadronSearch = ({
     });
 
     return results.slice(0, maxResultados);
-  }, [remoteMode, padron, term, termNorm, isNumeric, words, maxResultados]);
+  }, [remoteMode, searchReady, padron, term, termNorm, isNumeric, words, maxResultados]);
 
   const results = remoteMode ? remoteResults : localFiltered;
   const totalPages = Math.max(1, Math.ceil(results.length / PAGE_SIZE));
@@ -190,7 +194,7 @@ const PadronSearch = ({
             onChange={(e) => setSearchTerm(e.target.value)}
             placeholder={padronLoading ? "Preparando padrón..." : placeholder}
             disabled={padronLoading}
-            className="w-full pl-9 pr-9 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full pl-9 pr-9 py-2.5 text-base sm:text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
           />
           {searchTerm && !padronLoading && (
             <button onClick={() => setSearchTerm("")} className="absolute right-3 top-1/2 -translate-y-1/2 p-0 bg-transparent border-0 shadow-none text-slate-400 hover:text-slate-600" aria-label="Limpiar">
@@ -199,10 +203,12 @@ const PadronSearch = ({
           )}
         </div>
 
-        {!loadingSearch && !searchError && term.length === 1 && (
-          <p className="text-xs text-amber-500 mt-1.5">Escriba al menos 2 caracteres para buscar.</p>
+        {!loadingSearch && !searchError && term.length > 0 && !searchReady && (
+          <p className="text-xs text-amber-500 mt-1.5">
+            {minChars === 2 ? "Escriba al menos 2 dígitos para buscar." : "Escriba al menos 3 caracteres para buscar por nombre."}
+          </p>
         )}
-        {!loadingSearch && !searchError && term.length >= 2 && (
+        {!loadingSearch && !searchError && searchReady && (
           <p className="text-xs text-slate-500 mt-1.5">
             {results.length === 0
               ? "Sin resultados"
@@ -211,8 +217,8 @@ const PadronSearch = ({
         )}
       </div>
 
-      <div className="flex-1 overflow-y-auto px-5 py-3 space-y-1.5">
-        {loadingSearch && term.length >= 2 ? (
+      <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-5 py-3 space-y-1.5">
+        {loadingSearch && searchReady ? (
           <div className="text-center py-12">
             <div className="w-8 h-8 border-2 border-brand-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
             <p className="text-sm text-slate-500 font-medium">Buscando...</p>
@@ -224,10 +230,10 @@ const PadronSearch = ({
             <p className="text-xs text-slate-400 mt-1 mb-4 max-w-xs mx-auto">{searchError}</p>
             <button onClick={handleRetry} className="px-4 h-9 bg-brand-600 hover:bg-brand-700 text-white rounded-lg text-sm font-medium border-0 transition-colors">Reintentar</button>
           </div>
-        ) : !term || term.length < 2 ? (
+        ) : !searchReady ? (
           <div className="text-center py-12">
             <Search className="w-8 h-8 text-slate-200 mx-auto mb-2" />
-            <p className="text-sm text-slate-400">Escriba al menos 2 caracteres para buscar por CI, nombre o apellido.</p>
+            <p className="text-sm text-slate-400">Escriba al menos 3 letras para nombre/apellido o 2 dígitos para CI/teléfono.</p>
             <p className="text-xs text-slate-300 mt-1">{remoteMode ? "Búsqueda directa en el padrón" : `${padron.length.toLocaleString()} registros disponibles`}</p>
           </div>
         ) : pageData.length === 0 ? (
