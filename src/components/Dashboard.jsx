@@ -232,34 +232,99 @@ const TerceraEdadBadge = () => (
 );
 
 // ======================= BUSCADOR INTERNO (debajo de stats y botones de acciones) =======================
-// Mismo componente y apariencia en las 4 vistas por rol. Solo presenta el input — el
-// matching en si (matchCI, personaCoincideConsulta) vive fuera, sin cambios.
-const BuscadorInterno = ({ searchQuery, onChange, onClear }) => (
-  <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-card">
-    <label htmlFor="busquedaInterna" className="block text-sm font-semibold text-slate-700 mb-2">
-      Buscar en mi estructura
-    </label>
-    <div className="relative">
-      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-      <input
-        id="busquedaInterna"
-        type="text"
-        value={searchQuery}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder="Nombre, apellido, CI o teléfono..."
-        className="w-full pl-9 pr-9 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent bg-slate-50"
-      />
-      {searchQuery && (
-        <button
-          onClick={onClear}
-          className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0 bg-transparent border-0 shadow-none"
-        >
-          <X className="w-4 h-4" />
-        </button>
+// Mantiene el texto del input localmente y aplica el filtro con un pequeño debounce.
+// Así cada tecla no vuelve a renderizar el árbol completo. En móvil el input usa 16px
+// para evitar el auto-zoom de Safari/iOS al recibir foco.
+const BUSQUEDA_INTERNA_DEBOUNCE_MS = 180;
+const minCaracteresBusquedaInterna = (value) => {
+  const term = String(value || "").trim();
+  if (!term) return 0;
+  const soloNumeroOTelefono = /^[\d+().\-\s]+$/.test(term);
+  return soloNumeroOTelefono ? 2 : 3;
+};
+const busquedaInternaLista = (value) => {
+  const term = String(value || "").trim();
+  if (!term) return false;
+  return term.length >= minCaracteresBusquedaInterna(term);
+};
+
+const BuscadorInterno = React.memo(({ searchQuery, onChange, onClear }) => {
+  const [draftQuery, setDraftQuery] = useState(searchQuery);
+  const debounceRef = useRef(null);
+
+  useEffect(() => {
+    setDraftQuery(searchQuery);
+  }, [searchQuery]);
+
+  useEffect(
+    () => () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    },
+    []
+  );
+
+  const handleChange = (value) => {
+    setDraftQuery(value);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+
+    if (!busquedaInternaLista(value)) {
+      if (searchQuery) onChange("");
+      return;
+    }
+
+    debounceRef.current = setTimeout(
+      () => onChange(value),
+      BUSQUEDA_INTERNA_DEBOUNCE_MS
+    );
+  };
+
+  const handleClear = () => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    setDraftQuery("");
+    onClear();
+  };
+
+  const draftTrim = draftQuery.trim();
+  const minimo = minCaracteresBusquedaInterna(draftTrim);
+  const esperandoMinimo = draftTrim.length > 0 && draftTrim.length < minimo;
+  const pendiente = busquedaInternaLista(draftQuery) && draftQuery !== searchQuery;
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-card">
+      <label htmlFor="busquedaInterna" className="block text-sm font-semibold text-slate-700 mb-2">
+        Buscar en mi estructura
+      </label>
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+        <input
+          id="busquedaInterna"
+          type="text"
+          enterKeyHint="search"
+          value={draftQuery}
+          onChange={(e) => handleChange(e.target.value)}
+          placeholder="Nombre, apellido, CI o teléfono..."
+          className="w-full pl-9 pr-9 py-2.5 text-base sm:text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent bg-slate-50"
+        />
+        {draftQuery && (
+          <button
+            type="button"
+            onClick={handleClear}
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0 bg-transparent border-0 shadow-none"
+            aria-label="Limpiar búsqueda"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        )}
+      </div>
+      {esperandoMinimo && (
+        <p className="text-xs text-slate-400 mt-1.5">
+          {minimo === 2 ? "Escriba al menos 2 dígitos." : "Escriba al menos 3 caracteres."}
+        </p>
       )}
+      {pendiente && <p className="text-xs text-brand-500 mt-1.5">Buscando...</p>}
     </div>
-  </div>
-);
+  );
+});
 
 // ======================= AVISO DE BÚSQUEDA (dentro del árbol, sin reemplazarlo) =======================
 const BusquedaAviso = ({ matchCI, query }) => {
@@ -631,8 +696,8 @@ const ModalAgregarDirigente = ({
   // --- Vista: búsqueda en padrón ---
   if (modo === "padron") {
     return (
-      <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-3 sm:p-4">
-        <div className="bg-white rounded-2xl w-full max-w-xl shadow-modal overflow-hidden flex flex-col max-h-[90vh] animate-fade-in">
+      <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-stretch sm:items-center justify-center z-50 p-0 sm:p-4">
+        <div className="bg-white w-full max-w-xl shadow-modal overflow-hidden flex flex-col h-[100dvh] max-h-[100dvh] rounded-none sm:h-auto sm:max-h-[90dvh] sm:rounded-2xl animate-fade-in">
           <PadronSearch
             padron={padron}
             padronLoading={padronLoading}
@@ -1824,39 +1889,51 @@ const Dashboard = ({ currentUser, onLogout }) => {
   // El matching en si (nombre/apellido/CI con o sin formato/telefono) vive en
   // utils/busquedaHelpers.js, compartido con VistaSeccional.jsx.
 
-  // matchCI: null cuando no hay busqueda activa (= mostrar todo, comportamiento actual);
-  // Set<ci normalizada> con los que matchean, dentro del MISMO alcance por rol que ya
-  // usa el resto del dashboard (nunca se agregan candidatos fuera de la jerarquia propia).
-  const matchCI = useMemo(() => {
-    if (!searchQuery.trim()) return null;
-    const set = new Set();
-    const check = (persona) => {
-      if (personaCoincideConsulta(persona, searchQuery)) set.add(normalizeCI(persona.ci));
-    };
+  // Los candidatos dentro del alcance se calculan solo cuando cambia la estructura
+  // o el usuario. Antes estos helpers se ejecutaban de nuevo por cada letra escrita.
+  const candidatosBusquedaInterna = useMemo(() => {
+    const miCI = normalizeCI(currentUser.ci);
 
     if (currentUser.role === "superadmin") {
-      estructura.dirigentes.forEach(check);
-      estructura.coordinadores.forEach(check);
-      estructura.subcoordinadores.forEach(check);
-      estructura.votantes.forEach(check);
-    } else if (currentUser.role === "dirigente") {
-      const miCI = normalizeCI(currentUser.ci);
-      getCoordsDeDigente(estructura, miCI).forEach(check);
-      getSubsDeDigente(estructura, miCI).forEach(check);
-      getTodosVotantesDirigente(estructura, miCI).forEach(check);
-    } else if (currentUser.role === "coordinador") {
-      const miCI = normalizeCI(currentUser.ci);
-      getMisSubcoordinadores(estructura, miCI).forEach(check);
-      // Directos (incluidos los "estrictos" sin coordinador_ci poblado) + los de
-      // todos sus subcoordinadores — getTodosVotantesCoord ya une ambos criterios.
-      getTodosVotantesCoord(estructura, miCI).forEach(check);
-    } else if (currentUser.role === "subcoordinador") {
-      const miCI = normalizeCI(currentUser.ci);
-      getVotantesDeSubcoord(estructura, miCI).forEach(check);
+      return [
+        ...estructura.dirigentes,
+        ...estructura.coordinadores,
+        ...estructura.subcoordinadores,
+        ...estructura.votantes,
+      ];
     }
+    if (currentUser.role === "dirigente") {
+      return [
+        ...getCoordsDeDigente(estructura, miCI),
+        ...getSubsDeDigente(estructura, miCI),
+        ...getTodosVotantesDirigente(estructura, miCI),
+      ];
+    }
+    if (currentUser.role === "coordinador") {
+      return [
+        ...getMisSubcoordinadores(estructura, miCI),
+        ...getTodosVotantesCoord(estructura, miCI),
+      ];
+    }
+    if (currentUser.role === "subcoordinador") {
+      return getVotantesDeSubcoord(estructura, miCI);
+    }
+    return [];
+  }, [currentUser, estructura]);
 
+  // El matcher sigue siendo exactamente el compartido de nombre/apellido/CI/teléfono,
+  // pero ahora solo corre después del debounce del campo.
+  const matchCI = useMemo(() => {
+    if (!busquedaInternaLista(searchQuery)) return null;
+
+    const set = new Set();
+    for (const persona of candidatosBusquedaInterna) {
+      if (personaCoincideConsulta(persona, searchQuery)) {
+        set.add(normalizeCI(persona.ci));
+      }
+    }
     return set;
-  }, [searchQuery, currentUser, estructura]);
+  }, [searchQuery, candidatosBusquedaInterna]);
 
   // Helpers reutilizados en todo el arbol para respetar matchCI sin repetir logica.
   const filtrarPorBusqueda = useCallback(

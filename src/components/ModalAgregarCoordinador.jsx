@@ -321,10 +321,10 @@ const ModalAgregarCoordinador = ({
   // --- Paso: Buscar persona (PadronSearch) ---
   return (
     <div
-      className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-3 sm:p-4"
+      className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-stretch sm:items-center justify-center z-50 p-0 sm:p-4"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div className="bg-white rounded-2xl w-full max-w-xl shadow-modal overflow-hidden flex flex-col max-h-[90vh] animate-fade-in">
+      <div className="bg-white w-full max-w-xl shadow-modal overflow-hidden flex flex-col h-[100dvh] max-h-[100dvh] rounded-none sm:h-auto sm:max-h-[90dvh] sm:rounded-2xl animate-fade-in">
 
         {/* Indicador de dirigente seleccionado (solo superadmin) */}
         {rolActual === "superadmin" && dirigenteObj && (
