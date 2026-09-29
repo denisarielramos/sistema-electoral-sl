@@ -31,6 +31,9 @@ export const ERROR_MESSAGES = {
   CI_NO_ENCONTRADO: "No encontramos esa cédula en el padrón.",
   REGISTRO_DUPLICADO: "Esta asistencia ya fue registrada.",
   ERROR_TECNICO: "No se pudo conectar. Verificá tu conexión e intentá nuevamente.",
+  CREDENCIALES_INVALIDAS: "CI o contraseña incorrectos.",
+  ADMIN_TEMPORALMENTE_BLOQUEADO: "Demasiados intentos. El acceso quedó temporalmente bloqueado, intentá más tarde.",
+  SESION_ADMIN_EXPIRADA: "Tu sesión administrativa expiró. Cerrá sesión e ingresá nuevamente.",
 };
 
 const MENSAJE_GENERICO = "Ocurrió un problema al procesar tu solicitud. Intentá nuevamente.";
@@ -100,3 +103,33 @@ export const mensajeGeolocalizacion = (codigo) => MENSAJE_GEOLOCALIZACION[codigo
 
 // ======================= SANEO DE ENTRADA =======================
 export const soloDigitos = (value) => (value || "").replace(/\D/g, "");
+
+// ======================= FECHA/HORA (panel admin) =======================
+// `datetime-local` siempre edita/muestra en hora LOCAL del navegador, sin
+// información de zona horaria en el string. `new Date(str)` interpreta ese formato
+// (sin "Z" ni offset) como hora local — por eso alcanza con toISOString()/getters
+// locales para ir y volver sin alterar la hora que ve la persona en Paraguay.
+export const isoATimestampLocal = (iso) => {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
+
+export const timestampLocalAIso = (valor) => {
+  if (!valor) return null;
+  const d = new Date(valor);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toISOString();
+};
+
+// ======================= ROL SNAPSHOT (reportes) =======================
+export const ROL_SNAPSHOT_LABEL = {
+  padron: "Sin estructura asignada",
+  dirigente: "Dirigente",
+  coordinador: "Coordinador",
+  subcoordinador: "Subcoordinador",
+};
+
+export const labelRolSnapshot = (rol) => ROL_SNAPSHOT_LABEL[rol] || rol || "Sin estructura asignada";

@@ -11,11 +11,17 @@ import { supabase } from "./supabaseClient";
 import { ShieldCheck, Eye, EyeOff, KeyRound, ChevronLeft, Lock } from "lucide-react";
 import Dashboard from "./components/Dashboard";
 import { normalizeCI } from "./utils/estructuraHelpers";
+import { autenticarAdmin } from "./modules/asistencia/asistenciaService";
+import { guardarAdminSession, limpiarAdminSession } from "./modules/asistencia/asistenciaAdminAuth";
+import { mensajeError } from "./modules/asistencia/asistenciaUtils";
 
 // ======================= SUPERADMINS LOCALES =======================
+// La contraseña YA NO vive acá: se valida contra asistencia_admin_autenticar en
+// Supabase (ver handleLoginSuperadmin). Esta lista solo identifica quiénes son los 2
+// superadmin del sistema y sus datos de nombre/apellido para currentUser.
 const SUPERADMINS = [
-  { ci: "4630621", pass: "16052018", nombre: "Denis", apellido: "Ramos" },
-  { ci: "3641845", pass: "j.gomez", nombre: "José", apellido: "Gomez" },
+  { ci: "4630621", nombre: "Denis", apellido: "Ramos" },
+  { ci: "3641845", nombre: "José", apellido: "Gomez" },
 ];
 
 const App = () => {
@@ -108,6 +114,7 @@ const App = () => {
   const handleLogout = () => {
     setCurrentUser(null);
     localStorage.removeItem("currentUser");
+    limpiarAdminSession();
     setLoginCode("");
     setAdminCI("");
     setAdminPass("");
@@ -115,6 +122,11 @@ const App = () => {
   };
 
   // ======================= LOGIN SUPERADMIN =======================
+  // La contraseña se valida siempre contra asistencia_admin_autenticar (Supabase);
+  // nunca se compara localmente ni se guarda. Si es correcta, además de armar el
+  // currentUser de siempre, se guarda el admin_token (solo el token, nunca el
+  // password) para que el módulo de Asistencias pueda usar las RPC administrativas
+  // sin pedir una segunda contraseña.
   const handleLoginSuperadmin = async () => {
     const ci = adminCI.trim();
     const pass = adminPass;
@@ -123,9 +135,16 @@ const App = () => {
 
     setIsLoggingAdmin(true);
     try {
-      const sa = SUPERADMINS.find((s) => s.ci === ci);
+      const sa = SUPERADMINS.find((s) => normalizeCI(s.ci) === normalizeCI(ci));
       if (!sa) { alert("CI de superadmin no encontrado."); return; }
-      if (sa.pass !== pass) { alert("Contraseña incorrecta."); return; }
+
+      const data = await autenticarAdmin(normalizeCI(ci), pass);
+      if (!data?.ok) {
+        alert(mensajeError(data?.codigo));
+        return;
+      }
+
+      guardarAdminSession({ token: data.admin_token, expiresAt: data.expires_at });
       saveUser({ ci: sa.ci, nombre: sa.nombre, apellido: sa.apellido, role: "superadmin" });
     } finally {
       setIsLoggingAdmin(false);
