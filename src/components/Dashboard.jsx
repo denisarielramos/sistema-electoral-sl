@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../supabaseClient";
 import { generarAccessCodeUnico } from "../utils/accessCode";
 import {
@@ -31,6 +31,7 @@ import {
   Map as MapIcon,
   Home,
   ListChecks,
+  QrCode,
 } from "lucide-react";
 
 import AddPersonModal from "../AddPersonModal";
@@ -42,6 +43,8 @@ import VistaTerceraEdad from "./VistaTerceraEdad";
 import MapeoTerritorial from "./mapeo/MapeoTerritorial";
 import BitacoraVisitas from "./mapeo/BitacoraVisitas";
 import AccesoRapidoHogar from "./mapeo/AccesoRapidoHogar";
+// Import perezoso: solo lo usa superadmin y arrastra Leaflet-Circle + qrcode.react.
+const AsistenciaAdmin = lazy(() => import("../modules/asistencia/AsistenciaAdmin"));
 import {
   generateSuperadminPDF,
   generateCoordinadorPDF,
@@ -892,6 +895,10 @@ const Dashboard = ({ currentUser, onLogout }) => {
   // propios votantes (ver accesoRapidoHogar más abajo).
   const [mostrarMapeo, setMostrarMapeo] = useState(false);
   const [mostrarBitacora, setMostrarBitacora] = useState(false);
+  // Módulo de Asistencia (superadmin únicamente): pantalla completa, cargada de
+  // forma perezosa más abajo (React.lazy) porque solo la usa este rol y arrastra
+  // Leaflet-Circle + qrcode.react, que el resto del dashboard no necesita.
+  const [mostrarAsistencia, setMostrarAsistencia] = useState(false);
   // Acceso rápido "Asignar ubicación" desde una tarjeta de votante (los 4 roles).
   const [votanteParaUbicacion, setVotanteParaUbicacion] = useState(null);
 
@@ -2130,6 +2137,13 @@ const Dashboard = ({ currentUser, onLogout }) => {
             <ListChecks className="w-4 h-4" />
             Bitácora de visitas
           </button>
+          <button
+            onClick={() => setMostrarAsistencia(true)}
+            className="inline-flex items-center gap-2 px-4 h-9 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 rounded-lg text-sm font-medium transition-colors"
+          >
+            <QrCode className="w-4 h-4" />
+            Asistencias
+          </button>
         </div>
 
         <BuscadorInterno
@@ -3008,6 +3022,10 @@ const Dashboard = ({ currentUser, onLogout }) => {
           <MapeoTerritorial currentUser={currentUser} estructura={estructura} onVolver={() => setMostrarMapeo(false)} />
         ) : mostrarBitacora && currentUser.role !== "subcoordinador" ? (
           <BitacoraVisitas currentUser={currentUser} estructura={estructura} onVolver={() => setMostrarBitacora(false)} />
+        ) : mostrarAsistencia && currentUser.role === "superadmin" ? (
+          <Suspense fallback={<div className="text-center py-20 text-sm text-slate-400">Cargando…</div>}>
+            <AsistenciaAdmin currentUser={currentUser} estructura={estructura} onVolver={() => setMostrarAsistencia(false)} />
+          </Suspense>
         ) : currentUser.role === "superadmin" ? (
           renderSuperadmin()
         ) : currentUser.role === "dirigente" ? (

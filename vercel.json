@@ -1,0 +1,6 @@
+{
+  "rewrites": [
+    { "source": "/q/:path*", "destination": "/index.html" },
+    { "source": "/check/:path*", "destination": "/index.html" }
+  ]
+}
