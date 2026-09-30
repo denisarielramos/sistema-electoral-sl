@@ -226,6 +226,30 @@ const ExcelDownloadButton = ({ excelKey, busyKey, onDownload, iconOnly = false }
   );
 };
 
+// Exporta EXCLUSIVAMENTE los votantes directos del nivel (dirigente/coordinador/
+// subcoordinador seleccionado) — nunca la red completa. Botón aparte de
+// ExcelDownloadButton para que su etiqueta sea inequívoca en el modal "Verificar
+// estructura".
+const VotantesDirectosButton = ({ excelKey, busyKey, onDownload }) => {
+  const isBusy = busyKey === excelKey;
+  return (
+    <button
+      type="button"
+      onClick={(e) => { e.stopPropagation(); onDownload(); }}
+      disabled={!!busyKey}
+      title="Descargar solo los votantes directos (Excel)"
+      className="inline-flex items-center gap-1.5 px-3 h-8 border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed text-slate-700 rounded-lg text-xs font-medium transition-colors shadow-none"
+    >
+      {isBusy ? (
+        <span className="w-3.5 h-3.5 border-2 border-slate-300 border-t-slate-600 rounded-full animate-spin shrink-0" />
+      ) : (
+        <Users className="w-3.5 h-3.5" />
+      )}
+      {isBusy ? "Generando..." : "Votantes directos"}
+    </button>
+  );
+};
+
 // ======================= TERCERA EDAD BADGE =======================
 const TerceraEdadBadge = () => (
   <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-bold bg-amber-100 text-amber-700 border border-amber-300">
@@ -2029,6 +2053,52 @@ const Dashboard = ({ currentUser, onLogout }) => {
     };
   }, [estructura, padronMap]);
 
+  // ======================= EXPORTS ADICIONALES: SOLO VOTANTES DIRECTOS =======================
+  // Payloads independientes para "Verificar estructura" → "Votantes directos". A
+  // diferencia de los builders de arriba, NO se pasan dirigentes/coordinadores/
+  // subcoordinadores como contexto: generarExcelEstructura agrega una fila por cada
+  // persona presente en esos arrays sin importar `roles` (roles solo filtra los
+  // totales de la hoja "Resumen"), así que omitirlos es lo que garantiza que el Excel
+  // resultante tenga únicamente filas de votante. No duplica ninguna lógica de
+  // filtros: reutiliza generarExcelEstructura tal cual, solo con otro conjunto de
+  // votantes (obtenido exclusivamente con las funciones "directas" de
+  // estructuraHelpers, nunca con getTodosVotantes*).
+  const buildDirigenteDirectosExcelPayload = useCallback((dir) => {
+    const dirCI = normalizeCI(dir.ci);
+    return {
+      prefix: "votantes-directos-dirigente",
+      persona: dir,
+      roles: ["votante"],
+      votantes: getVotantesDirectosDirigente(estructura, dirCI),
+      padronMap,
+    };
+  }, [estructura, padronMap]);
+
+  const buildCoordDirectosExcelPayload = useCallback((coord) => {
+    const coordCI = normalizeCI(coord.ci);
+    return {
+      prefix: "votantes-directos-coordinador",
+      persona: coord,
+      roles: ["votante"],
+      votantes: getVotantesDirectosCoord(estructura, coordCI),
+      padronMap,
+    };
+  }, [estructura, padronMap]);
+
+  const buildSubDirectosExcelPayload = useCallback((sub) => {
+    const subCI = normalizeCI(sub.ci);
+    return {
+      prefix: "votantes-directos-subcoordinador",
+      persona: sub,
+      roles: ["votante"],
+      // A este nivel los votantes ya son directos por definición (no hay
+      // subcoordinadores debajo) — se mantiene igual a getVotantesDeSubcoord para
+      // que ambos exports coincidan siempre en el conjunto exacto de personas.
+      votantes: getVotantesDeSubcoord(estructura, subCI),
+      padronMap,
+    };
+  }, [estructura, padronMap]);
+
   // key identifica al botón que disparó la descarga (para el estado "Generando..." y
   // para impedir clics repetidos). payload son los argumentos de generarExcelEstructura.
   const handleDescargarExcel = useCallback(async (key, payload) => {
@@ -3111,6 +3181,7 @@ const Dashboard = ({ currentUser, onLogout }) => {
         const dirCoords = selectedDir ? getCoordsDeDigente(estructura, normalizeCI(selectedDir.ci)) : [];
         const dirSubs = selectedDir ? getSubsDeDigente(estructura, normalizeCI(selectedDir.ci)) : [];
         const dirVotantes = selectedDir ? getTodosVotantesDirigente(estructura, normalizeCI(selectedDir.ci)) : [];
+        const dirVotantesDirectos = selectedDir ? getVotantesDirectosDirigente(estructura, normalizeCI(selectedDir.ci)) : [];
 
         const selectedCoord = estructura.coordinadores.find(
           (c) => normalizeCI(c.ci) === verificarCoordCI
@@ -3130,6 +3201,9 @@ const Dashboard = ({ currentUser, onLogout }) => {
         // exactamente con "Total Red" del PDF completo (generateCoordinadorPDF).
         const coordVotantes = selectedCoord
           ? getTodosVotantesCoord(estructura, normalizeCI(selectedCoord.ci))
+          : [];
+        const coordVotantesDirectos = selectedCoord
+          ? getVotantesDirectosCoord(estructura, normalizeCI(selectedCoord.ci))
           : [];
 
         const haySeleccion = !!verificarDirCI || !!verificarCoordCI;
@@ -3288,12 +3362,20 @@ const Dashboard = ({ currentUser, onLogout }) => {
                         <p className="text-xs text-slate-500 mt-0.5">
                           {dirCoords.length} coordinador{dirCoords.length !== 1 ? "es" : ""} · {dirSubs.length} sub{dirSubs.length !== 1 ? "s" : ""} · {dirVotantes.length} votante{dirVotantes.length !== 1 ? "s" : ""}
                         </p>
+                        <p className="text-xs text-slate-400 mt-0.5">
+                          {dirVotantesDirectos.length} directo{dirVotantesDirectos.length !== 1 ? "s" : ""} · {dirVotantes.length} en estructura
+                        </p>
                       </div>
-                      <div className="flex items-center gap-2 shrink-0">
+                      <div className="flex items-center gap-2 flex-wrap shrink-0">
                         <ExcelDownloadButton
                           excelKey={`dirigente:${normalizeCI(selectedDir.ci)}`}
                           busyKey={excelBusy}
                           onDownload={() => handleDescargarExcel(`dirigente:${normalizeCI(selectedDir.ci)}`, buildDirigenteExcelPayload(selectedDir))}
+                        />
+                        <VotantesDirectosButton
+                          excelKey={`dirigente-directos:${normalizeCI(selectedDir.ci)}`}
+                          busyKey={excelBusy}
+                          onDownload={() => handleDescargarExcel(`dirigente-directos:${normalizeCI(selectedDir.ci)}`, buildDirigenteDirectosExcelPayload(selectedDir))}
                         />
                         <button
                           onClick={printDirigente}
@@ -3354,12 +3436,20 @@ const Dashboard = ({ currentUser, onLogout }) => {
                         <p className="text-xs text-slate-500 mt-0.5">
                           {coordSubs.length} sub{coordSubs.length !== 1 ? "s" : ""} · {coordVotantes.length} votante{coordVotantes.length !== 1 ? "s" : ""}
                         </p>
+                        <p className="text-xs text-slate-400 mt-0.5">
+                          {coordVotantesDirectos.length} directo{coordVotantesDirectos.length !== 1 ? "s" : ""} · {coordVotantes.length} en estructura
+                        </p>
                       </div>
-                      <div className="flex items-center gap-2 shrink-0">
+                      <div className="flex items-center gap-2 flex-wrap shrink-0">
                         <ExcelDownloadButton
                           excelKey={`coordinador:${normalizeCI(selectedCoord.ci)}`}
                           busyKey={excelBusy}
                           onDownload={() => handleDescargarExcel(`coordinador:${normalizeCI(selectedCoord.ci)}`, buildCoordExcelPayload(selectedCoord))}
+                        />
+                        <VotantesDirectosButton
+                          excelKey={`coordinador-directos:${normalizeCI(selectedCoord.ci)}`}
+                          busyKey={excelBusy}
+                          onDownload={() => handleDescargarExcel(`coordinador-directos:${normalizeCI(selectedCoord.ci)}`, buildCoordDirectosExcelPayload(selectedCoord))}
                         />
                         <button
                           onClick={printCoord}
@@ -3393,14 +3483,19 @@ const Dashboard = ({ currentUser, onLogout }) => {
                                     {`${sub.nombre || ""} ${sub.apellido || ""}`.trim() || subCI}
                                   </p>
                                   <p className="text-xs text-slate-500 mt-0.5">
-                                    CI: {subCI} · {subVoterCount} votante{subVoterCount !== 1 ? "s" : ""}
+                                    CI: {subCI} · {subVoterCount} votante{subVoterCount !== 1 ? "s" : ""} directo{subVoterCount !== 1 ? "s" : ""}
                                   </p>
                                 </div>
-                                <div className="flex items-center gap-2 shrink-0">
+                                <div className="flex items-center gap-2 flex-wrap shrink-0">
                                   <ExcelDownloadButton
                                     excelKey={`subcoordinador:${subCI}`}
                                     busyKey={excelBusy}
                                     onDownload={() => handleDescargarExcel(`subcoordinador:${subCI}`, buildSubExcelPayload(sub))}
+                                  />
+                                  <VotantesDirectosButton
+                                    excelKey={`subcoordinador-directos:${subCI}`}
+                                    busyKey={excelBusy}
+                                    onDownload={() => handleDescargarExcel(`subcoordinador-directos:${subCI}`, buildSubDirectosExcelPayload(sub))}
                                   />
                                   <button
                                     onClick={() => printSub(sub)}
