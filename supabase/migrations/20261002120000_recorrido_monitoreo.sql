@@ -20,11 +20,16 @@
 --      recorrido_admin_sesiones.
 --   2) Funciones auxiliares internas: distancia (Haversine), generación de token
 --      de sesión, validación de token admin, procesamiento de un punto GPS
---      (detección de parada/alerta + acumulación incremental de km).
+--      (idempotente por punto_id, detección de parada real >=3min/alerta >1h,
+--      acumulación incremental de km filtrando ruido GPS por accuracy, rechazo de
+--      timestamps absurdamente futuros — ver criterios documentados junto a
+--      recorrido_procesar_punto).
 --   3) Funciones RPC (SECURITY DEFINER) — ÚNICA vía de acceso soportada desde el
 --      frontend: autenticación temporal de chofer, registro de ubicaciones por
---      batch, finalizar sesión, autenticación de admin del módulo, consulta del
---      estado actual para el dashboard.
+--      batch (máx. 500 puntos por llamada), finalizar sesión, autenticación de
+--      admin del módulo, consulta del estado actual para el dashboard. Cada una
+--      se revoca explícitamente de PUBLIC antes de otorgarse solo a
+--      anon/authenticated (PostgreSQL otorga EXECUTE a PUBLIC por defecto).
 --   4) RLS en las 10 tablas nuevas SIN policies para anon/authenticated
 --      (deny-by-default): PostgREST no puede leer/escribir estas tablas directo;
 --      todo pasa por las funciones RPC.
@@ -176,9 +181,15 @@ CREATE INDEX IF NOT EXISTS ix_recorrido_estado_actual_estado ON recorrido_estado
 -- abajo). capturado_at = timestamp real del dispositivo al tomar el fix GPS;
 -- recibido_at SIEMPRE lo pone el servidor (now() dentro de la RPC), nunca el
 -- cliente — por eso no tiene DEFAULT basado en un valor que el cliente controle.
+-- punto_id: identificador generado por el CLIENTE (ej. crypto.randomUUID() en el
+-- navegador) para cada punto GPS capturado, único por sesión. Es lo que permite
+-- reenviar de forma segura el buffer offline completo sin duplicar filas ni
+-- reprocesar de más (ver recorrido_procesar_punto) — reenviar el mismo punto_id
+-- dentro de la misma sesión debe ignorarse limpiamente, nunca fallar ni duplicar.
 CREATE TABLE IF NOT EXISTS recorrido_ubicaciones (
   id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   sesion_id     uuid NOT NULL REFERENCES recorrido_sesiones(id),
+  punto_id      uuid NOT NULL,
   lat           double precision NOT NULL,
   lng           double precision NOT NULL,
   accuracy      double precision,
@@ -192,6 +203,9 @@ CREATE TABLE IF NOT EXISTS recorrido_ubicaciones (
 COMMENT ON TABLE recorrido_ubicaciones IS 'Historial crudo de puntos GPS, append-only. Puede crecer a millones de filas por jornada — solo se consulta acotado por sesion_id para replay, nunca para el dashboard en vivo.';
 
 CREATE INDEX IF NOT EXISTS ix_recorrido_ubicaciones_sesion_capturado ON recorrido_ubicaciones(sesion_id, capturado_at);
+-- Idempotencia: el mismo punto_id reenviado dentro de la misma sesión (reintento de
+-- buffer offline) nunca crea una segunda fila.
+CREATE UNIQUE INDEX IF NOT EXISTS ux_recorrido_ubicaciones_sesion_punto ON recorrido_ubicaciones(sesion_id, punto_id);
 
 -- Append-only de verdad: ni siquiera una RPC con un bug puede editar/borrar el
 -- histórico después de insertado (mismo patrón que visitas_hogar en
@@ -398,12 +412,50 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER STABLE SET search_path = public, pg_temp;
 
 -- Procesa UN punto GPS ya validado contra una sesión existente: inserta en el
--- histórico, actualiza el estado caliente, detecta parada/alerta (sin depender
--- solo de "speed") y acumula km de forma incremental. No valida identidad —
--- es un helper interno, lo llama siempre recorrido_registrar_ubicaciones ya con
--- la sesión re-validada.
+-- histórico (idempotente por punto_id), actualiza el estado caliente, detecta
+-- parada/alerta (sin depender solo de "speed", y sin contabilizar una parada como
+-- real hasta superar un mínimo de duración) y acumula km de forma incremental
+-- filtrando ruido GPS. No valida identidad — es un helper interno, lo llama
+-- siempre recorrido_registrar_ubicaciones ya con la sesión re-validada.
+--
+-- CRITERIOS DE FILTRADO (documentados acá porque son los números "mágicos" que
+-- importa poder auditar/ajustar sin releer toda la lógica):
+--   - v_umbral_ruido_metros (50m): umbral de desplazamiento desde el ANCLA para
+--     considerar que el chofer "se fue" del lugar donde estaba detenido. Es
+--     deliberadamente más permisivo que el filtro de km (abajo) porque decide algo
+--     distinto: "¿sigue en el mismo lugar?", no "¿este paso individual es ruido?".
+--   - v_parada_minima_segundos (180s = 3 min): una parada candidata (dentro del
+--     umbral de ruido) solo se materializa como fila real en recorrido_paradas
+--     (y solo entonces incrementa paradas_count) cuando el tiempo transcurrido
+--     desde que empezó a estar quieto alcanza este mínimo. Por debajo de 3
+--     minutos, el candidato se sigue rastreando en memoria (parada_desde) para
+--     poder detectar la duración, pero NUNCA se contabiliza ni persiste — un
+--     semáforo o un embotellamiento corto no deben aparecer como "parada".
+--   - Filtro de km por ruido: un segmento entre dos puntos consecutivos solo suma
+--     a km_acumulados si su distancia supera
+--     GREATEST(v_km_distancia_minima_metros, accuracy_punto_actual + accuracy_punto_anterior).
+--     Es decir: el piso absoluto es 15m, pero si el GPS reportó peor precisión que
+--     eso en cualquiera de los dos puntos, el piso sube a la suma de ambas
+--     precisiones — un desplazamiento menor que la propia incertidumbre combinada
+--     de las dos lecturas es estadísticamente indistinguible del ruido y no se
+--     cuenta. Un movimiento real de baja velocidad (ej. caminar/tráfico lento)
+--     sigue sumando en cuanto supera ese piso; solo el jitter de un vehículo
+--     parado (normalmente bajo accuracy+accuracy, casi siempre bajo 15m) queda
+--     filtrado. Es un filtro DISTINTO del umbral de parada (compara contra el
+--     último punto, no contra el ancla) a propósito: un vehículo podría estar
+--     "sin moverse del lugar" (dentro del umbral de parada) pero igual generar
+--     pequeños pasos de ruido entre puntos consecutivos que no deben sumar km.
+--   - v_velocidad_maxima_plausible (150 km/h): sin cambios — descarta saltos de
+--     GPS (teletransporte) como si fueran distancia recorrida real.
+--   - v_tolerancia_futuro_segundos (300s = 5 min): un punto con capturado_at más
+--     de 5 minutos en el futuro respecto del reloj del servidor se descarta en
+--     silencio (no corrompe estado/paradas/km) — tolera desvíos razonables de
+--     reloj del dispositivo sin aceptar timestamps absurdos. NO hay piso por el
+--     pasado: un punto arbitrariamente viejo sigue siendo válido (sincronización
+--     legítima de buffer offline).
 CREATE OR REPLACE FUNCTION recorrido_procesar_punto(
   p_sesion_id uuid,
+  p_punto_id uuid,
   p_lat double precision,
   p_lng double precision,
   p_accuracy double precision,
@@ -413,22 +465,42 @@ CREATE OR REPLACE FUNCTION recorrido_procesar_punto(
 ) RETURNS void AS $$
 DECLARE
   v_estado recorrido_estado_actual%ROWTYPE;
+  v_insertados int;
   v_dist_ultimo double precision;
   v_dist_ancla double precision;
   v_segs double precision;
   v_vel_kmh double precision;
+  v_umbral_km double precision;
   v_parada_id uuid;
+  v_parada_desde_efectivo timestamptz;
+  v_segs_quieto double precision;
   v_umbral_ruido_metros constant double precision := 50;
+  v_parada_minima_segundos constant int := 180; -- 3 minutos — ver criterios arriba
+  v_km_distancia_minima_metros constant double precision := 15; -- piso absoluto, ver criterios arriba
   v_velocidad_maxima_plausible constant double precision := 150; -- km/h, descarta saltos de GPS
   v_alerta_segundos constant int := 3600;
+  v_tolerancia_futuro_segundos constant int := 300; -- 5 minutos
 BEGIN
-  IF p_lat IS NULL OR p_lng IS NULL OR p_capturado_at IS NULL
+  IF p_punto_id IS NULL OR p_lat IS NULL OR p_lng IS NULL OR p_capturado_at IS NULL
      OR p_lat < -90 OR p_lat > 90 OR p_lng < -180 OR p_lng > 180 THEN
     RETURN; -- punto inválido: se descarta en silencio, no aborta el resto del batch
   END IF;
 
-  INSERT INTO recorrido_ubicaciones (sesion_id, lat, lng, accuracy, speed, heading, capturado_at)
-  VALUES (p_sesion_id, p_lat, p_lng, p_accuracy, p_speed, p_heading, p_capturado_at);
+  IF p_capturado_at > now() + make_interval(secs => v_tolerancia_futuro_segundos) THEN
+    RETURN; -- timestamp absurdamente futuro: se descarta sin tocar ningún estado.
+  END IF;
+
+  -- Idempotencia: si este punto_id ya se insertó antes para esta sesión (reenvío
+  -- de un buffer offline), ON CONFLICT DO NOTHING no inserta una segunda fila y
+  -- GET DIAGNOSTICS lo confirma — en ese caso se corta acá, SIN reprocesar
+  -- estado/paradas/km una segunda vez para el mismo punto.
+  INSERT INTO recorrido_ubicaciones (sesion_id, punto_id, lat, lng, accuracy, speed, heading, capturado_at)
+  VALUES (p_sesion_id, p_punto_id, p_lat, p_lng, p_accuracy, p_speed, p_heading, p_capturado_at)
+  ON CONFLICT (sesion_id, punto_id) DO NOTHING;
+  GET DIAGNOSTICS v_insertados = ROW_COUNT;
+  IF v_insertados = 0 THEN
+    RETURN; -- punto duplicado: ya procesado, se ignora limpiamente.
+  END IF;
 
   SELECT * INTO v_estado FROM recorrido_estado_actual WHERE sesion_id = p_sesion_id FOR UPDATE;
 
@@ -458,18 +530,20 @@ BEGIN
   v_segs := EXTRACT(EPOCH FROM (p_capturado_at - v_estado.capturado_at));
   v_vel_kmh := CASE WHEN v_segs > 0 THEN (v_dist_ultimo / 1000.0) / (v_segs / 3600.0) ELSE 0 END;
 
-  -- Kilómetros: solo suma si la velocidad implícita entre los dos puntos es
-  -- plausible — un salto de GPS (teletransporte) no debe contarse como distancia
-  -- recorrida.
-  IF v_segs > 0 AND v_vel_kmh <= v_velocidad_maxima_plausible THEN
+  -- Kilómetros: solo suma si (a) la velocidad implícita es plausible (no es un
+  -- salto de GPS) y (b) la distancia del paso supera el piso de ruido/accuracy —
+  -- ver criterios documentados arriba de la función.
+  v_umbral_km := GREATEST(v_km_distancia_minima_metros, COALESCE(p_accuracy, 0) + COALESCE(v_estado.accuracy, 0));
+  IF v_segs > 0 AND v_vel_kmh <= v_velocidad_maxima_plausible AND v_dist_ultimo > v_umbral_km THEN
     UPDATE recorrido_sesiones
       SET km_acumulados = km_acumulados + (v_dist_ultimo / 1000.0), updated_at = now()
       WHERE id = p_sesion_id;
   END IF;
 
   IF v_dist_ancla > v_umbral_ruido_metros THEN
-    -- Movimiento real confirmado desde el ancla: cierra cualquier parada abierta y
-    -- mueve el ancla al punto nuevo.
+    -- Movimiento real confirmado desde el ancla: cierra cualquier parada REAL
+    -- abierta (si la duración nunca llegó a 180s, nunca se creó una fila acá y
+    -- este UPDATE simplemente no afecta ninguna) y mueve el ancla al punto nuevo.
     UPDATE recorrido_paradas
       SET fin_at = p_capturado_at,
           duracion_seg = EXTRACT(EPOCH FROM (p_capturado_at - inicio_at))::int,
@@ -485,40 +559,43 @@ BEGIN
   END IF;
 
   -- Sin desplazamiento real desde el ancla (independientemente de lo que diga
-  -- "speed", que es ruidoso): se abre una parada si no había una.
-  IF v_estado.parada_desde IS NULL THEN
+  -- "speed", que es ruidoso). parada_desde marca desde cuándo está quieto el
+  -- candidato — existía desde antes, o arranca ahora en el ancla.
+  v_parada_desde_efectivo := COALESCE(v_estado.parada_desde, v_estado.capturado_at);
+  v_segs_quieto := EXTRACT(EPOCH FROM (p_capturado_at - v_parada_desde_efectivo));
+
+  SELECT id INTO v_parada_id FROM recorrido_paradas WHERE sesion_id = p_sesion_id AND fin_at IS NULL;
+
+  IF v_parada_id IS NULL AND v_segs_quieto >= v_parada_minima_segundos THEN
+    -- Recién ahora el candidato cruza el mínimo de 3 minutos: se materializa como
+    -- parada REAL (inicio_at retroactivo = cuándo empezó a estar quieto, no
+    -- "ahora") y es la única vez que se incrementa paradas_count para este
+    -- candidato.
     INSERT INTO recorrido_paradas (sesion_id, lat, lng, inicio_at)
-    VALUES (p_sesion_id, v_estado.ancla_lat, v_estado.ancla_lng, v_estado.capturado_at);
+    VALUES (p_sesion_id, v_estado.ancla_lat, v_estado.ancla_lng, v_parada_desde_efectivo)
+    RETURNING id INTO v_parada_id;
 
     UPDATE recorrido_sesiones SET paradas_count = paradas_count + 1, updated_at = now() WHERE id = p_sesion_id;
-
-    UPDATE recorrido_estado_actual
-      SET lat = p_lat, lng = p_lng, accuracy = p_accuracy, speed = p_speed, heading = p_heading,
-          capturado_at = p_capturado_at, recibido_at = now(), estado_movimiento = 'detenido',
-          parada_desde = v_estado.capturado_at, updated_at = now()
-      WHERE sesion_id = p_sesion_id;
-    RETURN;
   END IF;
 
-  -- Seguía parado: actualiza la posición/último contacto y escala a alerta si ya
-  -- superó 1 hora sin desplazamiento real.
   UPDATE recorrido_estado_actual
     SET lat = p_lat, lng = p_lng, accuracy = p_accuracy, speed = p_speed, heading = p_heading,
-        capturado_at = p_capturado_at, recibido_at = now(), updated_at = now()
+        capturado_at = p_capturado_at, recibido_at = now(),
+        estado_movimiento = CASE WHEN v_segs_quieto > v_alerta_segundos THEN 'alerta_detencion' ELSE 'detenido' END,
+        parada_desde = v_parada_desde_efectivo, updated_at = now()
     WHERE sesion_id = p_sesion_id;
 
-  IF EXTRACT(EPOCH FROM (p_capturado_at - v_estado.parada_desde)) > v_alerta_segundos THEN
-    UPDATE recorrido_estado_actual SET estado_movimiento = 'alerta_detencion' WHERE sesion_id = p_sesion_id;
-
-    SELECT id INTO v_parada_id FROM recorrido_paradas WHERE sesion_id = p_sesion_id AND fin_at IS NULL;
-    IF v_parada_id IS NOT NULL THEN
-      UPDATE recorrido_paradas SET es_alerta = true, updated_at = now() WHERE id = v_parada_id AND es_alerta = false;
-      INSERT INTO recorrido_alertas (sesion_id, parada_id, tipo, detalle)
-      SELECT p_sesion_id, v_parada_id, 'sin_movimiento_1h', 'Sin desplazamiento real por más de 1 hora.'
-      WHERE NOT EXISTS (
-        SELECT 1 FROM recorrido_alertas WHERE parada_id = v_parada_id AND tipo = 'sin_movimiento_1h'
-      );
-    END IF;
+  -- Alerta por detención prolongada: solo si ya existe una parada REAL (>= 3 min)
+  -- asociada — una parada por debajo del mínimo nunca llega a esta rama con una
+  -- fila que alertar, lo cual es correcto (180s << 3600s: para el momento en que
+  -- algo podría alertar, ya pasó de sobra el mínimo de materialización).
+  IF v_parada_id IS NOT NULL AND v_segs_quieto > v_alerta_segundos THEN
+    UPDATE recorrido_paradas SET es_alerta = true, updated_at = now() WHERE id = v_parada_id AND es_alerta = false;
+    INSERT INTO recorrido_alertas (sesion_id, parada_id, tipo, detalle)
+    SELECT p_sesion_id, v_parada_id, 'sin_movimiento_1h', 'Sin desplazamiento real por más de 1 hora.'
+    WHERE NOT EXISTS (
+      SELECT 1 FROM recorrido_alertas WHERE parada_id = v_parada_id AND tipo = 'sin_movimiento_1h'
+    );
   END IF;
 END;
 $$ LANGUAGE plpgsql;
@@ -526,7 +603,7 @@ $$ LANGUAGE plpgsql;
 REVOKE ALL ON FUNCTION recorrido_distancia_metros(double precision, double precision, double precision, double precision) FROM PUBLIC;
 REVOKE ALL ON FUNCTION recorrido_generar_token() FROM PUBLIC;
 REVOKE ALL ON FUNCTION recorrido_admin_validar_token(text) FROM PUBLIC;
-REVOKE ALL ON FUNCTION recorrido_procesar_punto(uuid, double precision, double precision, double precision, double precision, double precision, timestamptz) FROM PUBLIC;
+REVOKE ALL ON FUNCTION recorrido_procesar_punto(uuid, uuid, double precision, double precision, double precision, double precision, double precision, timestamptz) FROM PUBLIC;
 REVOKE ALL ON FUNCTION recorrido_bloquear_edicion_ubicaciones() FROM PUBLIC;
 REVOKE ALL ON FUNCTION recorrido_set_updated_at() FROM PUBLIC;
 
@@ -611,6 +688,9 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
 
 -- ======================= CHOFER: registrar ubicaciones (batch) =======================
+-- Límite de 500 puntos por llamada: acota el trabajo de una sola invocación
+-- (un batch offline de horas se manda en varias llamadas, no en una gigante) y
+-- evita que un cliente con un bug mande un array arbitrariamente grande.
 CREATE OR REPLACE FUNCTION recorrido_registrar_ubicaciones(
   p_sesion_token text,
   p_device_hash text,
@@ -620,11 +700,21 @@ DECLARE
   v_sesion recorrido_sesiones%ROWTYPE;
   v_elem jsonb;
   v_procesados int := 0;
+  v_cantidad_puntos int;
+  v_max_puntos constant int := 500;
 BEGIN
   IF p_sesion_token IS NULL OR btrim(p_sesion_token) = ''
      OR p_device_hash IS NULL OR btrim(p_device_hash) = ''
      OR p_puntos IS NULL OR jsonb_typeof(p_puntos) <> 'array' THEN
     RETURN jsonb_build_object('ok', false, 'codigo', 'PUNTOS_INVALIDOS');
+  END IF;
+
+  v_cantidad_puntos := jsonb_array_length(p_puntos);
+  IF v_cantidad_puntos = 0 THEN
+    RETURN jsonb_build_object('ok', false, 'codigo', 'PUNTOS_VACIO');
+  END IF;
+  IF v_cantidad_puntos > v_max_puntos THEN
+    RETURN jsonb_build_object('ok', false, 'codigo', 'PUNTOS_EXCEDEN_LIMITE');
   END IF;
 
   SELECT * INTO v_sesion FROM recorrido_sesiones
@@ -648,6 +738,7 @@ BEGIN
   LOOP
     PERFORM recorrido_procesar_punto(
       v_sesion.id,
+      (v_elem ->> 'punto_id')::uuid,
       (v_elem ->> 'lat')::double precision,
       (v_elem ->> 'lng')::double precision,
       (v_elem ->> 'accuracy')::double precision,
@@ -817,10 +908,27 @@ $$ LANGUAGE plpgsql SECURITY DEFINER STABLE SET search_path = public, pg_temp;
 -- El frontend usa siempre la clave anon (no hay sesión de Supabase Auth), así que
 -- estas funciones deben ser ejecutables por anon y authenticated. Las tablas base
 -- NO reciben ningún grant directo (ver sección 2).
+--
+-- PostgreSQL otorga EXECUTE a PUBLIC automáticamente en todo CREATE FUNCTION — el
+-- GRANT a anon/authenticated de abajo AGREGA esos dos roles, pero no retira el
+-- grant implícito a PUBLIC (que significa "cualquier rol", incluidos roles que no
+-- deberían poder llamarlas, como un futuro service_role mal configurado o
+-- cualquier rol nuevo). Por eso cada RPC pública se revoca explícitamente de
+-- PUBLIC antes de otorgarla puntualmente — mismo criterio de mínimo privilegio ya
+-- aplicado a los helpers internos en la sección 3.
+REVOKE ALL ON FUNCTION recorrido_iniciar_sesion_chofer(bigint, text, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION recorrido_iniciar_sesion_chofer(bigint, text, text) TO anon, authenticated;
+
+REVOKE ALL ON FUNCTION recorrido_registrar_ubicaciones(text, text, jsonb) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION recorrido_registrar_ubicaciones(text, text, jsonb) TO anon, authenticated;
+
+REVOKE ALL ON FUNCTION recorrido_finalizar_sesion(text, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION recorrido_finalizar_sesion(text, text) TO anon, authenticated;
+
+REVOKE ALL ON FUNCTION recorrido_admin_autenticar(bigint, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION recorrido_admin_autenticar(bigint, text) TO anon, authenticated;
+
+REVOKE ALL ON FUNCTION recorrido_admin_listar_estado(text, uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION recorrido_admin_listar_estado(text, uuid) TO anon, authenticated;
 
 -- Las funciones auxiliares internas (recorrido_distancia_metros,
