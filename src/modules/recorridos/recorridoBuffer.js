@@ -21,9 +21,14 @@
 // correcta NO es descartar los puntos más viejos para hacerle lugar a uno
 // nuevo (eso SÍ sería perder datos ya capturados) — es dejar de encolar puntos
 // NUEVOS hasta que un flush exitoso libere espacio, y reflejarlo claramente en
-// la UI (ver `lleno` en intentarEncolarPunto). A ~1 punto cada 10s como
-// mínimo, 5000 puntos cubren más de 13 horas continuas sin señal — muy por
-// encima de cualquier jornada electoral real.
+// la UI (ver `lleno` en intentarEncolarPunto). No hay una duración fija que se
+// pueda prometer para "cuánto dura" el buffer sin conexión: el umbral de
+// encolado es ~15m O ~10s (lo que ocurra primero), así que un vehículo en
+// movimiento constante genera puntos bien más seguido que uno cada 10s, y la
+// capacidad real depende de la velocidad/frecuencia de los fixes del GPS en
+// cada caso, no de un cálculo único. 5000 es simplemente un techo generoso
+// para no bloquear el almacenamiento del lado del cliente en un escenario
+// normal de corte de datos móviles, no una garantía de horas de autonomía.
 //
 // Cada punto guardado conserva su mismo punto_id hasta ser confirmado por el
 // backend — es la clave de la idempotencia: reenviar el mismo punto_id ante un

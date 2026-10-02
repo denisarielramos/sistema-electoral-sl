@@ -90,6 +90,25 @@ const RecorridoChoferActivo = ({ sesion, onActualizarSesion, onSesionInvalida, o
           const resultado = quitarConfirmados(sesion.sesionId, batch.map((p) => p.punto_id));
           setPendientes(resultado.buffer.length);
           setUltimoEnvioHora(new Date());
+
+          if (!resultado.persistido) {
+            // El backend SÍ confirmó este batch, pero no pudimos quitarlo del
+            // buffer local (localStorage falló al escribir la remoción). Si
+            // siguiéramos el loop, el próximo ciclo volvería a leer este mismo
+            // batch (sigue ahí) y lo reenviaría sin fin dentro de este mismo
+            // flush. Se corta acá en vez de seguir: se avisa en pantalla y se
+            // reintenta recién en el próximo ciclo (próximo tick del
+            // intervalo o evento "online"), nunca en un loop sin fin. Ningún
+            // punto se borra ni se da por enviado sin estarlo, y un reenvío
+            // posterior del mismo batch es inocuo: el backend lo ignora por
+            // punto_id (idempotente).
+            setAvisoAlmacenamiento(
+              "El envío se confirmó pero no se pudo actualizar el almacenamiento local. " +
+                "Se reintentará: si se reenvía el mismo lote, el servidor no lo duplica."
+            );
+            return;
+          }
+
           if (resultado.buffer.length < BUFFER_MAX_LOCAL) setAvisoAlmacenamiento("");
           continue; // puede quedar más del buffer local por mandar: sigue el loop
         }
@@ -162,9 +181,17 @@ const RecorridoChoferActivo = ({ sesion, onActualizarSesion, onSesionInvalida, o
         setAvisoAlmacenamiento("");
       }
 
-      if (resultado.agregado && online) intentarFlush();
+      // Deliberadamente NO se llama a intentarFlush() acá. La frecuencia de
+      // CAPTURA (este callback, gateado por el umbral de ~15m/~10s de arriba)
+      // es independiente de la frecuencia de ENVÍO a la red: un vehículo en
+      // movimiento puede encolar varios puntos dentro de una misma ventana de
+      // 10s, y se quiere seguir capturándolos todos, pero sin disparar una
+      // llamada RPC por cada uno — para ~600 choferes eso multiplicaría la
+      // carga de red/servidor sin necesidad. La sincronización corre sola, con
+      // su propio ritmo de ~10s (ver el setInterval más abajo) + al reconectar
+      // (evento "online") + al finalizar — nunca atada a cada punto capturado.
     },
-    [sesion.sesionId, sesion.trackingIniciadoAt, onActualizarSesion, online, intentarFlush]
+    [sesion.sesionId, sesion.trackingIniciadoAt, onActualizarSesion]
   );
 
   const onErrorPosicion = useCallback(
