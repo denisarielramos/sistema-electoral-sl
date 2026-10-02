@@ -22,7 +22,7 @@ import { MapPin, Wifi, WifiOff, CheckCircle2, AlertTriangle, Loader2, Truck, Log
 import { getDeviceHash } from "./recorridoDevice";
 import { registrarUbicaciones, finalizarSesion } from "./recorridoService";
 import { mensajeError, mensajeGeoError, GEO_ERROR_CODE, distanciaMetros, formatearHoraLocal } from "./recorridoUtils";
-import { leerBuffer, intentarEncolarPunto, quitarConfirmados, vaciarBuffer } from "./recorridoBuffer";
+import { leerBuffer, intentarEncolarPunto, quitarConfirmados, vaciarBuffer, RPC_BATCH_MAX, BUFFER_MAX_LOCAL } from "./recorridoBuffer";
 import { Tarjeta, Encabezado, Cargando, MensajeFinal, BotonPrimario, BotonSecundario } from "./components/RecorridoUI";
 
 const INTERVALO_FLUSH_MS = 10_000; // reintento periódico de envío, igual de frecuente que la captura
@@ -50,6 +50,7 @@ const RecorridoChoferActivo = ({ sesion, onActualizarSesion, onSesionInvalida, o
   const [mensajePermiso, setMensajePermiso] = useState("");
   const [errorFinalizar, setErrorFinalizar] = useState("");
   const [finalizando, setFinalizando] = useState(false);
+  const [avisoAlmacenamiento, setAvisoAlmacenamiento] = useState("");
 
   const watchIdRef = useRef(null);
   const flushEnCursoRef = useRef(false);
@@ -62,44 +63,61 @@ const RecorridoChoferActivo = ({ sesion, onActualizarSesion, onSesionInvalida, o
     }
   }, []);
 
+  // Vacía el buffer local en batches SUCESIVOS de a lo sumo RPC_BATCH_MAX (500)
+  // puntos cada uno — nunca manda más de 500 por llamada (es el máximo que
+  // acepta recorrido_registrar_ubicaciones), pero el buffer local puede tener
+  // muchos más, así que sigue mandando batch tras batch, EN SECUENCIA (nunca
+  // en paralelo, gracias a flushEnCursoRef + los `await` dentro del loop),
+  // mientras cada batch se vaya confirmando y queden puntos por mandar.
+  // Si un batch falla, el loop se detiene ahí: los puntos de ESE batch (y los
+  // que quedaban después) permanecen intactos en el buffer para el próximo
+  // intento — nunca se descartan ni se asume que se enviaron.
   const intentarFlush = useCallback(async () => {
     if (flushEnCursoRef.current) return;
-    const buffer = leerBuffer(sesion.sesionId);
-    if (buffer.length === 0) return;
-
     flushEnCursoRef.current = true;
     try {
-      const deviceHash = await getDeviceHash();
-      const data = await registrarUbicaciones(sesion.token, deviceHash, buffer);
-      if (!montadoRef.current) return;
+      for (;;) {
+        const buffer = leerBuffer(sesion.sesionId);
+        if (buffer.length === 0) break;
+        if (!montadoRef.current) return;
 
-      if (data?.ok) {
-        quitarConfirmados(sesion.sesionId, buffer.map((p) => p.punto_id));
-        setPendientes(leerBuffer(sesion.sesionId).length);
-        setUltimoEnvioHora(new Date());
-        return;
+        const batch = buffer.slice(0, RPC_BATCH_MAX);
+        const deviceHash = await getDeviceHash();
+        const data = await registrarUbicaciones(sesion.token, deviceHash, batch);
+        if (!montadoRef.current) return;
+
+        if (data?.ok) {
+          const resultado = quitarConfirmados(sesion.sesionId, batch.map((p) => p.punto_id));
+          setPendientes(resultado.buffer.length);
+          setUltimoEnvioHora(new Date());
+          if (resultado.buffer.length < BUFFER_MAX_LOCAL) setAvisoAlmacenamiento("");
+          continue; // puede quedar más del buffer local por mandar: sigue el loop
+        }
+
+        if (data?.codigo === "SESION_INVALIDA_O_VENCIDA") {
+          detenerSeguimiento();
+          onSesionInvalida();
+          return;
+        }
+
+        if (data?.codigo === "SESION_FINALIZADA") {
+          // El backend ya considera finalizada esta sesión (ej. finalizada desde
+          // otra pestaña/dispositivo con el mismo token) — se trata como éxito
+          // idempotente del lado del cliente: se deja de transmitir.
+          detenerSeguimiento();
+          vaciarBuffer(sesion.sesionId);
+          onFinalizado();
+          setFase("finalizado");
+          return;
+        }
+
+        // PUNTOS_INVALIDOS / PUNTOS_VACIO / PUNTOS_EXCEDEN_LIMITE / ERROR_TECNICO:
+        // ninguno es fatal, pero tampoco se insiste con más batches en este
+        // mismo ciclo — el buffer completo (este batch y lo que quedaba
+        // después) se deja intacto y se reintenta en el próximo ciclo
+        // (próximo tick del intervalo o próximo evento "online").
+        break;
       }
-
-      if (data?.codigo === "SESION_INVALIDA_O_VENCIDA") {
-        detenerSeguimiento();
-        onSesionInvalida();
-        return;
-      }
-
-      if (data?.codigo === "SESION_FINALIZADA") {
-        // El backend ya considera finalizada esta sesión (ej. finalizada desde
-        // otra pestaña/dispositivo con el mismo token) — se trata como éxito
-        // idempotente del lado del cliente: se deja de transmitir.
-        detenerSeguimiento();
-        vaciarBuffer(sesion.sesionId);
-        onFinalizado();
-        setFase("finalizado");
-        return;
-      }
-
-      // PUNTOS_INVALIDOS / PUNTOS_VACIO / PUNTOS_EXCEDEN_LIMITE / ERROR_TECNICO:
-      // ninguno es fatal — el buffer queda intacto y se reintenta en el próximo
-      // ciclo (próximo tick del intervalo o próximo evento "online").
     } finally {
       flushEnCursoRef.current = false;
     }
@@ -128,10 +146,23 @@ const RecorridoChoferActivo = ({ sesion, onActualizarSesion, onSesionInvalida, o
       };
 
       const resultado = intentarEncolarPunto(sesion.sesionId, candidato, distanciaMetros);
-      if (resultado.agregado) {
-        setPendientes(resultado.buffer.length);
-        if (online) intentarFlush();
+      setPendientes(resultado.buffer.length);
+
+      if (resultado.lleno) {
+        setAvisoAlmacenamiento(
+          `El almacenamiento local llegó al máximo (${BUFFER_MAX_LOCAL} puntos sin confirmar). ` +
+            "Se dejaron de guardar puntos nuevos hasta liberar espacio. Seguimos intentando sincronizar."
+        );
+      } else if (!resultado.persistido) {
+        setAvisoAlmacenamiento(
+          "No se pudo guardar tu última ubicación en este dispositivo (almacenamiento lleno o no disponible). " +
+            "Seguimos intentando sincronizar lo que sí se guardó."
+        );
+      } else {
+        setAvisoAlmacenamiento("");
       }
+
+      if (resultado.agregado && online) intentarFlush();
     },
     [sesion.sesionId, sesion.trackingIniciadoAt, onActualizarSesion, online, intentarFlush]
   );
@@ -332,6 +363,12 @@ const RecorridoChoferActivo = ({ sesion, onActualizarSesion, onSesionInvalida, o
         correctamente. El tracking puede interrumpirse si bloqueás la pantalla o el navegador
         queda en segundo plano.
       </p>
+
+      {avisoAlmacenamiento && (
+        <p className="flex items-start gap-1.5 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg p-3 mb-3">
+          <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" /> {avisoAlmacenamiento}
+        </p>
+      )}
 
       {errorFinalizar && (
         <p className="flex items-center gap-1.5 text-sm text-red-600 mb-3">
