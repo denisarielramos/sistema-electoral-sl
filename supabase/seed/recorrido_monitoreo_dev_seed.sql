@@ -46,15 +46,15 @@ ON CONFLICT (id) DO NOTHING;
 -- ======================= ASIGNACIONES (código de prueba hasheado con bcrypt) =======================
 INSERT INTO recorrido_asignaciones (id, jornada_id, chofer_id, codigo_hash, codigo_expira_at) VALUES
   ('00000000-0000-0000-0000-00000000b001', '00000000-0000-0000-0000-00000000a001', '00000000-0000-0000-0000-00000000c001',
-    crypt('PRUEBA-D1-2026', gen_salt('bf')), now() + interval '30 days'),
+    extensions.crypt('PRUEBA-D1-2026', extensions.gen_salt('bf')), now() + interval '30 days'),
   ('00000000-0000-0000-0000-00000000b002', '00000000-0000-0000-0000-00000000a001', '00000000-0000-0000-0000-00000000c002',
-    crypt('PRUEBA-D2-2026', gen_salt('bf')), now() + interval '30 days'),
+    extensions.crypt('PRUEBA-D2-2026', extensions.gen_salt('bf')), now() + interval '30 days'),
   ('00000000-0000-0000-0000-00000000b003', '00000000-0000-0000-0000-00000000a001', '00000000-0000-0000-0000-00000000c003',
-    crypt('PRUEBA-D3-2026', gen_salt('bf')), now() + interval '30 days')
+    extensions.crypt('PRUEBA-D3-2026', extensions.gen_salt('bf')), now() + interval '30 days')
 ON CONFLICT (id) DO NOTHING;
 
 -- ======================= ADMIN DE PRUEBA DEL MÓDULO =======================
 INSERT INTO recorrido_admin_access (id, ci, nombre, password_hash) VALUES
   ('00000000-0000-0000-0000-00000000d001', 90000001, 'Admin Recorridos (dev)',
-    crypt('recorridos-dev-2026', gen_salt('bf')))
+    extensions.crypt('recorridos-dev-2026', extensions.gen_salt('bf')))
 ON CONFLICT (id) DO NOTHING;

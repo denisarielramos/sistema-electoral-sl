@@ -44,10 +44,16 @@
 -- tiene el resto del sistema, no una regresión.
 -- ============================================================================
 
--- Necesaria para gen_random_bytes()/digest()/crypt()/gen_salt() usadas abajo para
--- hashear códigos, contraseñas y tokens de sesión. No se puede confirmar desde el
--- repo si ya está habilitada en el proyecto real de Supabase — ver riesgos en el
--- resumen entregado junto con esta migración.
+-- Necesaria para gen_random_bytes()/digest()/crypt() usadas abajo para hashear
+-- códigos, contraseñas y tokens de sesión. CONFIRMADO en el proyecto real de
+-- Supabase: pgcrypto 1.3 está instalada en el schema "extensions" (su convención
+-- habitual), no en "public". Por eso TODAS las llamadas a funciones de pgcrypto en
+-- este archivo están calificadas explícitamente como extensions.crypt(...) /
+-- extensions.digest(...) / extensions.gen_random_bytes(...) — nunca sin calificar
+-- — y ninguna función SECURITY DEFINER agrega "extensions" a su search_path solo
+-- para resolverlas (eso ensancharía innecesariamente qué esquemas puede ver la
+-- función). CREATE EXTENSION IF NOT EXISTS es un no-op si ya existe, sin importar
+-- en qué schema esté instalada.
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 -- ============================================================================
@@ -366,8 +372,8 @@ $$ LANGUAGE plpgsql IMMUTABLE;
 -- caller (iniciar_sesion_chofer / admin_autenticar); solo el hash se persiste.
 CREATE OR REPLACE FUNCTION recorrido_generar_token()
 RETURNS TABLE(token text, token_hash text) AS $$
-  SELECT t, encode(digest(t, 'sha256'), 'hex')
-  FROM (SELECT encode(gen_random_bytes(32), 'hex') AS t) s;
+  SELECT t, encode(extensions.digest(t, 'sha256'), 'hex')
+  FROM (SELECT encode(extensions.gen_random_bytes(32), 'hex') AS t) s;
 $$ LANGUAGE sql VOLATILE;
 
 -- Valida un admin_token contra recorrido_admin_sesiones y devuelve el admin_id si
@@ -385,11 +391,11 @@ BEGIN
   SELECT s.admin_id INTO v_admin_id
     FROM recorrido_admin_sesiones s
     JOIN recorrido_admin_access a ON a.id = s.admin_id AND a.activo = true
-    WHERE s.token_hash = encode(digest(p_admin_token, 'sha256'), 'hex')
+    WHERE s.token_hash = encode(extensions.digest(p_admin_token, 'sha256'), 'hex')
       AND s.token_expira_at > now();
   RETURN v_admin_id;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public STABLE;
+$$ LANGUAGE plpgsql SECURITY DEFINER STABLE SET search_path = public, pg_temp;
 
 -- Procesa UN punto GPS ya validado contra una sesión existente: inserta en el
 -- histórico, actualiza el estado caliente, detecta parada/alerta (sin depender
@@ -570,7 +576,7 @@ BEGIN
     RETURN jsonb_build_object('ok', false, 'codigo', 'CODIGO_EXPIRADO');
   END IF;
 
-  IF v_asignacion.codigo_hash <> crypt(p_codigo, v_asignacion.codigo_hash) THEN
+  IF v_asignacion.codigo_hash <> extensions.crypt(p_codigo, v_asignacion.codigo_hash) THEN
     RETURN jsonb_build_object('ok', false, 'codigo', 'CODIGO_INVALIDO');
   END IF;
 
@@ -602,7 +608,7 @@ BEGIN
     'jornada', jsonb_build_object('nombre', v_jornada.nombre)
   );
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
 
 -- ======================= CHOFER: registrar ubicaciones (batch) =======================
 CREATE OR REPLACE FUNCTION recorrido_registrar_ubicaciones(
@@ -622,7 +628,7 @@ BEGIN
   END IF;
 
   SELECT * INTO v_sesion FROM recorrido_sesiones
-    WHERE token_hash = encode(digest(p_sesion_token, 'sha256'), 'hex')
+    WHERE token_hash = encode(extensions.digest(p_sesion_token, 'sha256'), 'hex')
       AND device_hash = p_device_hash;
 
   IF NOT FOUND OR v_sesion.token_expira_at < now() THEN
@@ -659,7 +665,7 @@ EXCEPTION WHEN OTHERS THEN
   -- se informa un código genérico; el cliente puede reintentar.
   RETURN jsonb_build_object('ok', false, 'codigo', 'PUNTOS_INVALIDOS');
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
 
 -- ======================= CHOFER: finalizar sesión =======================
 CREATE OR REPLACE FUNCTION recorrido_finalizar_sesion(
@@ -674,7 +680,7 @@ BEGIN
   END IF;
 
   SELECT * INTO v_sesion FROM recorrido_sesiones
-    WHERE token_hash = encode(digest(p_sesion_token, 'sha256'), 'hex')
+    WHERE token_hash = encode(extensions.digest(p_sesion_token, 'sha256'), 'hex')
       AND device_hash = p_device_hash;
 
   IF NOT FOUND THEN
@@ -694,7 +700,7 @@ BEGIN
 
   RETURN jsonb_build_object('ok', true);
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
 
 -- ======================= ADMIN: autenticar =======================
 CREATE OR REPLACE FUNCTION recorrido_admin_autenticar(
@@ -716,7 +722,7 @@ BEGIN
     RETURN jsonb_build_object('ok', false, 'codigo', 'CREDENCIALES_INVALIDAS');
   END IF;
 
-  IF v_admin.password_hash <> crypt(p_password, v_admin.password_hash) THEN
+  IF v_admin.password_hash <> extensions.crypt(p_password, v_admin.password_hash) THEN
     RETURN jsonb_build_object('ok', false, 'codigo', 'CREDENCIALES_INVALIDAS');
   END IF;
 
@@ -728,7 +734,7 @@ BEGIN
 
   RETURN jsonb_build_object('ok', true, 'admin_token', v_token, 'expires_at', v_expira, 'nombre', v_admin.nombre);
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
 
 -- ======================= ADMIN: estado actual (dashboard en vivo) =======================
 -- SOLO lee recorrido_estado_actual + recorrido_asignaciones/choferes/jornadas
@@ -803,7 +809,7 @@ BEGIN
     'sin_senal', v_sin_senal, 'finalizados', v_finalizados
   );
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public STABLE;
+$$ LANGUAGE plpgsql SECURITY DEFINER STABLE SET search_path = public, pg_temp;
 
 -- ============================================================================
 -- 5) PERMISOS — únicamente EXECUTE sobre las RPC pensadas para el frontend
