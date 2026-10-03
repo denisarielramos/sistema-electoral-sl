@@ -38,6 +38,7 @@ import AddPersonModal from "../AddPersonModal";
 import ModalAgregarCoordinador from "./ModalAgregarCoordinador";
 import { ExcelDownloadButton, VotantesDirectosButton } from "./ExcelButtons";
 import ReportesMisSubsCoordinador from "./ReportesMisSubsCoordinador";
+import ReportesMiRamaDirigente from "./ReportesMiRamaDirigente";
 import PadronSearch from "./PadronSearch";
 import ModalTelefono from "./ModalTelefono";
 import VistaSeccional from "./VistaSeccional";
@@ -866,6 +867,9 @@ const Dashboard = ({ currentUser, onLogout }) => {
   // SUS subcoordinadores — sin selector de dirigente/coordinador, a diferencia del
   // "Verificar estructura" de superadmin. Ver ReportesMisSubsCoordinador.jsx.
   const [reportesSubsOpen, setReportesSubsOpen] = useState(false);
+
+  // Reportes de estructura (dirigente): panel limitado a SU propia rama.
+  const [reportesDirigenteOpen, setReportesDirigenteOpen] = useState(false);
 
   // Vista por seccional (superadmin): reemplaza el contenido del Dashboard por una
   // vista de solo lectura filtrable, reutilizando estructura/padronMap ya en memoria.
@@ -2572,6 +2576,13 @@ const Dashboard = ({ currentUser, onLogout }) => {
             <ListChecks className="w-4 h-4" />
             Bitácora de visitas
           </button>
+          <button
+            onClick={() => setReportesDirigenteOpen(true)}
+            className="inline-flex items-center gap-2 px-4 h-9 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 rounded-lg text-sm font-medium transition-colors"
+          >
+            <ClipboardList className="w-4 h-4" />
+            Reportes de estructura
+          </button>
         </div>
 
         <BuscadorInterno
@@ -3492,6 +3503,21 @@ const Dashboard = ({ currentUser, onLogout }) => {
           </div>
         );
       })()}
+
+      {/* =========== REPORTES DE ESTRUCTURA — MI RAMA (dirigente) =========== */}
+      {reportesDirigenteOpen && currentUser.role === "dirigente" && (
+        <ReportesMiRamaDirigente
+          estructura={estructura}
+          currentUser={currentUser}
+          excelBusy={excelBusy}
+          handleDescargarExcel={handleDescargarExcel}
+          buildCoordExcelPayload={buildCoordExcelPayload}
+          buildCoordDirectosExcelPayload={buildCoordDirectosExcelPayload}
+          buildSubExcelPayload={buildSubExcelPayload}
+          buildSubDirectosExcelPayload={buildSubDirectosExcelPayload}
+          onClose={() => setReportesDirigenteOpen(false)}
+        />
+      )}
 
       {/* =========== REPORTES DE ESTRUCTURA — MIS SUBCOORDINADORES (coordinador) =========== */}
       {reportesSubsOpen && currentUser.role === "coordinador" && (
