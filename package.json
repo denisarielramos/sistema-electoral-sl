@@ -10,6 +10,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@googlemaps/js-api-loader": "^2.1.3",
+    "@googlemaps/markerclusterer": "^2.6.2",
     "@supabase/supabase-js": "^2.86.2",
     "exceljs": "^4.4.0",
     "jspdf": "^3.0.4",

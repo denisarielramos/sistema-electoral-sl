@@ -32,6 +32,7 @@ import {
   Home,
   ListChecks,
   QrCode,
+  Navigation,
 } from "lucide-react";
 
 import AddPersonModal from "../AddPersonModal";
@@ -48,6 +49,9 @@ import BitacoraVisitas from "./mapeo/BitacoraVisitas";
 import AccesoRapidoHogar from "./mapeo/AccesoRapidoHogar";
 // Import perezoso: solo lo usa superadmin y arrastra Leaflet-Circle + qrcode.react.
 const AsistenciaAdmin = lazy(() => import("../modules/asistencia/AsistenciaAdmin"));
+// Módulo de Monitoreo de Recorridos (superadmin únicamente): perezoso por el
+// mismo motivo — arrastra Google Maps y exceljs, que el resto no necesita.
+const RecorridosAdmin = lazy(() => import("../modules/recorridos/admin/RecorridosAdmin"));
 import {
   generateSuperadminPDF,
   generateCoordinadorPDF,
@@ -886,6 +890,9 @@ const Dashboard = ({ currentUser, onLogout }) => {
   // forma perezosa más abajo (React.lazy) porque solo la usa este rol y arrastra
   // Leaflet-Circle + qrcode.react, que el resto del dashboard no necesita.
   const [mostrarAsistencia, setMostrarAsistencia] = useState(false);
+  // Módulo de Monitoreo de Recorridos (superadmin únicamente), mismo criterio
+  // de carga perezosa que Asistencia.
+  const [mostrarRecorridos, setMostrarRecorridos] = useState(false);
   // Acceso rápido "Asignar ubicación" desde una tarjeta de votante (los 4 roles).
   const [votanteParaUbicacion, setVotanteParaUbicacion] = useState(null);
 
@@ -2177,6 +2184,13 @@ const Dashboard = ({ currentUser, onLogout }) => {
             <QrCode className="w-4 h-4" />
             Asistencias
           </button>
+          <button
+            onClick={() => setMostrarRecorridos(true)}
+            className="inline-flex items-center gap-2 px-4 h-9 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 rounded-lg text-sm font-medium transition-colors"
+          >
+            <Navigation className="w-4 h-4" />
+            Monitoreo de recorridos
+          </button>
         </div>
 
         <BuscadorInterno
@@ -3072,6 +3086,10 @@ const Dashboard = ({ currentUser, onLogout }) => {
         ) : mostrarAsistencia && currentUser.role === "superadmin" ? (
           <Suspense fallback={<div className="text-center py-20 text-sm text-slate-400">Cargando…</div>}>
             <AsistenciaAdmin currentUser={currentUser} estructura={estructura} onVolver={() => setMostrarAsistencia(false)} />
+          </Suspense>
+        ) : mostrarRecorridos && currentUser.role === "superadmin" ? (
+          <Suspense fallback={<div className="text-center py-20 text-sm text-slate-400">Cargando…</div>}>
+            <RecorridosAdmin currentUser={currentUser} onVolver={() => setMostrarRecorridos(false)} />
           </Suspense>
         ) : currentUser.role === "superadmin" ? (
           renderSuperadmin()
