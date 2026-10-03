@@ -36,6 +36,8 @@ import {
 
 import AddPersonModal from "../AddPersonModal";
 import ModalAgregarCoordinador from "./ModalAgregarCoordinador";
+import { ExcelDownloadButton, VotantesDirectosButton } from "./ExcelButtons";
+import ReportesMisSubsCoordinador from "./ReportesMisSubsCoordinador";
 import PadronSearch from "./PadronSearch";
 import ModalTelefono from "./ModalTelefono";
 import VistaSeccional from "./VistaSeccional";
@@ -197,58 +199,10 @@ const abrirUbicacion = (direccion) => {
   window.open(url, "_blank", "noopener,noreferrer");
 };
 
-// ======================= BOTÓN DESCARGAR EXCEL (tarjetas individuales) =======================
-// excelKey identifica esta descarga puntual; busyKey es la descarga en curso (global),
-// usado tanto para deshabilitar el botón como para mostrar "Generando..." solo en el que se clickeó.
-const ExcelDownloadButton = ({ excelKey, busyKey, onDownload, iconOnly = false }) => {
-  const isBusy = busyKey === excelKey;
-  const baseIcon =
-    "inline-flex items-center justify-center w-9 h-9 rounded-lg transition-colors shrink-0 border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed";
-  const baseInline =
-    "inline-flex items-center gap-1 px-2 py-0.5 rounded-md border border-slate-200 text-slate-600 text-xs hover:bg-slate-50 transition-colors bg-transparent shadow-none disabled:opacity-50 disabled:cursor-not-allowed";
-
-  return (
-    <button
-      type="button"
-      onClick={(e) => { e.stopPropagation(); onDownload(); }}
-      disabled={!!busyKey}
-      title={isBusy ? "Generando Excel..." : "Descargar Excel"}
-      aria-label={isBusy ? "Generando Excel..." : "Descargar Excel"}
-      className={iconOnly ? baseIcon : baseInline}
-    >
-      {isBusy ? (
-        <span className="w-3.5 h-3.5 border-2 border-slate-300 border-t-slate-600 rounded-full animate-spin shrink-0" />
-      ) : (
-        <FileSpreadsheet className="w-3.5 h-3.5" />
-      )}
-      {!iconOnly && <span>{isBusy ? "Generando..." : "Excel"}</span>}
-    </button>
-  );
-};
-
-// Exporta EXCLUSIVAMENTE los votantes directos del nivel (dirigente/coordinador/
-// subcoordinador seleccionado) — nunca la red completa. Botón aparte de
-// ExcelDownloadButton para que su etiqueta sea inequívoca en el modal "Verificar
-// estructura".
-const VotantesDirectosButton = ({ excelKey, busyKey, onDownload }) => {
-  const isBusy = busyKey === excelKey;
-  return (
-    <button
-      type="button"
-      onClick={(e) => { e.stopPropagation(); onDownload(); }}
-      disabled={!!busyKey}
-      title="Descargar solo los votantes directos (Excel)"
-      className="inline-flex items-center gap-1.5 px-3 h-8 border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed text-slate-700 rounded-lg text-xs font-medium transition-colors shadow-none"
-    >
-      {isBusy ? (
-        <span className="w-3.5 h-3.5 border-2 border-slate-300 border-t-slate-600 rounded-full animate-spin shrink-0" />
-      ) : (
-        <Users className="w-3.5 h-3.5" />
-      )}
-      {isBusy ? "Generando..." : "Votantes directos"}
-    </button>
-  );
-};
+// ExcelDownloadButton / VotantesDirectosButton viven en ./ExcelButtons.jsx —
+// extraídos de este archivo para que ReportesMisSubsCoordinador.jsx (panel de
+// reportes del coordinador) los reutilice sin duplicar el componente ni crear
+// un import circular con este archivo.
 
 // ======================= TERCERA EDAD BADGE =======================
 const TerceraEdadBadge = () => (
@@ -907,6 +861,11 @@ const Dashboard = ({ currentUser, onLogout }) => {
   const [verificarDirCI, setVerificarDirCI] = useState("");
   const [verificarCoordCI, setVerificarCoordCI] = useState("");
   const [verificarPrinting, setVerificarPrinting] = useState(null); // "dirigente" | "coord" | "sub-<ci>" | null
+
+  // Reportes de estructura (coordinador): panel propio, limitado exclusivamente a
+  // SUS subcoordinadores — sin selector de dirigente/coordinador, a diferencia del
+  // "Verificar estructura" de superadmin. Ver ReportesMisSubsCoordinador.jsx.
+  const [reportesSubsOpen, setReportesSubsOpen] = useState(false);
 
   // Vista por seccional (superadmin): reemplaza el contenido del Dashboard por una
   // vista de solo lectura filtrable, reutilizando estructura/padronMap ya en memoria.
@@ -2823,6 +2782,13 @@ const Dashboard = ({ currentUser, onLogout }) => {
             <ListChecks className="w-4 h-4" />
             Bitácora de visitas
           </button>
+          <button
+            onClick={() => setReportesSubsOpen(true)}
+            className="inline-flex items-center gap-2 px-4 h-9 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 rounded-lg text-sm font-medium transition-colors"
+          >
+            <ClipboardList className="w-4 h-4" />
+            Reportes de estructura
+          </button>
         </div>
 
         <BuscadorInterno
@@ -3526,6 +3492,19 @@ const Dashboard = ({ currentUser, onLogout }) => {
           </div>
         );
       })()}
+
+      {/* =========== REPORTES DE ESTRUCTURA — MIS SUBCOORDINADORES (coordinador) =========== */}
+      {reportesSubsOpen && currentUser.role === "coordinador" && (
+        <ReportesMisSubsCoordinador
+          estructura={estructura}
+          currentUser={currentUser}
+          excelBusy={excelBusy}
+          handleDescargarExcel={handleDescargarExcel}
+          buildSubExcelPayload={buildSubExcelPayload}
+          buildSubDirectosExcelPayload={buildSubDirectosExcelPayload}
+          onClose={() => setReportesSubsOpen(false)}
+        />
+      )}
     </div>
   );
 };
