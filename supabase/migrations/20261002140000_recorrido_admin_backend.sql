@@ -23,18 +23,32 @@
 -- NO existe ni va a crearse ninguna ruta /admin/recorridos con un login
 -- administrativo separado. Dirigente/coordinador/subcoordinador NUNCA tienen
 -- acceso a nada de esto.
--- recorrido_admin_access y recorrido_admin_sesiones (tablas de la Fase 1) NO
--- son una segunda experiencia de login de cara al usuario: son el mecanismo
--- de AUTORIZACIÓN server-side de este módulo. En una fase posterior (frontend,
--- fuera del alcance de esta migración), el login de superadmin ya existente
--- deberá obtener de forma transparente un admin_token de este módulo al
--- iniciar sesión (un solo login visible para la persona, dos credenciales
--- coordinadas por detrás) — esta Fase 3 solo deja el backend listo para que
--- eso sea posible, sin resolver todavía ese puente ni tocar App.jsx/Dashboard.jsx.
--- Importante: esto es una decisión de DÓNDE vive la UI, no un relajamiento de
--- seguridad — ocultar el frontend nunca es una medida de seguridad suficiente,
--- así que cada RPC de abajo sigue exigiendo y validando p_admin_token
--- server-side exactamente igual que si el panel fuera público.
+--
+-- UN SOLO LOGIN (revisión de esta misma fase, antes de producción): ya NO hay
+-- un segundo login administrativo independiente para Recorridos.
+-- recorrido_admin_autenticar(bigint,text) — de la Fase 1 — se deja sin
+-- EXECUTE para ningún rol de cliente (ver sección de permisos): existir en la
+-- base pero ser inalcanzable desde el frontend. En su lugar, el puente es
+-- recorrido_admin_iniciar_desde_superadmin(text), que recibe el token
+-- administrativo que YA devuelve el login de Asistencias/Superadmin existente,
+-- lo valida server-side contra public.asistencia_admin_validar_token_interno
+-- (función real ya desplegada en el proyecto), y si la CI que esa función
+-- devuelve está autorizada y activa en recorrido_admin_access, emite un
+-- admin_token propio de Recorridos. El navegador nunca vuelve a mandar una
+-- contraseña para entrar a este módulo — un solo login visible para la
+-- persona, verificado criptográficamente contra una sesión Superadmin real.
+-- recorrido_admin_access pasa a ser, en los hechos, una ALLOWLIST
+-- server-side: la CI de un superadmin existe en el sistema no le da acceso
+-- automático a Recorridos — debe estar explícitamente autorizada acá
+-- (ver recorrido_admin_autorizar_ci más abajo). password_hash sigue siendo
+-- NOT NULL por el esquema ya aplicado de la Fase 1 (no se altera
+-- destructivamente), pero deja de ser una contraseña real de nadie: se llena
+-- con el hash de un secreto aleatorio, generado server-side, nunca devuelto,
+-- nunca reutilizado ni derivado de la contraseña del superadmin.
+-- Importante: esto sigue sin ser un relajamiento de seguridad — ocultar el
+-- frontend nunca es una medida de seguridad suficiente, así que cada RPC de
+-- abajo sigue exigiendo y validando su propio p_admin_token server-side
+-- exactamente igual que si el panel fuera público.
 --
 -- Resumen de lo que agrega:
 --   1) Un helper interno nuevo: generación de códigos temporales de chofer
@@ -42,27 +56,30 @@
 --      humano lo tipee, con suficiente entropía para no ser adivinable).
 --   2) Dos índices nuevos (jornada única activa + orden de historial) — NO se
 --      elimina ni modifica ningún índice existente.
---   3) RPC administrativas (SECURITY DEFINER) para jornadas, choferes
+--   3) El puente recorrido_admin_iniciar_desde_superadmin(text) (ver arriba).
+--   4) RPC administrativas (SECURITY DEFINER) para jornadas, choferes
 --      (incluida importación masiva), asignaciones/códigos, detalle de
 --      chofer/sesión, historial, replay (puntos/paradas/alertas) y gestión de
---      administradores del módulo — siempre validando p_admin_token server-side
---      vía recorrido_admin_validar_token (ya existe desde la Fase 1).
---   4) Mismo contrato de siempre: {ok:true, ...} / {ok:false, codigo:"..."},
---      REVOKE ALL FROM PUBLIC antes de otorgar EXECUTE solo a anon/authenticated
---      en las RPC públicas, y los helpers internos sin EXECUTE para
---      anon/authenticated/service_role/PUBLIC (lección aprendida en el hotfix
---      de la Fase 1: un REVOKE FROM PUBLIC no alcanza si en algún momento se
---      otorgó EXECUTE explícito a otro rol con nombre — por eso los helpers de
---      esta fase se revocan explícitamente de los 4).
+--      la allowlist de Recorridos — siempre validando p_admin_token
+--      server-side vía recorrido_admin_validar_token (ya existe desde la
+--      Fase 1).
+--   5) ACL determinística para TODA RPC nueva: REVOKE ALL ... FROM
+--      anon, authenticated, service_role, PUBLIC explícito antes de otorgar
+--      EXECUTE puntualmente (solo a anon/authenticated en las públicas; a
+--      nadie en los helpers internos) — lección aprendida en el hotfix de la
+--      Fase 1: un REVOKE FROM PUBLIC no alcanza si en algún momento se otorgó
+--      EXECUTE explícito a otro rol con nombre, así que esta fase ya no deja
+--      ningún rol de cliente sin revocar explícitamente en ninguna función
+--      nueva.
 --
--- NOTA SOBRE ADMINISTRADORES REALES (ver sección 8 al final de este archivo):
--- esta migración NO inserta ningún administrador ni contraseña, ni ejecuta el
--- seed de desarrollo. El primer administrador real sigue siendo, por
--- necesidad (no hay todavía ninguno con quien autenticarse), una única
--- inserción manual en el SQL Editor de Supabase — nunca en un archivo de este
--- repositorio. A partir de ese primer administrador, el resto se puede crear
--- con la RPC recorrido_admin_crear_admin (abajo), sin volver a tocar SQL a
--- mano ni commitear ninguna contraseña.
+-- NOTA SOBRE LA ALLOWLIST (ver sección "GESTIÓN DE LA ALLOWLIST" más abajo):
+-- esta migración NO autoriza ninguna CI ni inserta ningún secreto, ni ejecuta
+-- el seed de desarrollo. La primera CI autorizada sigue siendo, por necesidad
+-- (no hay todavía ninguna sesión Recorridos con la que llamar a estas RPC),
+-- una única inserción manual en el SQL Editor de Supabase — nunca en un
+-- archivo de este repositorio, y nunca con una contraseña real (ver ejemplo
+-- en esa sección). A partir de esa primera autorización, el resto se agrega
+-- con recorrido_admin_autorizar_ci (abajo), sin volver a tocar SQL a mano.
 -- ============================================================================
 
 -- ============================================================================
@@ -102,12 +119,14 @@ CREATE INDEX IF NOT EXISTS ix_recorrido_sesiones_created_at ON recorrido_sesione
 -- caracteres, pensado para viajar en una URL/header, no para que un humano lo
 -- tipee). Este código es el que el chofer escribe a mano en /recorrido, así
 -- que debe ser corto pero con entropía real:
---   - 10 caracteres de un alfabeto de 33 símbolos sin ambigüedad visual (sin
+--   - 10 caracteres de un alfabeto de 32 símbolos sin ambigüedad visual (sin
 --     0/O ni 1/I, que se confunden fácil al leer/tipear en un papel o
---     WhatsApp) → 33^10 ≈ 1.8×10^15 combinaciones (~50 bits de entropía),
---     muy por encima de lo que se podría probar a fuerza bruta durante la
---     corta vida de un código (horas, no años), y combinado además con la CI
---     del chofer como segundo dato que hay que conocer.
+--     WhatsApp) → 32^10 = 2^50 ≈ 1.13×10^15 combinaciones (exactamente 50
+--     bits de entropía — y como 256 (los valores posibles de un byte) es
+--     múltiplo exacto de 32, el "% length(v_alfabeto)" de abajo no introduce
+--     ningún sesgo), muy por encima de lo que se podría probar a fuerza bruta
+--     durante la corta vida de un código (horas, no años), y combinado además
+--     con la CI del chofer como segundo dato que hay que conocer.
 --   - Se guarda SIEMPRE con bcrypt (extensions.crypt + gen_salt('bf')), igual
 --     que el resto de los secretos del módulo — nunca texto plano.
 --   - El código crudo se devuelve UNA sola vez, en el momento en que se
@@ -138,7 +157,74 @@ $$ LANGUAGE plpgsql VOLATILE SET search_path = public, pg_temp;
 REVOKE ALL ON FUNCTION recorrido_generar_codigo_temporal() FROM anon, authenticated, service_role, PUBLIC;
 
 -- ============================================================================
--- 3) RPC ADMIN — JORNADAS
+-- 3) PUENTE DESDE LA SESIÓN SUPERADMIN EXISTENTE (reemplaza el login propio)
+-- ============================================================================
+-- Única puerta de entrada al módulo administrativo de Recorridos. Recibe el
+-- token administrativo que YA devuelve el login de Superadmin/Asistencias
+-- existente (public.asistencia_admin_validar_token_interno, ya desplegado en
+-- el proyecto real), lo valida server-side, y solo si la CI resultante está
+-- autorizada y activa en recorrido_admin_access emite un admin_token propio
+-- de este módulo. El navegador NUNCA manda una contraseña para esto.
+--
+-- Por qué esto es seguro y no un salto de confianza "a ciegas": la llamada a
+-- public.asistencia_admin_validar_token_interno corre DENTRO de esta misma
+-- función SECURITY DEFINER, con los privilegios del owner (igual que ya pasa
+-- hoy cuando esta función llama a recorrido_generar_token) — no depende de
+-- que anon/authenticated tengan EXECUTE otorgado sobre esa función de
+-- Asistencias; lo que importa es que el OWNER de ambos módulos (quien corre
+-- las migraciones) sí lo tiene. Si esa función devuelve NULL (token
+-- inexistente/vencido), no se autoriza nada. Si devuelve una CI que no está
+-- en la allowlist de recorrido_admin_access, tampoco — "ser Superadmin" no
+-- alcanza por sí solo, hay que estar explícitamente autorizado para GPS.
+CREATE OR REPLACE FUNCTION recorrido_admin_iniciar_desde_superadmin(
+  p_asistencia_admin_token text
+) RETURNS jsonb AS $$
+DECLARE
+  v_ci_text text;
+  v_ci bigint;
+  v_admin recorrido_admin_access%ROWTYPE;
+  v_token text;
+  v_token_hash text;
+  v_expira timestamptz;
+BEGIN
+  IF p_asistencia_admin_token IS NULL OR btrim(p_asistencia_admin_token) = '' THEN
+    RETURN jsonb_build_object('ok', false, 'codigo', 'SESION_SUPERADMIN_INVALIDA');
+  END IF;
+
+  v_ci_text := public.asistencia_admin_validar_token_interno(p_asistencia_admin_token);
+  IF v_ci_text IS NULL OR btrim(v_ci_text) = '' THEN
+    RETURN jsonb_build_object('ok', false, 'codigo', 'SESION_SUPERADMIN_INVALIDA');
+  END IF;
+
+  -- Normalización defensiva: la CI debe resolver a un entero positivo. Si por
+  -- cualquier motivo no castea, se trata como sesión inválida (nunca como un
+  -- error técnico que delate detalles internos).
+  BEGIN
+    v_ci := btrim(v_ci_text)::bigint;
+  EXCEPTION WHEN OTHERS THEN
+    RETURN jsonb_build_object('ok', false, 'codigo', 'SESION_SUPERADMIN_INVALIDA');
+  END;
+  IF v_ci <= 0 THEN
+    RETURN jsonb_build_object('ok', false, 'codigo', 'SESION_SUPERADMIN_INVALIDA');
+  END IF;
+
+  SELECT * INTO v_admin FROM recorrido_admin_access WHERE ci = v_ci AND activo = true;
+  IF NOT FOUND THEN
+    RETURN jsonb_build_object('ok', false, 'codigo', 'RECORRIDO_NO_AUTORIZADO');
+  END IF;
+
+  SELECT token, token_hash INTO v_token, v_token_hash FROM recorrido_generar_token();
+  v_expira := now() + interval '8 hours';
+
+  INSERT INTO recorrido_admin_sesiones (admin_id, token_hash, token_expira_at)
+  VALUES (v_admin.id, v_token_hash, v_expira);
+
+  RETURN jsonb_build_object('ok', true, 'admin_token', v_token, 'expires_at', v_expira, 'nombre', v_admin.nombre);
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
+
+-- ============================================================================
+-- 4) RPC ADMIN — JORNADAS
 -- ============================================================================
 
 CREATE OR REPLACE FUNCTION recorrido_admin_listar_jornadas(p_admin_token text)
@@ -288,7 +374,7 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
 
 -- ============================================================================
--- 4) RPC ADMIN — CHOFERES
+-- 5) RPC ADMIN — CHOFERES
 -- ============================================================================
 
 CREATE OR REPLACE FUNCTION recorrido_admin_listar_choferes(
@@ -425,12 +511,14 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
 -- todavía). Upsert por CI: un CI ya existente se actualiza, uno nuevo se crea.
 -- Nunca toca padron/votantes/coordinadores/subcoordinadores/dirigentes — ni
 -- siquiera los menciona, por diseño (ver nota de aislamiento en la Fase 1).
--- Cada elemento se procesa en su propio sub-bloque con EXCEPTION: una fila
--- mal formada se cuenta como rechazada sin abortar el resto del batch (a
--- diferencia de recorrido_registrar_ubicaciones, que descarta el batch
--- COMPLETO ante cualquier error — acá se prefiere máxima tolerancia por fila,
--- porque es una carga administrativa puntual donde importa saber
--- exactamente cuáles filas fallaron, no solo "falló algo").
+-- Cada elemento se valida con códigos de rechazo CONTROLADOS (nunca SQLERRM
+-- ni ningún mensaje crudo de Postgres: podría filtrar nombres de columnas,
+-- constraints o detalles del schema al frontend). Una fila mal formada se
+-- cuenta como rechazada sin abortar el resto del batch — a diferencia de
+-- recorrido_registrar_ubicaciones, que descarta el batch COMPLETO ante
+-- cualquier error, acá se prefiere máxima tolerancia por fila, porque es una
+-- carga administrativa puntual donde importa saber exactamente cuáles filas
+-- fallaron, no solo "falló algo".
 CREATE OR REPLACE FUNCTION recorrido_admin_importar_choferes(
   p_admin_token text,
   p_choferes jsonb
@@ -468,14 +556,36 @@ BEGIN
 
   FOR v_elem IN SELECT * FROM jsonb_array_elements(p_choferes) LOOP
     v_indice := v_indice + 1;
+
+    IF jsonb_typeof(v_elem) <> 'object' THEN
+      v_rechazados := v_rechazados + 1;
+      v_detalles_rechazados := v_detalles_rechazados || jsonb_build_object('indice', v_indice, 'codigo', 'FORMATO_INVALIDO');
+      CONTINUE;
+    END IF;
+
+    -- Validación de CI por regex ANTES de castear: así se distingue
+    -- "CI_INVALIDO" de un error inesperado, sin depender de capturar la
+    -- excepción de un cast fallido (ni de su mensaje).
+    IF (v_elem ->> 'ci') IS NULL OR (v_elem ->> 'ci') !~ '^[0-9]+$' THEN
+      v_rechazados := v_rechazados + 1;
+      v_detalles_rechazados := v_detalles_rechazados || jsonb_build_object('indice', v_indice, 'ci', v_elem ->> 'ci', 'codigo', 'CI_INVALIDO');
+      CONTINUE;
+    END IF;
+    v_ci := (v_elem ->> 'ci')::bigint;
+    IF v_ci <= 0 THEN
+      v_rechazados := v_rechazados + 1;
+      v_detalles_rechazados := v_detalles_rechazados || jsonb_build_object('indice', v_indice, 'ci', v_ci, 'codigo', 'CI_INVALIDO');
+      CONTINUE;
+    END IF;
+
+    v_nombre := btrim(v_elem ->> 'nombre');
+    IF v_nombre IS NULL OR v_nombre = '' THEN
+      v_rechazados := v_rechazados + 1;
+      v_detalles_rechazados := v_detalles_rechazados || jsonb_build_object('indice', v_indice, 'ci', v_ci, 'codigo', 'NOMBRE_INVALIDO');
+      CONTINUE;
+    END IF;
+
     BEGIN
-      v_ci := (v_elem ->> 'ci')::bigint;
-      v_nombre := btrim(v_elem ->> 'nombre');
-
-      IF v_ci IS NULL OR v_ci <= 0 OR v_nombre IS NULL OR v_nombre = '' THEN
-        RAISE EXCEPTION 'ci o nombre inválido';
-      END IF;
-
       UPDATE recorrido_choferes
         SET nombre = v_nombre,
             apellido = v_elem ->> 'apellido',
@@ -493,9 +603,15 @@ BEGIN
         VALUES (v_ci, v_nombre, v_elem ->> 'apellido', v_elem ->> 'telefono', v_elem ->> 'seccional', v_elem ->> 'local_votacion');
         v_creados := v_creados + 1;
       END IF;
-    EXCEPTION WHEN OTHERS THEN
-      v_rechazados := v_rechazados + 1;
-      v_detalles_rechazados := v_detalles_rechazados || jsonb_build_object('indice', v_indice, 'elemento', v_elem, 'motivo', SQLERRM);
+    EXCEPTION
+      WHEN unique_violation THEN
+        v_rechazados := v_rechazados + 1;
+        v_detalles_rechazados := v_detalles_rechazados || jsonb_build_object('indice', v_indice, 'ci', v_ci, 'codigo', 'CI_DUPLICADO');
+      WHEN OTHERS THEN
+        -- Catch-all genérico y controlado para cualquier otra falla
+        -- inesperada de esta fila puntual — nunca se expone SQLERRM.
+        v_rechazados := v_rechazados + 1;
+        v_detalles_rechazados := v_detalles_rechazados || jsonb_build_object('indice', v_indice, 'ci', v_ci, 'codigo', 'ERROR_FILA');
     END;
   END LOOP;
 
@@ -507,7 +623,7 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
 
 -- ============================================================================
--- 5) RPC ADMIN — ASIGNACIONES Y CÓDIGOS
+-- 6) RPC ADMIN — ASIGNACIONES Y CÓDIGOS
 -- ============================================================================
 
 CREATE OR REPLACE FUNCTION recorrido_admin_asignar_choferes(
@@ -571,19 +687,39 @@ BEGIN
       CONTINUE;
     END IF;
 
+    -- Se chequea PRIMERO si ya existe una asignación para este chofer en esta
+    -- jornada, antes de gastar una generación de código — si ya existe, se
+    -- rechaza como YA_ASIGNADO sin tocarla y sin haber generado nada de más.
+    IF EXISTS (SELECT 1 FROM recorrido_asignaciones WHERE jornada_id = p_jornada_id AND chofer_id = v_chofer.id) THEN
+      v_rechazados := v_rechazados || jsonb_build_object('ci', v_chofer.ci, 'codigo', 'YA_ASIGNADO');
+      CONTINUE;
+    END IF;
+
     SELECT codigo, codigo_hash INTO v_codigo, v_codigo_hash FROM recorrido_generar_codigo_temporal();
     v_expira := now() + make_interval(hours => p_horas_expiracion);
 
-    -- Upsert por (jornada_id, chofer_id): si ya existía una asignación para
-    -- este chofer en esta jornada, esto la REGENERA (nuevo código, nueva
-    -- expiración, se reactiva si estaba desactivada) en vez de duplicarla —
-    -- cubre tanto "asignar por primera vez" como "re-entregar código" con la
-    -- misma llamada.
+    -- IMPORTANTE (corregido en esta misma fase, antes de producción): si el
+    -- chofer YA tenía una asignación para esta jornada, NO se toca su
+    -- codigo_hash ni su codigo_expira_at — se rechaza como YA_ASIGNADO (el
+    -- chequeo de arriba ya cubre el caso normal; este ON CONFLICT DO NOTHING
+    -- es solo la red de seguridad final contra una carrera entre el chequeo y
+    -- el INSERT, nunca el mecanismo principal). Antes, esto hacía un upsert
+    -- que regeneraba el código en cada llamada, lo cual es peligroso: volver
+    -- a correr una asignación masiva (ej. por error, o para agregar un par de
+    -- choferes nuevos a una lista ya entregada) invalidaría de golpe cientos
+    -- de códigos ya impresos/enviados por WhatsApp. Regenerar un código sigue
+    -- siendo posible, pero EXCLUSIVAMENTE a través de
+    -- recorrido_admin_regenerar_codigo (abajo), una acción explícita sobre
+    -- una asignación puntual, nunca un efecto secundario silencioso de una
+    -- asignación masiva.
     INSERT INTO recorrido_asignaciones (jornada_id, chofer_id, codigo_hash, codigo_expira_at)
     VALUES (p_jornada_id, v_chofer.id, v_codigo_hash, v_expira)
-    ON CONFLICT (jornada_id, chofer_id) DO UPDATE
-      SET codigo_hash = EXCLUDED.codigo_hash, codigo_expira_at = EXCLUDED.codigo_expira_at,
-          activo = true, updated_at = now();
+    ON CONFLICT (jornada_id, chofer_id) DO NOTHING;
+
+    IF NOT FOUND THEN
+      v_rechazados := v_rechazados || jsonb_build_object('ci', v_chofer.ci, 'codigo', 'YA_ASIGNADO');
+      CONTINUE;
+    END IF;
 
     v_resultados := v_resultados || jsonb_build_object(
       'ci', v_chofer.ci, 'nombre', v_chofer.nombre, 'apellido', v_chofer.apellido,
@@ -641,7 +777,7 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
 
 -- ============================================================================
--- 6) RPC ADMIN — DETALLE DE CHOFER/SESIÓN
+-- 7) RPC ADMIN — DETALLE DE CHOFER/SESIÓN
 -- ============================================================================
 -- Clave por asignacion_id (no por sesion_id): una asignación siempre existe
 -- una vez que el chofer fue asignado a la jornada, independientemente de si
@@ -727,7 +863,7 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER STABLE SET search_path = public, pg_temp;
 
 -- ============================================================================
--- 7) RPC ADMIN — HISTORIAL (resumen, nunca puntos crudos)
+-- 8) RPC ADMIN — HISTORIAL (resumen, nunca puntos crudos)
 -- ============================================================================
 CREATE OR REPLACE FUNCTION recorrido_admin_listar_historico(
   p_admin_token text,
@@ -793,7 +929,7 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER STABLE SET search_path = public, pg_temp;
 
 -- ============================================================================
--- 8) RPC ADMIN — REPLAY (puntos de UNA sesión, paradas, alertas)
+-- 9) RPC ADMIN — REPLAY (puntos de UNA sesión, paradas, alertas)
 -- ============================================================================
 -- Siempre acotada a UNA sesion_id (nunca "todos los choferes juntos") y con
 -- límite/paginación obligatorios, igual que ya exige la arquitectura de
@@ -901,32 +1037,44 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER STABLE SET search_path = public, pg_temp;
 
 -- ============================================================================
--- 9) RPC ADMIN — GESTIÓN DE ADMINISTRADORES DEL MÓDULO
+-- 10) RPC ADMIN — GESTIÓN DE LA ALLOWLIST DE RECORRIDOS
 -- ============================================================================
--- Ver nota larga al principio de este archivo: el primer administrador real
--- sigue necesitando una inserción manual única (no hay nadie todavía con
--- quien autenticarse para llamar a estas RPC) — ESO no se hace en este
--- archivo ni en ningún archivo de este repositorio. A partir de ahí, el
--- resto de los administradores se crean con recorrido_admin_crear_admin,
--- que recibe la contraseña por parámetro (viaja una sola vez, por HTTPS,
--- igual que ya hace recorrido_admin_autenticar) y la hashea server-side —
--- nunca queda en texto plano ni en Git ni en ningún log de este módulo.
--- recorrido_admin_access sigue siendo la tabla de AUTORIZACIÓN server-side de
--- este módulo, no una identidad de usuario nueva: la persona nunca ve este
--- "login" por separado. La CI de cada fila acá puede (y en la práctica va a)
--- coincidir con la CI de un superadmin ya existente del sistema — es lo que
--- permitirá, en la fase de frontend que haga el puente, que el login de
--- superadmin existente obtenga este admin_token de forma transparente sin
--- pedirle una segunda contraseña a la persona.
-
-CREATE OR REPLACE FUNCTION recorrido_admin_crear_admin(
+-- Revisión de esta misma fase, antes de producción: recorrido_admin_access ya
+-- NO es "crear un administrador con su propia contraseña" — es autorizar o
+-- desautorizar una CI para ver GPS, dentro de la allowlist server-side de
+-- este módulo. El acceso real sigue entrando únicamente por
+-- recorrido_admin_iniciar_desde_superadmin (sección 3): estar en esta
+-- allowlist no es un login, es un permiso.
+--
+-- Ver nota larga al principio de este archivo: la primera CI autorizada
+-- sigue necesitando una inserción manual única (no hay todavía ninguna
+-- sesión Recorridos con la que llamar a estas RPC) — ESO no se hace en este
+-- archivo ni en ningún archivo de este repositorio, por ejemplo:
+--   INSERT INTO recorrido_admin_access (ci, nombre, password_hash)
+--   VALUES (<ci_real>, '<nombre_real>',
+--     extensions.crypt(encode(extensions.gen_random_bytes(32), 'hex'), extensions.gen_salt('bf')));
+-- (un secreto aleatorio, nunca una contraseña real — exactamente lo mismo que
+-- hace recorrido_admin_autorizar_ci de abajo). A partir de esa primera CI, el
+-- resto se autoriza con recorrido_admin_autorizar_ci, sin volver a tocar SQL
+-- a mano.
+--
+-- password_hash sigue siendo NOT NULL por el esquema ya aplicado de la
+-- Fase 1 (no se altera destructivamente acá) pero deja de tener cualquier
+-- uso real como contraseña: recorrido_admin_autenticar (el único camino que
+-- la usaba) queda sin EXECUTE para ningún rol de cliente (ver permisos). Por
+-- eso recorrido_admin_autorizar_ci NO recibe ninguna contraseña como
+-- parámetro — genera un secreto aleatorio de 32 bytes server-side, lo hashea
+-- con bcrypt para satisfacer la columna, y lo descarta de inmediato: nunca se
+-- devuelve, nunca se loguea, no es la contraseña real de nadie y no existe
+-- ninguna forma de recuperarlo.
+CREATE OR REPLACE FUNCTION recorrido_admin_autorizar_ci(
   p_admin_token text,
   p_ci bigint,
-  p_nombre text,
-  p_password text
+  p_nombre text
 ) RETURNS jsonb AS $$
 DECLARE
   v_admin_id uuid;
+  v_secreto_aleatorio text;
   v_nuevo recorrido_admin_access%ROWTYPE;
 BEGIN
   v_admin_id := recorrido_admin_validar_token(p_admin_token);
@@ -938,45 +1086,44 @@ BEGIN
     RETURN jsonb_build_object('ok', false, 'codigo', 'ADMIN_DATOS_INVALIDOS');
   END IF;
 
-  IF p_password IS NULL OR length(p_password) < 10 THEN
-    RETURN jsonb_build_object('ok', false, 'codigo', 'PASSWORD_DEBIL');
-  END IF;
+  v_secreto_aleatorio := encode(extensions.gen_random_bytes(32), 'hex');
 
   BEGIN
     INSERT INTO recorrido_admin_access (ci, nombre, password_hash)
-    VALUES (p_ci, btrim(p_nombre), extensions.crypt(p_password, extensions.gen_salt('bf')))
+    VALUES (p_ci, btrim(p_nombre), extensions.crypt(v_secreto_aleatorio, extensions.gen_salt('bf')))
     RETURNING * INTO v_nuevo;
   EXCEPTION WHEN unique_violation THEN
-    RETURN jsonb_build_object('ok', false, 'codigo', 'ADMIN_CI_DUPLICADO');
+    RETURN jsonb_build_object('ok', false, 'codigo', 'CI_YA_AUTORIZADA');
   END;
 
-  RETURN jsonb_build_object('ok', true, 'admin', jsonb_build_object('id', v_nuevo.id, 'ci', v_nuevo.ci, 'nombre', v_nuevo.nombre));
+  RETURN jsonb_build_object('ok', true, 'autorizado', jsonb_build_object('id', v_nuevo.id, 'ci', v_nuevo.ci, 'nombre', v_nuevo.nombre));
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
 
-CREATE OR REPLACE FUNCTION recorrido_admin_listar_admins(p_admin_token text)
+CREATE OR REPLACE FUNCTION recorrido_admin_listar_autorizados(p_admin_token text)
 RETURNS jsonb AS $$
 DECLARE
   v_admin_id uuid;
-  v_admins jsonb;
+  v_autorizados jsonb;
 BEGIN
   v_admin_id := recorrido_admin_validar_token(p_admin_token);
   IF v_admin_id IS NULL THEN
     RETURN jsonb_build_object('ok', false, 'codigo', 'SESION_ADMIN_INVALIDA');
   END IF;
 
-  -- Nunca se incluye password_hash en la respuesta.
+  -- Nunca se incluye password_hash en la respuesta (ni tendría sentido: no es
+  -- una contraseña real de nadie).
   SELECT COALESCE(jsonb_agg(jsonb_build_object(
     'id', id, 'ci', ci, 'nombre', nombre, 'activo', activo, 'created_at', created_at
   ) ORDER BY nombre), '[]'::jsonb)
-  INTO v_admins
+  INTO v_autorizados
   FROM recorrido_admin_access;
 
-  RETURN jsonb_build_object('ok', true, 'admins', v_admins);
+  RETURN jsonb_build_object('ok', true, 'autorizados', v_autorizados);
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER STABLE SET search_path = public, pg_temp;
 
-CREATE OR REPLACE FUNCTION recorrido_admin_desactivar_admin(
+CREATE OR REPLACE FUNCTION recorrido_admin_desautorizar_ci(
   p_admin_token text,
   p_admin_objetivo_id uuid
 ) RETURNS jsonb AS $$
@@ -988,10 +1135,10 @@ BEGIN
     RETURN jsonb_build_object('ok', false, 'codigo', 'SESION_ADMIN_INVALIDA');
   END IF;
 
-  -- Protección contra quedarse sin ningún admin activo por error: nadie puede
-  -- desactivarse a sí mismo con su propia sesión.
+  -- Protección contra quedarse sin ninguna CI autorizada activa por error:
+  -- nadie puede desautorizarse a sí mismo con su propia sesión.
   IF p_admin_objetivo_id = v_admin_id THEN
-    RETURN jsonb_build_object('ok', false, 'codigo', 'NO_PUEDE_DESACTIVARSE_A_SI_MISMO');
+    RETURN jsonb_build_object('ok', false, 'codigo', 'NO_PUEDE_DESAUTORIZARSE_A_SI_MISMO');
   END IF;
 
   UPDATE recorrido_admin_access SET activo = false, updated_at = now() WHERE id = p_admin_objetivo_id;
@@ -999,8 +1146,8 @@ BEGIN
     RETURN jsonb_build_object('ok', false, 'codigo', 'ADMIN_NO_ENCONTRADO');
   END IF;
 
-  -- Invalida de inmediato cualquier sesión ya abierta de ese admin — desactivar
-  -- el acceso no debe dejar tokens vigentes que sigan funcionando.
+  -- Invalida de inmediato cualquier sesión ya abierta de esa CI — desautorizar
+  -- no debe dejar tokens vigentes que sigan funcionando.
   DELETE FROM recorrido_admin_sesiones WHERE admin_id = p_admin_objetivo_id;
 
   RETURN jsonb_build_object('ok', true);
@@ -1008,67 +1155,80 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
 
 -- ============================================================================
--- 10) PERMISOS
+-- 11) PERMISOS
 -- ============================================================================
--- Mismo criterio que el resto del módulo: cada RPC administrativa se revoca
--- explícitamente de PUBLIC antes de otorgarse solo a anon/authenticated
--- (el frontend siempre usa la clave anon, no hay Supabase Auth). El helper
--- interno (sección 2) ya se revocó de los 4 roles (anon/authenticated/
--- service_role/PUBLIC) justo después de crearse, arriba.
+-- ACL determinística (revisión de esta misma fase, antes de producción): ya
+-- se comprobó en el proyecto real de Supabase que un REVOKE FROM PUBLIC no
+-- alcanza por sí solo — en algún momento quedaron grants explícitos a
+-- anon/authenticated/service_role sobre funciones internas que nunca
+-- debieron tenerlos (ver el hotfix de la Fase 1). Por eso TODA RPC nueva de
+-- esta migración, pública o interna, revoca explícitamente los 4 roles
+-- (anon, authenticated, service_role, PUBLIC) antes de otorgar — nunca se
+-- confía en que "no se otorgó" sea lo mismo que "está revocado".
+--
+-- recorrido_admin_autenticar (Fase 1) queda revocada de los 4 roles de
+-- cliente SIN ningún GRANT posterior: existe en la base (no se borra, no es
+-- destructivo) pero ya no es alcanzable desde ningún frontend. El único
+-- camino de entrada al módulo administrativo pasa a ser
+-- recorrido_admin_iniciar_desde_superadmin.
+REVOKE ALL ON FUNCTION recorrido_admin_autenticar(bigint, text) FROM anon, authenticated, service_role, PUBLIC;
 
-REVOKE ALL ON FUNCTION recorrido_admin_listar_jornadas(text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION recorrido_admin_iniciar_desde_superadmin(text) FROM anon, authenticated, service_role, PUBLIC;
+GRANT EXECUTE ON FUNCTION recorrido_admin_iniciar_desde_superadmin(text) TO anon, authenticated;
+
+REVOKE ALL ON FUNCTION recorrido_admin_listar_jornadas(text) FROM anon, authenticated, service_role, PUBLIC;
 GRANT EXECUTE ON FUNCTION recorrido_admin_listar_jornadas(text) TO anon, authenticated;
 
-REVOKE ALL ON FUNCTION recorrido_admin_crear_jornada(text, text, date) FROM PUBLIC;
+REVOKE ALL ON FUNCTION recorrido_admin_crear_jornada(text, text, date) FROM anon, authenticated, service_role, PUBLIC;
 GRANT EXECUTE ON FUNCTION recorrido_admin_crear_jornada(text, text, date) TO anon, authenticated;
 
-REVOKE ALL ON FUNCTION recorrido_admin_actualizar_jornada(text, uuid, text, date) FROM PUBLIC;
+REVOKE ALL ON FUNCTION recorrido_admin_actualizar_jornada(text, uuid, text, date) FROM anon, authenticated, service_role, PUBLIC;
 GRANT EXECUTE ON FUNCTION recorrido_admin_actualizar_jornada(text, uuid, text, date) TO anon, authenticated;
 
-REVOKE ALL ON FUNCTION recorrido_admin_activar_jornada(text, uuid) FROM PUBLIC;
+REVOKE ALL ON FUNCTION recorrido_admin_activar_jornada(text, uuid) FROM anon, authenticated, service_role, PUBLIC;
 GRANT EXECUTE ON FUNCTION recorrido_admin_activar_jornada(text, uuid) TO anon, authenticated;
 
-REVOKE ALL ON FUNCTION recorrido_admin_desactivar_jornada(text, uuid) FROM PUBLIC;
+REVOKE ALL ON FUNCTION recorrido_admin_desactivar_jornada(text, uuid) FROM anon, authenticated, service_role, PUBLIC;
 GRANT EXECUTE ON FUNCTION recorrido_admin_desactivar_jornada(text, uuid) TO anon, authenticated;
 
-REVOKE ALL ON FUNCTION recorrido_admin_listar_choferes(text, text, boolean, int, int) FROM PUBLIC;
+REVOKE ALL ON FUNCTION recorrido_admin_listar_choferes(text, text, boolean, int, int) FROM anon, authenticated, service_role, PUBLIC;
 GRANT EXECUTE ON FUNCTION recorrido_admin_listar_choferes(text, text, boolean, int, int) TO anon, authenticated;
 
-REVOKE ALL ON FUNCTION recorrido_admin_crear_chofer(text, bigint, text, text, text, text, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION recorrido_admin_crear_chofer(text, bigint, text, text, text, text, text) FROM anon, authenticated, service_role, PUBLIC;
 GRANT EXECUTE ON FUNCTION recorrido_admin_crear_chofer(text, bigint, text, text, text, text, text) TO anon, authenticated;
 
-REVOKE ALL ON FUNCTION recorrido_admin_actualizar_chofer(text, uuid, text, text, text, text, text, boolean) FROM PUBLIC;
+REVOKE ALL ON FUNCTION recorrido_admin_actualizar_chofer(text, uuid, text, text, text, text, text, boolean) FROM anon, authenticated, service_role, PUBLIC;
 GRANT EXECUTE ON FUNCTION recorrido_admin_actualizar_chofer(text, uuid, text, text, text, text, text, boolean) TO anon, authenticated;
 
-REVOKE ALL ON FUNCTION recorrido_admin_importar_choferes(text, jsonb) FROM PUBLIC;
+REVOKE ALL ON FUNCTION recorrido_admin_importar_choferes(text, jsonb) FROM anon, authenticated, service_role, PUBLIC;
 GRANT EXECUTE ON FUNCTION recorrido_admin_importar_choferes(text, jsonb) TO anon, authenticated;
 
-REVOKE ALL ON FUNCTION recorrido_admin_asignar_choferes(text, uuid, jsonb, int) FROM PUBLIC;
+REVOKE ALL ON FUNCTION recorrido_admin_asignar_choferes(text, uuid, jsonb, int) FROM anon, authenticated, service_role, PUBLIC;
 GRANT EXECUTE ON FUNCTION recorrido_admin_asignar_choferes(text, uuid, jsonb, int) TO anon, authenticated;
 
-REVOKE ALL ON FUNCTION recorrido_admin_regenerar_codigo(text, uuid, int) FROM PUBLIC;
+REVOKE ALL ON FUNCTION recorrido_admin_regenerar_codigo(text, uuid, int) FROM anon, authenticated, service_role, PUBLIC;
 GRANT EXECUTE ON FUNCTION recorrido_admin_regenerar_codigo(text, uuid, int) TO anon, authenticated;
 
-REVOKE ALL ON FUNCTION recorrido_admin_detalle_chofer(text, uuid) FROM PUBLIC;
+REVOKE ALL ON FUNCTION recorrido_admin_detalle_chofer(text, uuid) FROM anon, authenticated, service_role, PUBLIC;
 GRANT EXECUTE ON FUNCTION recorrido_admin_detalle_chofer(text, uuid) TO anon, authenticated;
 
-REVOKE ALL ON FUNCTION recorrido_admin_listar_historico(text, uuid, bigint, date, date, int, int) FROM PUBLIC;
+REVOKE ALL ON FUNCTION recorrido_admin_listar_historico(text, uuid, bigint, date, date, int, int) FROM anon, authenticated, service_role, PUBLIC;
 GRANT EXECUTE ON FUNCTION recorrido_admin_listar_historico(text, uuid, bigint, date, date, int, int) TO anon, authenticated;
 
-REVOKE ALL ON FUNCTION recorrido_admin_replay_puntos(text, uuid, int, int) FROM PUBLIC;
+REVOKE ALL ON FUNCTION recorrido_admin_replay_puntos(text, uuid, int, int) FROM anon, authenticated, service_role, PUBLIC;
 GRANT EXECUTE ON FUNCTION recorrido_admin_replay_puntos(text, uuid, int, int) TO anon, authenticated;
 
-REVOKE ALL ON FUNCTION recorrido_admin_listar_paradas(text, uuid) FROM PUBLIC;
+REVOKE ALL ON FUNCTION recorrido_admin_listar_paradas(text, uuid) FROM anon, authenticated, service_role, PUBLIC;
 GRANT EXECUTE ON FUNCTION recorrido_admin_listar_paradas(text, uuid) TO anon, authenticated;
 
-REVOKE ALL ON FUNCTION recorrido_admin_listar_alertas(text, uuid) FROM PUBLIC;
+REVOKE ALL ON FUNCTION recorrido_admin_listar_alertas(text, uuid) FROM anon, authenticated, service_role, PUBLIC;
 GRANT EXECUTE ON FUNCTION recorrido_admin_listar_alertas(text, uuid) TO anon, authenticated;
 
-REVOKE ALL ON FUNCTION recorrido_admin_crear_admin(text, bigint, text, text) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION recorrido_admin_crear_admin(text, bigint, text, text) TO anon, authenticated;
+REVOKE ALL ON FUNCTION recorrido_admin_autorizar_ci(text, bigint, text) FROM anon, authenticated, service_role, PUBLIC;
+GRANT EXECUTE ON FUNCTION recorrido_admin_autorizar_ci(text, bigint, text) TO anon, authenticated;
 
-REVOKE ALL ON FUNCTION recorrido_admin_listar_admins(text) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION recorrido_admin_listar_admins(text) TO anon, authenticated;
+REVOKE ALL ON FUNCTION recorrido_admin_listar_autorizados(text) FROM anon, authenticated, service_role, PUBLIC;
+GRANT EXECUTE ON FUNCTION recorrido_admin_listar_autorizados(text) TO anon, authenticated;
 
-REVOKE ALL ON FUNCTION recorrido_admin_desactivar_admin(text, uuid) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION recorrido_admin_desactivar_admin(text, uuid) TO anon, authenticated;
+REVOKE ALL ON FUNCTION recorrido_admin_desautorizar_ci(text, uuid) FROM anon, authenticated, service_role, PUBLIC;
+GRANT EXECUTE ON FUNCTION recorrido_admin_desautorizar_ci(text, uuid) TO anon, authenticated;
